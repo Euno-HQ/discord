@@ -112,7 +112,6 @@ export const PurgeMessagesCommand = {
       yield* interactionReply(interaction, {
         flags: MessageFlags.Ephemeral,
         content: `How far back should I purge messages from **${targetUser.username}**?`,
-        // @ts-expect-error discord.js components typing is overly strict here
         components: [row],
       });
     }).pipe(
@@ -195,7 +194,7 @@ export const PurgeMessagesSelectHandler = {
       );
 
       // Also include active threads (public and private).
-      const activeThreads = await Effect.tryPromise(() =>
+      const activeThreads = yield* Effect.tryPromise(() =>
         guild.channels.fetchActiveThreads(),
       ).pipe(Effect.orElseSucceed(() => ({ threads: new Map() })));
 
@@ -204,46 +203,51 @@ export const PurgeMessagesSelectHandler = {
         ...activeThreads.threads.values(),
       ];
 
-      for (const channel of channelsToScan) {
-        if (!channel.isTextBased()) continue;
-        try {
-          let lastId: string | undefined;
+      // Scan channels in an async function so we can use await + per-channel
+      // try/catch to gracefully skip channels the bot cannot access.
+      yield* Effect.tryPromise(async () => {
+        for (const channel of channelsToScan) {
+          if (!channel.isTextBased()) continue;
+          try {
+            let lastId: string | undefined;
 
-          // Paginate through channel history oldest-first within the window.
-          for (;;) {
-            const messages = await channel.messages.fetch({
-              limit: 100,
-              ...(lastId ? { before: lastId } : {}),
-            });
+            // Paginate through channel history oldest-first within the window.
+            for (;;) {
+              const messages = await channel.messages.fetch({
+                limit: 100,
+                ...(lastId ? { before: lastId } : {}),
+              });
 
-            if (messages.size === 0) break;
+              if (messages.size === 0) break;
 
-            // Filter messages from this user within the time window.
-            const toDelete = messages.filter(
-              (m) => m.author.id === targetUserId && m.createdTimestamp >= since,
-            );
+              // Filter messages from this user within the time window.
+              const toDelete = messages.filter(
+                (m) =>
+                  m.author.id === targetUserId && m.createdTimestamp >= since,
+              );
 
-            if (toDelete.size > 0) {
-              if (toDelete.size === 1) {
-                await toDelete.first()!.delete();
-              } else {
-                // bulkDelete requires messages < 2 weeks old; our max window is
-                // 7 days so this is always safe.
-                await channel.bulkDelete(toDelete);
+              if (toDelete.size > 0) {
+                if (toDelete.size === 1) {
+                  await toDelete.first()!.delete();
+                } else {
+                  // bulkDelete requires messages < 2 weeks old; our max window
+                  // is 7 days so this is always safe.
+                  await channel.bulkDelete(toDelete);
+                }
+                deletedCount += toDelete.size;
               }
-              deletedCount += toDelete.size;
-            }
 
-            // Stop paging if we've gone past the time window.
-            const oldest = messages.last();
-            if (!oldest || oldest.createdTimestamp < since) break;
-            lastId = oldest.id;
+              // Stop paging if we've gone past the time window.
+              const oldest = messages.last();
+              if (!oldest || oldest.createdTimestamp < since) break;
+              lastId = oldest.id;
+            }
+          } catch {
+            // Skip channels the bot lacks permission to read/manage.
+            // This is expected for some channels and should not abort the whole run.
           }
-        } catch {
-          // Skip channels the bot lacks permission to read/manage.
-          // This is expected for some channels and should not abort the whole run.
         }
-      }
+      });
 
       yield* logEffect(
         "info",
