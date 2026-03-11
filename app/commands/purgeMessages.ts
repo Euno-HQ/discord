@@ -8,6 +8,7 @@ import {
   PermissionFlagsBits,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
+  type Message,
 } from "discord.js";
 import { Effect } from "effect";
 
@@ -102,10 +103,9 @@ export const PurgeMessagesCommand = {
           ),
         );
 
-      const row =
-        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-          selectMenu,
-        );
+      const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        selectMenu,
+      );
 
       commandStats.commandExecuted(interaction, "purge-messages", true);
 
@@ -118,12 +118,17 @@ export const PurgeMessagesCommand = {
       Effect.catchAll((error) =>
         Effect.gen(function* () {
           const err = error instanceof Error ? error : new Error(String(error));
-          yield* logEffect("error", "Commands", "Purge messages invoke failed", {
-            guildId: interaction.guildId,
-            moderatorUserId: interaction.user.id,
-            targetUserId: interaction.targetUser.id,
-            error: err.message,
-          });
+          yield* logEffect(
+            "error",
+            "Commands",
+            "Purge messages invoke failed",
+            {
+              guildId: interaction.guildId,
+              moderatorUserId: interaction.user.id,
+              targetUserId: interaction.targetUser.id,
+              error: err.message,
+            },
+          );
           commandStats.commandFailed(
             interaction,
             "purge-messages",
@@ -222,7 +227,7 @@ export const PurgeMessagesSelectHandler = {
 
               // Filter messages from this user within the time window.
               const toDelete = messages.filter(
-                (m) =>
+                (m: Message) =>
                   m.author.id === targetUserId && m.createdTimestamp >= since,
               );
 
@@ -249,18 +254,13 @@ export const PurgeMessagesSelectHandler = {
         }
       });
 
-      yield* logEffect(
-        "info",
-        "Commands",
-        "Purge messages completed",
-        {
-          guildId: interaction.guildId,
-          moderatorUserId: interaction.user.id,
-          targetUserId,
-          durationLabel,
-          deletedCount,
-        },
-      );
+      yield* logEffect("info", "Commands", "Purge messages completed", {
+        guildId: interaction.guildId,
+        moderatorUserId: interaction.user.id,
+        targetUserId,
+        durationLabel,
+        deletedCount,
+      });
 
       yield* interactionEditReply(interaction, {
         content: `Done. Deleted **${deletedCount}** message${deletedCount !== 1 ? "s" : ""} from <@${targetUserId}> in the last ${durationLabel}.`,
