@@ -104,4 +104,4 @@ spec:
   tls:
     - hosts:
         - uat.euno-staging.reactiflux.com
-      secretName: wildcard-staging-tls
+      secretName: uat-staging-tls

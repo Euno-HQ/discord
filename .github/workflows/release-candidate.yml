@@ -12,11 +12,21 @@ permissions:
 jobs:
   create-rc:
     runs-on: ubuntu-latest
+    environment: CI
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: Euno-HQ
+
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Ensure release branch exists
         run: |
