@@ -24,7 +24,7 @@ import {
   type SpamSignal,
   type SpamVerdict,
 } from "./spamScorer.ts";
-import { analyzeVelocity } from "./velocityAnalyzer.ts";
+import { analyzeVelocity, getPriorDuplicates } from "./velocityAnalyzer.ts";
 
 export interface ISpamDetectionService {
   readonly checkMessage: (
@@ -194,7 +194,9 @@ export const SpamDetectionServiceLive = Layer.effect(
             message.embeds.some((e) => e.url != null);
 
           // Record in activity tracker
-          const attachmentIds = Array.from(message.attachments.keys()).sort().join(",");
+          const attachmentIds = Array.from(message.attachments.keys())
+            .sort()
+            .join(",");
           const baseContent = [content.toLowerCase().trim(), embedText]
             .filter(Boolean)
             .join(" ");
@@ -234,7 +236,29 @@ export const SpamDetectionServiceLive = Layer.effect(
             ...velocitySignals,
           ];
 
-          return computeVerdict(allSignals);
+          const verdict = computeVerdict(allSignals);
+
+          // When a duplicate velocity signal fires, the prior duplicate messages
+          // had tier=none when they were processed and were never logged.
+          // Attach them to the verdict so the response handler can back-fill
+          // them into reported_messages and clean them up on kick.
+          const hasDuplicateSignal = velocitySignals.some(
+            (s) =>
+              s.name === "duplicate_messages" ||
+              s.name === "cross_channel_spam",
+          );
+          if (hasDuplicateSignal) {
+            const priorDuplicates = getPriorDuplicates(
+              recentMessages,
+              message.id,
+              contentHash,
+            );
+            if (priorDuplicates.length > 0) {
+              return { ...verdict, priorDuplicates };
+            }
+          }
+
+          return verdict;
         }).pipe(
           Effect.catchAll((error) =>
             Effect.gen(function* () {

@@ -13,9 +13,11 @@ import { logEffect } from "#~/effects/observability.ts";
 import { featureStats } from "#~/helpers/metrics.ts";
 import { applyRestriction, timeout } from "#~/models/discord.server.ts";
 import {
+  deleteAllReportedForUser,
   getSpamReportCount,
   getSpamReportGuildCount,
   markMessageAsDeleted,
+  recordReport,
   ReportReasons,
 } from "#~/models/reportedMessages.ts";
 
@@ -119,6 +121,19 @@ export const executeResponse = (
             logEffect("warn", "SpamResponse", "Failed to kick spammer", {
               error: String(error),
             }),
+          ),
+        );
+
+        // Clean up all reported messages for the kicked user — including any
+        // back-filled prior duplicates — so nothing is left behind on Discord.
+        yield* deleteAllReportedForUser(userId, guildId).pipe(
+          Effect.catchAll((error) =>
+            logEffect(
+              "warn",
+              "SpamResponse",
+              "Failed to delete reported messages after autokick",
+              { error: String(error), userId, guildId },
+            ),
           ),
         );
 
@@ -242,6 +257,52 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
         }),
       ),
     );
+
+    // Back-fill any prior duplicate messages that were not logged when they
+    // were first processed (because at that point they looked like tier=none).
+    // We record them against the same mod-log thread post as the trigger message
+    // so mods can see the full duplicate sequence, and so deleteAllReportedForUser
+    // can clean them all up on kick.
+    if (
+      result &&
+      verdict.priorDuplicates &&
+      verdict.priorDuplicates.length > 0
+    ) {
+      const guildId = message.guild!.id;
+      const userId = message.author.id;
+      const logMessageId = result.message.id;
+      const logChannelId = result.thread.id;
+      const backfillExtra = `Back-filled prior duplicate. ${extra}`;
+
+      for (const prior of verdict.priorDuplicates) {
+        yield* recordReport({
+          reportedMessageId: prior.messageId,
+          reportedChannelId: prior.channelId,
+          reportedUserId: userId,
+          guildId,
+          logMessageId,
+          logChannelId,
+          reason: ReportReasons.spam,
+          extra: backfillExtra,
+        }).pipe(
+          Effect.catchAll((error) =>
+            logEffect(
+              "warn",
+              "SpamResponse",
+              "Failed to back-fill prior duplicate into reported_messages",
+              { messageId: prior.messageId, error: String(error) },
+            ),
+          ),
+        );
+      }
+
+      yield* logEffect(
+        "info",
+        "SpamResponse",
+        `Back-filled ${verdict.priorDuplicates.length} prior duplicate(s)`,
+        { userId, guildId },
+      );
+    }
 
     return result;
   }).pipe(Effect.withSpan("SpamResponse.logSpamReport"));

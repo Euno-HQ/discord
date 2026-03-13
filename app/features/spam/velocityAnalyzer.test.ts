@@ -1,5 +1,5 @@
 import type { RecentMessage } from "./recentActivityTracker";
-import { analyzeVelocity } from "./velocityAnalyzer";
+import { analyzeVelocity, getPriorDuplicates } from "./velocityAnalyzer";
 
 const makeMessage = (
   overrides: Partial<RecentMessage> = {},
@@ -147,4 +147,112 @@ test("does not flag cross-channel spam if content differs", () => {
 
   const signals = analyzeVelocity(messages, "new content");
   expect(signals.find((s) => s.name === "cross_channel_spam")).toBeUndefined();
+});
+
+// ── getPriorDuplicates tests ──
+
+test("getPriorDuplicates returns earlier messages with the same hash", () => {
+  const now = Date.now();
+  const hash = "spam content";
+  const currentId = "msg-current";
+  const messages = [
+    makeMessage({
+      messageId: "msg-1",
+      contentHash: hash,
+      timestamp: now - 60000,
+    }),
+    makeMessage({
+      messageId: "msg-2",
+      contentHash: hash,
+      timestamp: now - 30000,
+    }),
+    makeMessage({ messageId: currentId, contentHash: hash, timestamp: now }),
+  ];
+
+  const priors = getPriorDuplicates(messages, currentId, hash);
+  expect(priors).toHaveLength(2);
+  expect(priors.map((m) => m.messageId)).toEqual(
+    expect.arrayContaining(["msg-1", "msg-2"]),
+  );
+  // Should not include the current message
+  expect(priors.find((m) => m.messageId === currentId)).toBeUndefined();
+});
+
+test("getPriorDuplicates excludes messages with a different hash", () => {
+  const now = Date.now();
+  const hash = "spam content";
+  const currentId = "msg-current";
+  const messages = [
+    makeMessage({
+      messageId: "msg-unrelated",
+      contentHash: "other content",
+      timestamp: now - 10000,
+    }),
+    makeMessage({ messageId: currentId, contentHash: hash, timestamp: now }),
+  ];
+
+  const priors = getPriorDuplicates(messages, currentId, hash);
+  expect(priors).toHaveLength(0);
+});
+
+test("getPriorDuplicates excludes messages outside the time window", () => {
+  const now = Date.now();
+  const hash = "spam content";
+  const currentId = "msg-current";
+  const FIVE_MIN = 5 * 60 * 1000;
+  const messages = [
+    // Just outside the window
+    makeMessage({
+      messageId: "msg-old",
+      contentHash: hash,
+      timestamp: now - FIVE_MIN - 1000,
+    }),
+    // Inside the window
+    makeMessage({
+      messageId: "msg-recent",
+      contentHash: hash,
+      timestamp: now - FIVE_MIN + 1000,
+    }),
+    makeMessage({ messageId: currentId, contentHash: hash, timestamp: now }),
+  ];
+
+  const priors = getPriorDuplicates(messages, currentId, hash);
+  expect(priors).toHaveLength(1);
+  expect(priors[0].messageId).toBe("msg-recent");
+});
+
+test("getPriorDuplicates returns empty array when no prior duplicates exist", () => {
+  const now = Date.now();
+  const hash = "unique content";
+  const currentId = "msg-current";
+  const messages = [
+    makeMessage({ messageId: currentId, contentHash: hash, timestamp: now }),
+  ];
+
+  const priors = getPriorDuplicates(messages, currentId, hash);
+  expect(priors).toHaveLength(0);
+});
+
+test("getPriorDuplicates respects a custom window", () => {
+  const now = Date.now();
+  const hash = "spam content";
+  const currentId = "msg-current";
+  const messages = [
+    makeMessage({
+      messageId: "msg-1",
+      contentHash: hash,
+      timestamp: now - 90000,
+    }), // 90s ago
+    makeMessage({
+      messageId: "msg-2",
+      contentHash: hash,
+      timestamp: now - 30000,
+    }), // 30s ago
+    makeMessage({ messageId: currentId, contentHash: hash, timestamp: now }),
+  ];
+
+  // 60-second window: only msg-2 should be included
+  const priors = getPriorDuplicates(messages, currentId, hash, 60000);
+  expect(priors).toHaveLength(1);
+  expect(priors[0].messageId).toBe("msg-2");
 });
