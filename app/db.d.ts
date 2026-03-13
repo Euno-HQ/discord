@@ -12,6 +12,7 @@ export type Generated<T> =
 
 export interface ChannelInfo {
   category: string | null;
+  category_id: string | null;
   id: string | null;
   name: string | null;
 }
