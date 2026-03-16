@@ -1,0 +1,76 @@
+# Kustomization for the new multi-service architecture
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: default
+
+commonLabels:
+  app: mod-bot
+  version: v2
+
+resources:
+  - config-service.yaml
+  - http-service.yaml
+  - gateway-service.yaml
+  - ingress.yaml
+  - pdb.yaml
+
+configMapGenerator:
+  - name: k8s-context
+    envs: [k8s-context]
+    behavior: create
+
+configurations:
+  - variable-config.yaml
+
+vars:
+  - name: IMAGE
+    objref:
+      kind: ConfigMap
+      name: k8s-context
+      apiVersion: v1
+    fieldref:
+      fieldpath: data.IMAGE
+  - name: IMAGE_CONFIG
+    objref:
+      kind: ConfigMap
+      name: k8s-context
+      apiVersion: v1
+    fieldref:
+      fieldpath: data.IMAGE_CONFIG
+
+# Patches for different environments
+patchesStrategicMerge:
+  - |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: http-service
+    spec:
+      template:
+        spec:
+          containers:
+            - name: http-service
+              image: $(IMAGE)
+  - |-
+    apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: gateway
+    spec:
+      template:
+        spec:
+          containers:
+            - name: gateway
+              image: $(IMAGE)
+  - |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: config-service
+    spec:
+      template:
+        spec:
+          containers:
+            - name: config-service
+              image: $(IMAGE_CONFIG)

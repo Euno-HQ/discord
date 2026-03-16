@@ -1,0 +1,45 @@
+# Pod Disruption Budget for high availability
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: http-service-pdb
+  labels:
+    app: mod-bot
+    component: http
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: mod-bot
+      component: http
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: config-service-pdb
+  labels:
+    app: mod-bot
+    component: config
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: mod-bot
+      component: config
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gateway-pdb
+  labels:
+    app: mod-bot
+    component: gateway
+spec:
+  minAvailable: 2  # Allow disruption of 1 gateway pod at a time
+  selector:
+    matchLabels:
+      app: mod-bot
+      component: gateway

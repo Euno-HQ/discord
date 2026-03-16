@@ -1,0 +1,37 @@
+# Ingress configuration for the new architecture
+# Routes external traffic to HTTP service only
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mod-bot-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/hsts: "true"
+    nginx.ingress.kubernetes.io/hsts-max-age: "31536000"
+    nginx.ingress.kubernetes.io/hsts-include-subdomains: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Connection timeout for long-polling requests
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    # Rate limiting (adjust as needed)
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: euno.reactiflux.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: http-service
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - euno.reactiflux.com
+      secretName: letsencrypt-prod-key
