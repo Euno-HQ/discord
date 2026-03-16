@@ -26,6 +26,7 @@ export interface SetupAllOptions {
   guildId: string;
   moderatorRoleId: string;
   restrictedRoleId?: string;
+  quorum?: number;
   modLogChannel: string; // channel ID or CREATE_SENTINEL
   deletionLogChannel?: string; // channel ID, CREATE_SENTINEL, or undefined (disabled)
   honeypotChannel?: string; // channel ID, CREATE_SENTINEL, or undefined (disabled)
@@ -87,6 +88,7 @@ export async function setupAll(
     guildId,
     moderatorRoleId,
     restrictedRoleId,
+    quorum,
     modLogChannel,
     deletionLogChannel,
     honeypotChannel,
@@ -148,6 +150,7 @@ export async function setupAll(
     ...(deletionLogChannelId
       ? { [SETTINGS.deletionLog]: deletionLogChannelId }
       : {}),
+    ...(quorum !== undefined ? { [SETTINGS.quorum]: quorum } : {}),
   });
 
   // --- Honeypot channel (optional) ---

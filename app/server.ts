@@ -34,7 +34,7 @@ import { startReactjiChanneler } from "#~/discord/reactjiChanneler";
 import { applicationKey } from "#~/helpers/env.server";
 
 import { runtime } from "./AppRuntime";
-import { checkpointWal, runIntegrityCheck } from "./Database";
+import { checkpointWal } from "./Database";
 import { DiscordApiError } from "./effects/errors";
 import { logEffect } from "./effects/observability";
 import { initializeGroups } from "./effects/posthog";
@@ -128,9 +128,6 @@ const startup = Effect.gen(function* () {
 
   // Initialize PostHog group analytics for guilds
   yield* initializeGroups(discordClient.guilds.cache);
-
-  yield* logEffect("debug", "Server", "scheduling integrity check");
-  runtime.runFork(runIntegrityCheck);
 
   // Graceful shutdown handler to checkpoint WAL and dispose the runtime
   // (tears down PostHog finalizer, feature flag interval, and SQLite connection)

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schedule } from "effect";
+import { Context, Effect, Layer } from "effect";
 
 import * as Reactivity from "@effect/experimental/Reactivity";
 import { SqlClient } from "@effect/sql";
@@ -7,7 +7,6 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { ResultLengthMismatch, SqlError } from "@effect/sql/SqlError";
 
 import type { DB } from "./db";
-import { DatabaseCorruptionError } from "./effects/errors";
 import { logEffect } from "./effects/observability";
 import { databaseUrl, emergencyWebhook } from "./helpers/env.server";
 import { log } from "./helpers/observability";
@@ -71,40 +70,3 @@ const sendWebhookAlert = (message: string) =>
     Effect.ignore, // Don't fail the whole check if webhook fails
   );
 
-/** Run SQLite integrity check using the existing database connection */
-export const runIntegrityCheck = Effect.gen(function* () {
-  log("info", "IntegrityCheck", "Running scheduled integrity check", {});
-
-  const sql = yield* SqlClient.SqlClient;
-  const result = yield* sql.unsafe<{ integrity_check: string }>(
-    "PRAGMA integrity_check",
-  );
-
-  if (result[0]?.integrity_check === "ok") {
-    log("info", "IntegrityCheck", "Database integrity check passed", {});
-    return "ok" as const;
-  }
-
-  const errors = result.map((r) => r.integrity_check).join("\n");
-  log("error", "IntegrityCheck", "Database corruption detected!", { errors });
-
-  yield* sendWebhookAlert(
-    `🚨 **Database Corruption Detected**\n\`\`\`\n${errors.slice(0, 1800)}\n\`\`\``,
-  );
-
-  return yield* new DatabaseCorruptionError({ errors });
-}).pipe(
-  Effect.repeat(Schedule.fixed("6 hours")),
-  Effect.catchTag("SqlError", (error) =>
-    Effect.all([
-      logEffect("error", "IntegrityCheck", "Integrity check failed to run", {
-        error,
-      }),
-      sendWebhookAlert(
-        `🚨 **Database Integrity Check Failed**\n\`\`\`\n${error.message}\n${String(error.cause)}\n${error.stack}\n\`\`\``,
-      ),
-    ]),
-  ),
-  Effect.catchAll(() => Effect.succeed(null)),
-  Effect.withSpan("runIntegrityCheck"),
-);

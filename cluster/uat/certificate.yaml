@@ -1,12 +1,12 @@
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: wildcard-staging-cert
+  name: uat-staging-cert
   namespace: staging
 spec:
-  secretName: wildcard-staging-tls
+  secretName: uat-staging-tls
   issuerRef:
     name: letsencrypt-prod
     kind: ClusterIssuer
   dnsNames:
-    - "*.euno-staging.reactiflux.com"
+    - "uat.euno-staging.reactiflux.com"
