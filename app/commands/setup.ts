@@ -27,7 +27,9 @@ export const Command = {
         username: interaction.user.username,
       });
 
-      const form = initSetupForm(interaction.guildId, interaction.user.id);
+      const form = yield* Effect.tryPromise(() =>
+        initSetupForm(interaction.guildId!, interaction.user.id),
+      );
 
       yield* interactionReply(
         interaction,

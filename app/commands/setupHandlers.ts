@@ -8,6 +8,7 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
+import { db, runTakeFirst } from "#~/AppRuntime";
 import {
   interactionDeferUpdate,
   interactionEditReply,
@@ -17,6 +18,7 @@ import { logEffect } from "#~/effects/observability";
 import type { MessageComponentCommand } from "#~/helpers/discord";
 import { commandStats } from "#~/helpers/metrics";
 import { CREATE_SENTINEL, setupAll } from "#~/helpers/setupAll.server.ts";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 // --- State management ---
 
@@ -112,9 +114,51 @@ const v2Update = v2Payload;
 
 // --- Public: initialize state and return the form payload for slash command use ---
 
-export function initSetupForm(guildId: string, userId: string): object {
+export async function initSetupForm(
+  guildId: string,
+  userId: string,
+): Promise<object> {
   cleanupStaleSetups();
-  const state: PendingSetup = { ...defaultSetup(), createdAt: Date.now() };
+
+  // Try to populate from existing guild settings
+  const defaults = defaultSetup();
+  try {
+    const settings = await fetchSettings(guildId, [
+      SETTINGS.moderator,
+      SETTINGS.modLog,
+      SETTINGS.deletionLog,
+      SETTINGS.restricted,
+      SETTINGS.autoRole,
+    ]);
+
+    if (settings.moderator) defaults.modRoleId = settings.moderator;
+    if (settings.modLog) defaults.modLogChannel = settings.modLog;
+    // If guild is configured but deletionLog is absent, treat as disabled
+    defaults.deletionLogChannel = settings.deletionLog ?? null;
+    if (settings.restricted) defaults.restrictedRoleId = settings.restricted;
+    if (settings.autoRole) defaults.autoRoleId = settings.autoRole;
+
+    // Check for existing honeypot channel
+    const honeypot = await runTakeFirst(
+      db
+        .selectFrom("honeypot_config")
+        .select("channel_id")
+        .where("guild_id", "=", guildId),
+    );
+    if (honeypot) {
+      defaults.honeypotChannel = honeypot.channel_id;
+    } else {
+      defaults.honeypotChannel = null;
+    }
+
+    // tickets_config has no guild_id — can't pre-populate without Discord API
+    // calls, so leave as null (disabled) for configured guilds
+    defaults.ticketChannel = null;
+  } catch {
+    // Guild not registered yet — use fresh defaults (CREATE_SENTINEL for all)
+  }
+
+  const state: PendingSetup = { ...defaults, createdAt: Date.now() };
   pendingSetups.set(setupKey(guildId, userId), state);
   return buildSetupFormMessage(guildId, state);
 }
