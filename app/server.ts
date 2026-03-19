@@ -22,7 +22,6 @@ import { Command as setupTicket } from "#~/commands/setupTickets";
 import { Command as track } from "#~/commands/track";
 import { startActivityTracking } from "#~/discord/activityTracker";
 import automod from "#~/discord/automod";
-import { autoRole } from "#~/discord/autoRole";
 import { startDeletionLogging } from "#~/discord/deletionLogger";
 import {
   deployCommands,
@@ -105,7 +104,6 @@ const startup = Effect.gen(function* () {
         onboardGuild(discordClient),
         automod(discordClient),
         modActionLogger(discordClient),
-        autoRole(discordClient),
         deployCommands(discordClient),
         startActivityTracking(discordClient),
         startDeletionLogging(discordClient),
