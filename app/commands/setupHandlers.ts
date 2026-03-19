@@ -29,7 +29,6 @@ interface PendingSetup {
   honeypotChannel: string | null; // channel ID, CREATE_SENTINEL, or null (disabled)
   ticketChannel: string | null; // channel ID, CREATE_SENTINEL, or null (disabled)
   restrictedRoleId?: string; // undefined = skip
-  autoRoleId?: string; // new — role to assign on join
   createdAt: number;
 }
 
@@ -57,7 +56,6 @@ function defaultSetup(): Omit<PendingSetup, "createdAt"> {
     honeypotChannel: CREATE_SENTINEL,
     ticketChannel: CREATE_SENTINEL,
     restrictedRoleId: undefined,
-    autoRoleId: undefined,
   };
 }
 
@@ -68,7 +66,6 @@ const FIELD_MAP = {
   honeypot: "honeypotChannel",
   tickets: "ticketChannel",
   restrictedRole: "restrictedRoleId",
-  autoRole: "autoRoleId",
 } as const;
 
 type FieldKey = keyof typeof FIELD_MAP;
@@ -132,7 +129,6 @@ export async function initSetupForm(
     // If guild is configured but deletionLog is absent, treat as disabled
     defaults.deletionLogChannel = settings.deletionLog ?? null;
     if (settings.restricted) defaults.restrictedRoleId = settings.restricted;
-    if (settings.autoRole) defaults.autoRoleId = settings.autoRole;
 
     // Check for existing honeypot channel
     const honeypot = await runTakeFirst(
@@ -354,27 +350,6 @@ function buildSetupFormMessage(
           { type: ComponentType.Separator },
           {
             type: ComponentType.TextDisplay,
-            content:
-              "**Auto-Role on Join** *(optional)* — Role automatically assigned to new members when they join.",
-          },
-          {
-            type: ComponentType.ActionRow,
-            components: [
-              {
-                type: ComponentType.RoleSelect,
-                custom_id: `setup-sel|${guildId}|autoRole`,
-                placeholder: "None — skip (default)",
-                ...(state.autoRoleId
-                  ? {
-                      default_values: roleDefaultValues(state.autoRoleId),
-                    }
-                  : {}),
-              },
-            ],
-          },
-          { type: ComponentType.Separator },
-          {
-            type: ComponentType.TextDisplay,
             content: "**Enabled features**",
           },
           buildFeatureToggleRow(guildId, state),
@@ -404,7 +379,6 @@ function buildSetupConfirmMessage(guildId: string, state: PendingSetup) {
     `**Honeypot:** ${channelValue(state.honeypotChannel, "honeypot")}`,
     `**Ticket Channel:** ${channelValue(state.ticketChannel, "contact-mods")}`,
     `**Restricted Role:** ${state.restrictedRoleId ? `<@&${state.restrictedRoleId}>` : "None"}`,
-    `**Auto-Role on Join:** ${state.autoRoleId ? `<@&${state.autoRoleId}>` : "None"}`,
   ];
 
   return v2Update({
@@ -642,7 +616,6 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
             guildId,
             moderatorRoleId: state.modRoleId!,
             restrictedRoleId: state.restrictedRoleId,
-            autoRoleId: state.autoRoleId,
             modLogChannel: state.modLogChannel,
             deletionLogChannel: state.deletionLogChannel ?? undefined,
             honeypotChannel: state.honeypotChannel ?? undefined,
@@ -684,9 +657,6 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
             : "**Tickets:** Disabled",
           ...(state.restrictedRoleId
             ? [`**Restricted Role:** <@&${state.restrictedRoleId}>`]
-            : []),
-          ...(state.autoRoleId
-            ? [`**Auto-Role on Join:** <@&${state.autoRoleId}>`]
             : []),
         ];
 
