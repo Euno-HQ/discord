@@ -117,6 +117,7 @@ const v2Update = v2Payload;
 export async function initSetupForm(
   guildId: string,
   userId: string,
+  guildChannelIds?: Set<string>,
 ): Promise<object> {
   cleanupStaleSetups();
 
@@ -146,9 +147,25 @@ export async function initSetupForm(
       defaults.honeypotChannel = null;
     }
 
-    // tickets_config has no guild_id — can't pre-populate without Discord API
-    // calls, so leave as null (disabled) for configured guilds
-    defaults.ticketChannel = null;
+    // tickets_config has no guild_id, so match by channel ownership
+    if (guildChannelIds) {
+      const ticketRows = await runTakeFirst(
+        db
+          .selectFrom("tickets_config")
+          .select("channel_id")
+          .where("channel_id", "is not", null),
+      );
+      if (
+        ticketRows?.channel_id &&
+        guildChannelIds.has(ticketRows.channel_id)
+      ) {
+        defaults.ticketChannel = ticketRows.channel_id;
+      } else {
+        defaults.ticketChannel = null;
+      }
+    } else {
+      defaults.ticketChannel = null;
+    }
   }
 
   const state: PendingSetup = { ...defaults, createdAt: Date.now() };
