@@ -25,6 +25,8 @@ No migration required — the `guilds.settings` column is JSONB and handles new 
 
 Add an optional role selector to the setup form in `app/commands/setupHandlers.ts`, following the same pattern as the existing restricted role selector. The selected role ID is persisted through `setupAll.server.ts` via `setSettings()`.
 
+This will appears as its own "page" of the setup flow, and will have a button to enable/disable the "apply to join" feature.
+
 ### Files modified
 
 - `app/commands/setupHandlers.ts` — add role selector component to the setup form, update `PendingSetup` type with `autoRoleId` field
