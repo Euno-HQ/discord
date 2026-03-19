@@ -18,7 +18,7 @@ import { logEffect } from "#~/effects/observability";
 import type { MessageComponentCommand } from "#~/helpers/discord";
 import { commandStats } from "#~/helpers/metrics";
 import { CREATE_SENTINEL, setupAll } from "#~/helpers/setupAll.server.ts";
-import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
+import { fetchGuild } from "#~/models/guilds.server";
 
 // --- State management ---
 
@@ -122,14 +122,9 @@ export async function initSetupForm(
 
   // Try to populate from existing guild settings
   const defaults = defaultSetup();
-  try {
-    const settings = await fetchSettings(guildId, [
-      SETTINGS.moderator,
-      SETTINGS.modLog,
-      SETTINGS.deletionLog,
-      SETTINGS.restricted,
-      SETTINGS.autoRole,
-    ]);
+  const guild = await fetchGuild(guildId);
+  if (guild?.settings) {
+    const settings = JSON.parse(guild.settings) as Record<string, string>;
 
     if (settings.moderator) defaults.modRoleId = settings.moderator;
     if (settings.modLog) defaults.modLogChannel = settings.modLog;
@@ -154,8 +149,6 @@ export async function initSetupForm(
     // tickets_config has no guild_id — can't pre-populate without Discord API
     // calls, so leave as null (disabled) for configured guilds
     defaults.ticketChannel = null;
-  } catch {
-    // Guild not registered yet — use fresh defaults (CREATE_SENTINEL for all)
   }
 
   const state: PendingSetup = { ...defaults, createdAt: Date.now() };
