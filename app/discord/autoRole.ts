@@ -6,7 +6,7 @@ import { DiscordApiError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 
-export const autoRole = (client: Client) => {
+export const autoRole = async (client: Client) => {
   client.on(Events.GuildMemberAdd, (member) => {
     void runEffect(
       Effect.gen(function* () {
