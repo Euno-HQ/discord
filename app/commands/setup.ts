@@ -27,8 +27,15 @@ export const Command = {
         username: interaction.user.username,
       });
 
+      const guildChannelIds = new Set(
+        interaction.guild.channels.cache.map((c) => c.id),
+      );
       const form = yield* Effect.tryPromise(() =>
-        initSetupForm(interaction.guildId!, interaction.user.id),
+        initSetupForm(
+          interaction.guildId!,
+          interaction.user.id,
+          guildChannelIds,
+        ),
       );
 
       yield* interactionReply(
