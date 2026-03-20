@@ -24,6 +24,7 @@ import {
   type ModalCommand,
 } from "#~/helpers/discord";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { getOrCreateUserThread } from "#~/models/userThreads";
 
 export const Command = [
   {
@@ -144,21 +145,28 @@ export const Command = [
           }),
         );
 
+        // Post application content to the applicant's private thread
         yield* sendMessage(
           thread,
-          `**Application from ${user.displayName} (<@${user.id}>)**\n\n` +
+          `<@${user.id}>, your application has been received. A moderator will review it shortly.\n\n` +
             `**Tell us about yourself**\n${about}\n\n` +
             `**How did you find this server?**\n${referral}\n\n` +
             `**What do you hope to get from this community?**\n${goals}`,
         );
 
-        const { [SETTINGS.moderator]: modRole } = yield* fetchSettingsEffect(
-          interaction.guild.id,
-          [SETTINGS.moderator],
-        );
+        // Post review message with approve/deny buttons to the mod-log user thread
+        const modThread = yield* getOrCreateUserThread(interaction.guild, user);
 
-        yield* sendMessage(thread, {
-          content: `<@&${modRole}> — a new application is ready for review.`,
+        const applicationContent =
+          `**Application from ${user.displayName} (<@${user.id}>)**\n\n` +
+          `**Tell us about yourself**\n${about}\n\n` +
+          `**How did you find this server?**\n${referral}\n\n` +
+          `**What do you hope to get from this community?**\n${goals}`;
+
+        yield* sendMessage(modThread, applicationContent);
+
+        yield* sendMessage(modThread, {
+          content: "Review this application:",
           components: [
             // @ts-expect-error Types for this are super busted
             new ActionRowBuilder().addComponents(
