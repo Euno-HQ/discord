@@ -288,14 +288,22 @@ export async function setupAll(
     // Step 8: Deny ViewChannel on @everyone
     await ssrDiscordSdk.patch(Routes.guildRole(guildId, guildId), {
       body: {
-        permissions: String(everyonePerms & ~PermissionFlagsBits.ViewChannel),
+        permissions: String(
+          everyonePerms &
+            ~PermissionFlagsBits.ViewChannel &
+            ~PermissionFlagsBits.MentionEveryone,
+        ),
       },
     });
 
     // Step 9: Grant ViewChannel on @member role
     await ssrDiscordSdk.patch(Routes.guildRole(guildId, resolvedMemberRoleId), {
       body: {
-        permissions: String(memberPerms | PermissionFlagsBits.ViewChannel),
+        permissions: String(
+          memberPerms |
+            PermissionFlagsBits.ViewChannel |
+            PermissionFlagsBits.MentionEveryone,
+        ),
       },
     });
   }

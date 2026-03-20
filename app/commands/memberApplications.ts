@@ -1,9 +1,8 @@
-import { Routes, TextInputStyle } from "discord-api-types/v10";
+import { ButtonStyle, Routes, TextInputStyle } from "discord-api-types/v10";
 import {
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   ChannelType,
+  ComponentType,
   InteractionType,
   MessageFlags,
   ModalBuilder,
@@ -13,13 +12,10 @@ import { Effect } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
 import { ssrDiscordSdk as rest } from "#~/discord/api";
-import {
-  fetchChannel,
-  interactionReply,
-  sendMessage,
-} from "#~/effects/discordSdk.ts";
+import { fetchChannel, interactionReply } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import {
+  quoteMessageContent,
   type MessageComponentCommand,
   type ModalCommand,
 } from "#~/helpers/discord";
@@ -145,42 +141,84 @@ export const Command = [
           }),
         );
 
-        // Post application content to the applicant's private thread
-        yield* sendMessage(
-          thread,
-          `<@${user.id}>, your application has been received. A moderator will review it shortly.\n\n` +
-            `**Tell us about yourself**\n${about}\n\n` +
-            `**How did you find this server?**\n${referral}\n\n` +
-            `**What do you hope to get from this community?**\n${goals}`,
+        const applicationComponents = [
+          {
+            type: ComponentType.TextDisplay,
+            content: `Tell us about yourself\n${quoteMessageContent(about)}`,
+          },
+          {
+            type: ComponentType.TextDisplay,
+            content: `How did you find this server?\n${quoteMessageContent(referral)}`,
+          },
+          {
+            type: ComponentType.TextDisplay,
+            content: `What do you hope to get from this community?\n${quoteMessageContent(goals)}`,
+          },
+        ];
+
+        // Post application receipt to the applicant's private thread
+        yield* Effect.tryPromise(() =>
+          rest.post(Routes.channelMessages(thread.id), {
+            body: {
+              flags: MessageFlags.IsComponentsV2,
+              components: [
+                {
+                  type: ComponentType.Container,
+                  components: [
+                    {
+                      type: ComponentType.TextDisplay,
+                      content: `<@${user.id}>, your application has been received. A moderator will review it shortly.`,
+                    },
+                    { type: ComponentType.Separator },
+                    ...applicationComponents,
+                  ],
+                },
+              ],
+            },
+          }),
         );
 
         // Post review message with approve/deny buttons to the mod-log user thread
         const modThread = yield* getOrCreateUserThread(interaction.guild, user);
 
-        const applicationContent =
-          `**Application from ${user.displayName} (<@${user.id}>)**\n\n` +
-          `**Tell us about yourself**\n${about}\n\n` +
-          `**How did you find this server?**\n${referral}\n\n` +
-          `**What do you hope to get from this community?**\n${goals}`;
-
-        yield* sendMessage(modThread, applicationContent);
-
-        yield* sendMessage(modThread, {
-          content: "Review this application:",
-          components: [
-            // @ts-expect-error Types for this are super busted
-            new ActionRowBuilder().addComponents(
-              new ButtonBuilder()
-                .setCustomId(`app-approve||${user.id}`)
-                .setLabel("Approve")
-                .setStyle(ButtonStyle.Success),
-              new ButtonBuilder()
-                .setCustomId(`app-deny||${user.id}`)
-                .setLabel("Deny")
-                .setStyle(ButtonStyle.Danger),
-            ),
-          ],
-        });
+        yield* Effect.tryPromise(() =>
+          rest.post(Routes.channelMessages(modThread.id), {
+            body: {
+              flags: MessageFlags.IsComponentsV2,
+              components: [
+                {
+                  type: ComponentType.Container,
+                  components: [
+                    {
+                      type: ComponentType.TextDisplay,
+                      content: `## Application from ${user.displayName}\nApplicant thread: <#${thread.id}>`,
+                    },
+                    { type: ComponentType.Separator },
+                    ...applicationComponents,
+                    { type: ComponentType.Separator },
+                    {
+                      type: ComponentType.ActionRow,
+                      components: [
+                        {
+                          type: ComponentType.Button,
+                          custom_id: `app-approve||${user.id}`,
+                          label: "Approve",
+                          style: ButtonStyle.Success,
+                        },
+                        {
+                          type: ComponentType.Button,
+                          custom_id: `app-deny||${user.id}`,
+                          label: "Deny",
+                          style: ButtonStyle.Danger,
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+        );
 
         yield* interactionReply(interaction, {
           content:
