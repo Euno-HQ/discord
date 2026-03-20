@@ -21,6 +21,7 @@ export interface Applications {
   created_at: string;
   guild_id: string;
   id: string;
+  log_message_id: string | null;
   resolved_at: string | null;
   reviewed_by: string | null;
   status: Generated<string>;
