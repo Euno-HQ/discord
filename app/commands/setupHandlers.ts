@@ -18,6 +18,10 @@ import { logEffect } from "#~/effects/observability";
 import type { MessageComponentCommand } from "#~/helpers/discord";
 import { commandStats } from "#~/helpers/metrics";
 import { CREATE_SENTINEL, setupAll } from "#~/helpers/setupAll.server.ts";
+import {
+  checkSetupPermissions,
+  type SetupPermissionCheckResult,
+} from "#~/helpers/setupPermissionCheck";
 import { fetchGuild } from "#~/models/guilds.server";
 
 // --- State management ---
@@ -209,7 +213,8 @@ function buildSetupFormMessage(
           { type: ComponentType.Separator, spacing: 2 },
           {
             type: ComponentType.TextDisplay,
-            content: "**Moderator Role** *(required)*",
+            content:
+              "**Moderator Role** *(required)*\n**Mod Log** — Moderation actions and reports, visible only to mods",
           },
           {
             type: ComponentType.ActionRow,
@@ -223,12 +228,6 @@ function buildSetupFormMessage(
                   : {}),
               },
             ],
-          },
-          { type: ComponentType.Separator },
-          {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Mod Log** — Moderation actions and reports. Visible only to moderators.",
           },
           {
             type: ComponentType.ActionRow,
@@ -246,10 +245,11 @@ function buildSetupFormMessage(
               },
             ],
           },
+          { type: ComponentType.Separator },
           {
             type: ComponentType.TextDisplay,
             content:
-              "**Deletion Log** — Captures deleted messages. Visible only to moderators.",
+              "**Deletion Log** — Captures deleted messages\n**Honeypot** — Trap channel; bots that post here are auto-banned\n**Ticket Channel** — Where members open private tickets\n**Restricted Role** *(optional)* — Assigned to muted/restricted members",
           },
           {
             type: ComponentType.ActionRow,
@@ -274,11 +274,6 @@ function buildSetupFormMessage(
             ],
           },
           {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Honeypot** — Trap channel placed at top of channel list. Bots that post here are auto-banned.",
-          },
-          {
             type: ComponentType.ActionRow,
             components: [
               {
@@ -301,11 +296,6 @@ function buildSetupFormMessage(
             ],
           },
           {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Ticket Channel** — Where members open private tickets with moderators.",
-          },
-          {
             type: ComponentType.ActionRow,
             components: [
               {
@@ -324,12 +314,6 @@ function buildSetupFormMessage(
                   : {}),
               },
             ],
-          },
-          { type: ComponentType.Separator },
-          {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Restricted Role** *(optional)* — Role assigned to muted or restricted members.",
           },
           {
             type: ComponentType.ActionRow,
@@ -354,11 +338,28 @@ function buildSetupFormMessage(
           buildFeatureToggleRow(guildId, state),
           ...(state.applicationChannel !== null
             ? [
-                { type: ComponentType.Separator },
                 {
                   type: ComponentType.TextDisplay,
                   content:
-                    "**Member Role** — Role granted to approved applicants. All current members will receive this role.",
+                    "**Application Channel** — Where members submit applications\n**Member Role** — Granted to approved applicants; all current members will receive this role",
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.ChannelSelect,
+                      custom_id: `setup-sel|${guildId}|applications`,
+                      placeholder: "Create new #apply-here (default)",
+                      channel_types: [ChannelType.GuildText],
+                      ...(channelDefaultValues(state.applicationChannel)
+                        ? {
+                            default_values: channelDefaultValues(
+                              state.applicationChannel,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
                 },
                 {
                   type: ComponentType.ActionRow,
@@ -409,7 +410,42 @@ function roleValue(roleId: string | undefined): string {
   return roleId ? `<@&${roleId}>` : "None";
 }
 
-function buildSetupConfirmMessage(guildId: string, state: PendingSetup) {
+function buildPermWarnings(permCheck?: SetupPermissionCheckResult) {
+  if (!permCheck) return [];
+
+  const lines: string[] = [];
+
+  if (permCheck.missingGuildPerms.length > 0) {
+    lines.push(
+      `**Missing server permissions:** ${permCheck.missingGuildPerms.join(", ")}`,
+    );
+  }
+
+  for (const issue of permCheck.channelIssues) {
+    lines.push(`**${issue.label}:** missing ${issue.missing.join(", ")}`);
+  }
+
+  if (lines.length === 0) return [];
+
+  const icon = permCheck.hasHardBlock ? "⛔" : "⚠️";
+  const heading = permCheck.hasHardBlock
+    ? `### ${icon} Permission Issues (must fix before confirming)`
+    : `### ${icon} Permission Warnings`;
+
+  return [
+    { type: ComponentType.Separator },
+    {
+      type: ComponentType.TextDisplay,
+      content: `${heading}\n${lines.map((l) => `- ${l}`).join("\n")}`,
+    },
+  ];
+}
+
+function buildSetupConfirmMessage(
+  guildId: string,
+  state: PendingSetup,
+  permCheck?: SetupPermissionCheckResult,
+) {
   // --- Configuration summary table ---
   const configRows = [
     ["Moderator Role", roleValue(state.modRoleId)],
@@ -500,6 +536,7 @@ function buildSetupConfirmMessage(guildId: string, state: PendingSetup) {
                 },
               ]
             : []),
+          ...buildPermWarnings(permCheck),
           { type: ComponentType.Separator },
           {
             type: ComponentType.ActionRow,
@@ -515,6 +552,7 @@ function buildSetupConfirmMessage(guildId: string, state: PendingSetup) {
                 custom_id: `setup-exec|${guildId}`,
                 label: "Confirm ✓",
                 style: ButtonStyle.Primary,
+                ...(permCheck?.hasHardBlock ? { disabled: true } : {}),
               },
             ],
           },
@@ -629,9 +667,19 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           return;
         }
 
+        const guild = interaction.guild;
+        const botMember = guild?.members.me;
+        let permCheck: SetupPermissionCheckResult | undefined;
+
+        if (guild && botMember) {
+          permCheck = yield* Effect.tryPromise(() =>
+            checkSetupPermissions(guild, botMember, state),
+          );
+        }
+
         yield* interactionUpdate(
           interaction,
-          buildSetupConfirmMessage(guildId, state),
+          buildSetupConfirmMessage(guildId, state, permCheck),
         );
       }).pipe(
         Effect.catchAll((error) =>
