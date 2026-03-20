@@ -343,7 +343,10 @@ export const Command = [
         // Store the log message ID so we can update it on resolution
         yield* db
           .updateTable("applications")
-          .set({ log_message_id: logMsg.id })
+          .set({
+            log_message_id: logMsg.id,
+            review_message_id: reviewMsg.id,
+          })
           .where("guild_id", "=", interaction.guild.id)
           .where("user_id", "=", user.id)
           .where("status", "=", "pending");
@@ -649,6 +652,97 @@ export const Command = [
           .where("guild_id", "=", guildId)
           .where("user_id", "=", applicantUserId)
           .where("status", "=", "pending");
+
+        // Disable approve/deny buttons on the mod thread review message
+        const [retractAppRow] = yield* db
+          .selectFrom("applications")
+          .select(["review_message_id"])
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId)
+          .orderBy("created_at", "desc");
+
+        const [modThreadRow] = yield* db
+          .selectFrom("user_threads")
+          .select("thread_id")
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId);
+
+        if (retractAppRow?.review_message_id && modThreadRow?.thread_id) {
+          // Fetch the existing message to preserve application content
+          const existingMsg = (yield* Effect.tryPromise(() =>
+            rest.get(
+              Routes.channelMessage(
+                modThreadRow.thread_id,
+                retractAppRow.review_message_id!,
+              ),
+            ),
+          ).pipe(Effect.catchAll(() => Effect.succeed(null)))) as {
+            components?: { components?: unknown[] }[];
+          } | null;
+
+          if (existingMsg?.components?.[0]) {
+            const container = existingMsg.components[0] as {
+              components: unknown[];
+            };
+            // Replace the header and swap buttons for disabled ones
+            const updatedComponents = container.components.map(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Components V2 types not fully supported
+              (c: any) => {
+                if (
+                  c.type === ComponentType.TextDisplay &&
+                  c.content?.startsWith("## Application from")
+                ) {
+                  return {
+                    ...c,
+                    content: `## Application from <@${applicantUserId}>\n*Retracted by applicant*`,
+                  };
+                }
+                if (c.type === ComponentType.ActionRow) {
+                  return {
+                    type: ComponentType.ActionRow,
+                    components: [
+                      {
+                        type: ComponentType.Button,
+                        custom_id: `app-approve||${applicantUserId}`,
+                        label: "Approve",
+                        style: ButtonStyle.Success,
+                        disabled: true,
+                      },
+                      {
+                        type: ComponentType.Button,
+                        custom_id: `app-deny||${applicantUserId}`,
+                        label: "Deny",
+                        style: ButtonStyle.Danger,
+                        disabled: true,
+                      },
+                    ],
+                  };
+                }
+                return c;
+              },
+            );
+
+            yield* Effect.tryPromise(() =>
+              rest.patch(
+                Routes.channelMessage(
+                  modThreadRow.thread_id,
+                  retractAppRow.review_message_id!,
+                ),
+                {
+                  body: {
+                    flags: MessageFlags.IsComponentsV2,
+                    components: [
+                      {
+                        ...existingMsg.components![0],
+                        components: updatedComponents,
+                      },
+                    ],
+                  },
+                },
+              ),
+            ).pipe(Effect.catchAll(() => Effect.void));
+          }
+        }
 
         yield* interactionReply(interaction, {
           content:
