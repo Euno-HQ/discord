@@ -233,6 +233,18 @@ export const Command = [
                     },
                     { type: ComponentType.Separator },
                     ...applicationComponents,
+                    { type: ComponentType.Separator },
+                    {
+                      type: ComponentType.ActionRow,
+                      components: [
+                        {
+                          type: ComponentType.Button,
+                          custom_id: `app-retract||${user.id}`,
+                          label: "Retract Application",
+                          style: ButtonStyle.Secondary,
+                        },
+                      ],
+                    },
                   ],
                 },
               ],
@@ -376,10 +388,12 @@ export const Command = [
           [SETTINGS.modLog],
         );
 
+        const appMsgLink = `https://discord.com/channels/${guildId}/${interaction.channelId}/${interaction.message?.id}`;
+
         yield* Effect.tryPromise(() =>
           rest.post(Routes.channelMessages(modLog), {
             body: {
-              content: `<@${applicantUserId}>'s application approved by <@${approverId}> in <#${interaction.channelId}>`,
+              content: `<@${applicantUserId}>'s [application](${appMsgLink}) approved by <@${approverId}>`,
               allowedMentions: {},
             },
           }),
@@ -459,10 +473,12 @@ export const Command = [
           [SETTINGS.modLog],
         );
 
+        const appMsgLink = `https://discord.com/channels/${guildId}/${interaction.channelId}/${interaction.message?.id}`;
+
         yield* Effect.tryPromise(() =>
           rest.post(Routes.channelMessages(modLog), {
             body: {
-              content: `<@${applicantUserId}>'s application denied by <@${denierId}> in <#${interaction.channelId}>`,
+              content: `<@${applicantUserId}>'s [application](${appMsgLink}) denied by <@${denierId}>`,
               allowedMentions: {},
             },
           }),
@@ -492,6 +508,97 @@ export const Command = [
           }),
         ),
         Effect.withSpan("appDeny", {
+          attributes: {
+            guildId: interaction.guildId,
+            userId: interaction.user.id,
+          },
+        }),
+      ),
+  } satisfies MessageComponentCommand,
+
+  {
+    command: {
+      type: InteractionType.MessageComponent,
+      name: "app-retract",
+    },
+    handler: (interaction) =>
+      Effect.gen(function* () {
+        const [, applicantUserId] = interaction.customId.split("||");
+
+        if (!interaction.guild) {
+          yield* interactionReply(interaction, {
+            content: "Something went wrong",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Only the applicant can retract their own application
+        if (interaction.user.id !== applicantUserId) {
+          yield* interactionReply(interaction, {
+            content: "Only the applicant can retract their application.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const guildId = interaction.guild.id;
+
+        const db = yield* DatabaseService;
+        yield* db
+          .updateTable("applications")
+          .set({
+            status: "retracted",
+            reviewed_by: applicantUserId,
+            resolved_at: new Date().toISOString(),
+          })
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId)
+          .where("status", "=", "pending");
+
+        yield* interactionReply(interaction, {
+          content:
+            "Your application has been retracted. You can apply again at any time.",
+        });
+
+        const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(
+          guildId,
+          [SETTINGS.modLog],
+        );
+
+        yield* Effect.tryPromise(() =>
+          rest.post(Routes.channelMessages(modLog), {
+            body: {
+              content: `<@${applicantUserId}> retracted their application`,
+              allowedMentions: {},
+            },
+          }),
+        );
+
+        yield* Effect.tryPromise(() =>
+          rest.patch(Routes.channel(interaction.channelId), {
+            body: { archived: true, locked: true },
+          }),
+        );
+
+        yield* syncChannelName(guildId);
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            yield* logEffect(
+              "error",
+              "MemberApplication",
+              "Error retracting application",
+              { error },
+            );
+
+            yield* interactionReply(interaction, {
+              content: "Something went wrong while retracting the application",
+              flags: MessageFlags.Ephemeral,
+            }).pipe(Effect.catchAll(() => Effect.void));
+          }),
+        ),
+        Effect.withSpan("appRetract", {
           attributes: {
             guildId: interaction.guildId,
             userId: interaction.user.id,
