@@ -1,6 +1,5 @@
 import type {
   AutoModerationActionExecution,
-  Collection,
   Guild,
   GuildBan,
   GuildMember,
@@ -12,6 +11,7 @@ import type {
   PartialMessage,
   PartialMessageReaction,
   PartialUser,
+  ReadonlyCollection,
   ThreadChannel,
   User,
 } from "discord.js";
@@ -46,7 +46,7 @@ export interface GuildMessageUpdate {
 
 export interface GuildMessageBulkDelete {
   readonly type: "GuildMessageBulkDelete";
-  readonly messages: Collection<string, Message | PartialMessage>;
+  readonly messages: ReadonlyCollection<string, Message | PartialMessage>;
   readonly channel: GuildTextBasedChannel;
   readonly guild: Guild;
   readonly guildId: string;

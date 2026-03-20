@@ -2,6 +2,7 @@ import { Effect, Layer, Logger, LogLevel, ManagedRuntime } from "effect";
 import type { PostHog } from "posthog-node";
 
 import { DatabaseLayer, DatabaseService, type EffectKysely } from "#~/Database";
+import { DiscordEventBusLive } from "#~/discord/eventBus";
 import { MessageCacheServiceLive } from "#~/discord/messageCacheService";
 import { NotFoundError } from "#~/effects/errors";
 import {
@@ -30,6 +31,7 @@ const AppLayer = Layer.mergeAll(
   FeatureFlagServiceLive,
   Layer.provide(SpamDetectionServiceLive, DatabaseLayer),
   MessageCacheServiceLive,
+  DiscordEventBusLive,
   InfraLayer,
 );
 
