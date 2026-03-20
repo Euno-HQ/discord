@@ -11,7 +11,10 @@ import { createRequestHandler } from "@react-router/express";
 import { Command as checkRequirements } from "#~/commands/checkRequirements";
 import { EscalationCommands } from "#~/commands/escalationControls";
 import { Command as forceBan } from "#~/commands/force-ban";
-import { Command as memberApplications } from "#~/commands/memberApplications";
+import {
+  Command as memberApplications,
+  syncChannelName,
+} from "#~/commands/memberApplications";
 import { Command as modreport } from "#~/commands/modreport";
 import { Command as report } from "#~/commands/report";
 import modActionLogger from "#~/commands/report/modActionLogger";
@@ -133,6 +136,11 @@ const startup = Effect.gen(function* () {
 
   yield* logEffect("debug", "Server", "scheduling integrity check");
   runtime.runFork(runIntegrityCheck);
+
+  // Sync #apply-here channel names on startup (in case counts drifted)
+  for (const [guildId] of discordClient.guilds.cache) {
+    runtime.runFork(syncChannelName(guildId));
+  }
 
   // Graceful shutdown handler to checkpoint WAL and dispose the runtime
   // (tears down PostHog finalizer, feature flag interval, and SQLite connection)

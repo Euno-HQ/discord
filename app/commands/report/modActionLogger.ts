@@ -13,6 +13,7 @@ import {
 import { Effect } from "effect";
 
 import { runEffect } from "#~/AppRuntime";
+import { resolveApplicationsForDeparture } from "#~/commands/memberApplications";
 import { logAutomod } from "#~/commands/report/automodLog.ts";
 import { AUDIT_LOG_WINDOW_MS, fetchAuditLogEntry } from "#~/discord/auditLog";
 import { fetchUser } from "#~/effects/discordSdk.ts";
@@ -174,6 +175,9 @@ const memberRemoveEffect = (member: GuildMember | PartialGuildMember) =>
       userId: user.id,
       guildId: guild.id,
     });
+
+    // Resolve any pending applications for this user
+    yield* resolveApplicationsForDeparture(guild.id, user.id);
 
     const auditLogs = yield* fetchKickAuditLog(guild, user);
     if (!auditLogs || auditLogs.actionType === "left") {

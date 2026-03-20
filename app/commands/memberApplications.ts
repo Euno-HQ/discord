@@ -29,7 +29,7 @@ function pendingLabel(count: number): string {
 }
 
 /** Update the #apply-here channel name to reflect the current pending count. */
-const syncChannelName = (guildId: string) =>
+export const syncChannelName = (guildId: string) =>
   Effect.gen(function* () {
     const db = yield* DatabaseService;
     const [row] = yield* db
@@ -56,6 +56,42 @@ const syncChannelName = (guildId: string) =>
     // Channel rename is cosmetic — don't fail the main operation
     Effect.catchAll(() => Effect.void),
   );
+
+/**
+ * Resolve any pending applications for a user who left the guild.
+ * Called from GuildMemberRemove handler.
+ */
+export const resolveApplicationsForDeparture = (
+  guildId: string,
+  userId: string,
+) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+    const [pending] = yield* db
+      .selectFrom("applications")
+      .select("id")
+      .where("guild_id", "=", guildId)
+      .where("user_id", "=", userId)
+      .where("status", "=", "pending");
+
+    if (!pending) return;
+
+    yield* db
+      .updateTable("applications")
+      .set({
+        status: "denied",
+        resolved_at: new Date().toISOString(),
+      })
+      .where("id", "=", pending.id);
+
+    yield* resolveLogMessage(
+      guildId,
+      userId,
+      `<@${userId}> left the server — application auto-denied`,
+    );
+
+    yield* syncChannelName(guildId);
+  }).pipe(Effect.catchAll(() => Effect.void));
 
 /** Update the mod-log summary message with resolution details. */
 const resolveLogMessage = (
