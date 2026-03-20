@@ -418,11 +418,22 @@ export const Command = [
           return;
         }
 
-        yield* Effect.tryPromise(() =>
-          rest.put(
-            Routes.guildMemberRole(guildId, applicantUserId, config.role_id),
-          ),
-        );
+        // Verify a pending application exists before taking action
+        const [appRow] = yield* db
+          .selectFrom("applications")
+          .selectAll()
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId)
+          .where("status", "=", "pending");
+
+        if (!appRow) {
+          yield* interactionReply(interaction, {
+            content:
+              "No pending application found — it may have already been resolved or retracted.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
 
         yield* db
           .updateTable("applications")
@@ -431,22 +442,18 @@ export const Command = [
             reviewed_by: approverId,
             resolved_at: new Date().toISOString(),
           })
-          .where("guild_id", "=", guildId)
-          .where("user_id", "=", applicantUserId)
-          .where("status", "=", "pending");
+          .where("id", "=", appRow.id);
+
+        yield* Effect.tryPromise(() =>
+          rest.put(
+            Routes.guildMemberRole(guildId, applicantUserId, config.role_id),
+          ),
+        );
 
         yield* interactionReply(interaction, {
           content: `<@${applicantUserId}>'s application has been approved by <@${approverId}>.`,
           allowedMentions: {},
         });
-
-        // Notify the applicant in their thread
-        const [appRow] = yield* db
-          .selectFrom("applications")
-          .select("thread_id")
-          .where("guild_id", "=", guildId)
-          .where("user_id", "=", applicantUserId)
-          .orderBy("created_at", "desc");
 
         if (appRow?.thread_id) {
           yield* Effect.tryPromise(() =>
@@ -519,6 +526,23 @@ export const Command = [
 
         const db = yield* DatabaseService;
 
+        // Verify a pending application exists before taking action
+        const [denyAppRow] = yield* db
+          .selectFrom("applications")
+          .selectAll()
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId)
+          .where("status", "=", "pending");
+
+        if (!denyAppRow) {
+          yield* interactionReply(interaction, {
+            content:
+              "No pending application found — it may have already been resolved or retracted.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
         // Notify the applicant via DM before kicking, fall back to thread
         const dmSent = yield* Effect.tryPromise(async () => {
           const dmChannel = (await rest.post(Routes.userChannels(), {
@@ -532,23 +556,14 @@ export const Command = [
           return true;
         }).pipe(Effect.catchAll(() => Effect.succeed(false)));
 
-        if (!dmSent) {
-          const [denyAppRow] = yield* db
-            .selectFrom("applications")
-            .select("thread_id")
-            .where("guild_id", "=", guildId)
-            .where("user_id", "=", applicantUserId)
-            .where("status", "=", "pending");
-
-          if (denyAppRow?.thread_id) {
-            yield* Effect.tryPromise(() =>
-              rest.post(Routes.channelMessages(denyAppRow.thread_id), {
-                body: {
-                  content: `<@${applicantUserId}>, your application has been denied.`,
-                },
-              }),
-            ).pipe(Effect.catchAll(() => Effect.void));
-          }
+        if (!dmSent && denyAppRow.thread_id) {
+          yield* Effect.tryPromise(() =>
+            rest.post(Routes.channelMessages(denyAppRow.thread_id), {
+              body: {
+                content: `<@${applicantUserId}>, your application has been denied.`,
+              },
+            }),
+          ).pipe(Effect.catchAll(() => Effect.void));
         }
 
         yield* db
@@ -558,9 +573,7 @@ export const Command = [
             reviewed_by: denierId,
             resolved_at: new Date().toISOString(),
           })
-          .where("guild_id", "=", guildId)
-          .where("user_id", "=", applicantUserId)
-          .where("status", "=", "pending");
+          .where("id", "=", denyAppRow.id);
 
         // Kick the applicant
         yield* Effect.tryPromise(() =>
