@@ -213,7 +213,8 @@ function buildSetupFormMessage(
           { type: ComponentType.Separator, spacing: 2 },
           {
             type: ComponentType.TextDisplay,
-            content: "**Moderator Role** *(required)*",
+            content:
+              "**Moderator Role** *(required)*\n**Mod Log** — Moderation actions and reports, visible only to mods",
           },
           {
             type: ComponentType.ActionRow,
@@ -227,12 +228,6 @@ function buildSetupFormMessage(
                   : {}),
               },
             ],
-          },
-          { type: ComponentType.Separator },
-          {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Mod Log** — Moderation actions and reports. Visible only to moderators.",
           },
           {
             type: ComponentType.ActionRow,
@@ -250,10 +245,11 @@ function buildSetupFormMessage(
               },
             ],
           },
+          { type: ComponentType.Separator },
           {
             type: ComponentType.TextDisplay,
             content:
-              "**Deletion Log** — Captures deleted messages. Visible only to moderators.",
+              "**Deletion Log** — Captures deleted messages\n**Honeypot** — Trap channel; bots that post here are auto-banned\n**Ticket Channel** — Where members open private tickets\n**Restricted Role** *(optional)* — Assigned to muted/restricted members",
           },
           {
             type: ComponentType.ActionRow,
@@ -278,11 +274,6 @@ function buildSetupFormMessage(
             ],
           },
           {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Honeypot** — Trap channel placed at top of channel list. Bots that post here are auto-banned.",
-          },
-          {
             type: ComponentType.ActionRow,
             components: [
               {
@@ -305,11 +296,6 @@ function buildSetupFormMessage(
             ],
           },
           {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Ticket Channel** — Where members open private tickets with moderators.",
-          },
-          {
             type: ComponentType.ActionRow,
             components: [
               {
@@ -328,12 +314,6 @@ function buildSetupFormMessage(
                   : {}),
               },
             ],
-          },
-          { type: ComponentType.Separator },
-          {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Restricted Role** *(optional)* — Role assigned to muted or restricted members.",
           },
           {
             type: ComponentType.ActionRow,
@@ -358,11 +338,28 @@ function buildSetupFormMessage(
           buildFeatureToggleRow(guildId, state),
           ...(state.applicationChannel !== null
             ? [
-                { type: ComponentType.Separator },
                 {
                   type: ComponentType.TextDisplay,
                   content:
-                    "**Member Role** — Role granted to approved applicants. All current members will receive this role.",
+                    "**Application Channel** — Where members submit applications\n**Member Role** — Granted to approved applicants; all current members will receive this role",
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.ChannelSelect,
+                      custom_id: `setup-sel|${guildId}|applications`,
+                      placeholder: "Create new #apply-here (default)",
+                      channel_types: [ChannelType.GuildText],
+                      ...(channelDefaultValues(state.applicationChannel)
+                        ? {
+                            default_values: channelDefaultValues(
+                              state.applicationChannel,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
                 },
                 {
                   type: ComponentType.ActionRow,
