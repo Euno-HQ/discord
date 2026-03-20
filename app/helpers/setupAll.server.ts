@@ -299,11 +299,7 @@ export async function setupAll(
     // Step 9: Grant ViewChannel on @member role
     await ssrDiscordSdk.patch(Routes.guildRole(guildId, resolvedMemberRoleId), {
       body: {
-        permissions: String(
-          memberPerms |
-            PermissionFlagsBits.ViewChannel |
-            PermissionFlagsBits.MentionEveryone,
-        ),
+        permissions: String(memberPerms | PermissionFlagsBits.ViewChannel),
       },
     });
   }
