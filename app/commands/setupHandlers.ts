@@ -756,6 +756,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           return;
         }
 
+        pendingSetups.delete(key);
         yield* interactionDeferUpdate(interaction);
 
         const result = yield* Effect.tryPromise(() =>
@@ -774,9 +775,6 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
                 : state.memberRoleId,
           }),
         );
-
-        // Clean up state
-        pendingSetups.delete(key);
 
         yield* logEffect(
           "info",
