@@ -83,7 +83,10 @@ export const setSettings = async (
     db
       .updateTable("guilds")
       .set("settings", (eb) =>
-        eb.fn("json_patch", ["settings", eb.val(JSON.stringify(settings))]),
+        eb.fn("json_patch", [
+          eb.fn("coalesce", ["settings", eb.val("{}")]),
+          eb.val(JSON.stringify(settings)),
+        ]),
       )
       .where("id", "=", guildId),
   );
