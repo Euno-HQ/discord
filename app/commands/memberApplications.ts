@@ -22,6 +22,40 @@ import {
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 import { getOrCreateUserThread } from "#~/models/userThreads";
 
+function pendingLabel(count: number): string {
+  if (count === 0) return "apply-here";
+  return `apply-here⎸${count}-pending`;
+}
+
+/** Update the #apply-here channel name to reflect the current pending count. */
+const syncChannelName = (guildId: string) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+    const [row] = yield* db
+      .selectFrom("applications")
+      .select((eb) => eb.fn.count("id").as("count"))
+      .where("guild_id", "=", guildId)
+      .where("status", "=", "pending");
+
+    const count = Number(row?.count ?? 0);
+
+    const [config] = yield* db
+      .selectFrom("application_config")
+      .select("channel_id")
+      .where("guild_id", "=", guildId);
+
+    if (!config) return;
+
+    yield* Effect.tryPromise(() =>
+      rest.patch(Routes.channel(config.channel_id), {
+        body: { name: pendingLabel(count) },
+      }),
+    );
+  }).pipe(
+    // Channel rename is cosmetic — don't fail the main operation
+    Effect.catchAll(() => Effect.void),
+  );
+
 export const Command = [
   {
     command: {
@@ -30,6 +64,24 @@ export const Command = [
     },
     handler: (interaction) =>
       Effect.gen(function* () {
+        // Block duplicate applications before showing the modal
+        const db = yield* DatabaseService;
+        const existingApp = yield* db
+          .selectFrom("applications")
+          .selectAll()
+          .where("guild_id", "=", interaction.guildId!)
+          .where("user_id", "=", interaction.user.id)
+          .where("status", "=", "pending");
+
+        if (existingApp[0]) {
+          yield* interactionReply(interaction, {
+            content:
+              "You already have a pending application. Please wait for a moderator to review it.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
         const modal = new ModalBuilder()
           .setCustomId("modal-apply-to-join")
           .setTitle("Apply to join this community");
@@ -141,6 +193,16 @@ export const Command = [
           }),
         );
 
+        // Record the application in the database
+        yield* db.insertInto("applications").values({
+          id: crypto.randomUUID(),
+          guild_id: interaction.guild.id,
+          user_id: user.id,
+          thread_id: thread.id,
+          status: "pending",
+          created_at: new Date().toISOString(),
+        });
+
         const applicationComponents = [
           {
             type: ComponentType.TextDisplay,
@@ -225,6 +287,8 @@ export const Command = [
             "Your application has been submitted! A moderator will review it shortly.",
           flags: MessageFlags.Ephemeral,
         });
+
+        yield* syncChannelName(interaction.guild.id);
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
@@ -291,6 +355,17 @@ export const Command = [
           ),
         );
 
+        yield* db
+          .updateTable("applications")
+          .set({
+            status: "approved",
+            reviewed_by: approverId,
+            resolved_at: new Date().toISOString(),
+          })
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId)
+          .where("status", "=", "pending");
+
         yield* interactionReply(interaction, {
           content: `<@${applicantUserId}>'s application has been approved by <@${approverId}>. Welcome to the community!`,
           allowedMentions: {},
@@ -315,6 +390,8 @@ export const Command = [
             body: { archived: true, locked: true },
           }),
         );
+
+        yield* syncChannelName(guildId);
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
@@ -360,6 +437,18 @@ export const Command = [
         const guildId = interaction.guild.id;
         const denierId = interaction.user.id;
 
+        const db = yield* DatabaseService;
+        yield* db
+          .updateTable("applications")
+          .set({
+            status: "denied",
+            reviewed_by: denierId,
+            resolved_at: new Date().toISOString(),
+          })
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId)
+          .where("status", "=", "pending");
+
         yield* interactionReply(interaction, {
           content: `<@${applicantUserId}>'s application has been denied by <@${denierId}>.`,
           allowedMentions: {},
@@ -384,6 +473,8 @@ export const Command = [
             body: { archived: true, locked: true },
           }),
         );
+
+        yield* syncChannelName(guildId);
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
