@@ -11,6 +11,7 @@ import { createRequestHandler } from "@react-router/express";
 import { Command as checkRequirements } from "#~/commands/checkRequirements";
 import { EscalationCommands } from "#~/commands/escalationControls";
 import { Command as forceBan } from "#~/commands/force-ban";
+import { Command as memberApplications } from "#~/commands/memberApplications";
 import { Command as modreport } from "#~/commands/modreport";
 import { Command as report } from "#~/commands/report";
 import modActionLogger from "#~/commands/report/modActionLogger";
@@ -93,6 +94,7 @@ const startup = Effect.gen(function* () {
     registerCommand(SetupComponentCommands),
     registerCommand(checkRequirements),
     registerCommand(modreport),
+    registerCommand(memberApplications),
   ]);
 
   yield* logEffect("debug", "Server", "initializing Discord bot");
