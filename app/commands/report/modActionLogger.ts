@@ -1,9 +1,7 @@
 import { formatDistanceToNowStrict } from "date-fns";
 import {
   AuditLogEvent,
-  Events,
   type AutoModerationActionExecution,
-  type Client,
   type Guild,
   type GuildBan,
   type GuildMember,
@@ -12,7 +10,6 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { runEffect } from "#~/AppRuntime";
 import { logAutomod } from "#~/commands/report/automodLog.ts";
 import { AUDIT_LOG_WINDOW_MS, fetchAuditLogEntry } from "#~/discord/auditLog";
 import { fetchUser } from "#~/effects/discordSdk.ts";
@@ -20,7 +17,7 @@ import { logEffect } from "#~/effects/observability.ts";
 
 import { logModAction } from "./modActionLog";
 
-const banAddEffect = (ban: GuildBan) =>
+export const banAddEffect = (ban: GuildBan) =>
   Effect.gen(function* () {
     const { guild, user } = ban;
     let { reason } = ban;
@@ -64,7 +61,7 @@ const banAddEffect = (ban: GuildBan) =>
     });
   }).pipe(Effect.withSpan("handleBanAdd"));
 
-const banRemoveEffect = (ban: GuildBan) =>
+export const banRemoveEffect = (ban: GuildBan) =>
   Effect.gen(function* () {
     const { guild, user } = ban;
 
@@ -166,7 +163,7 @@ const fetchKickAuditLog = (guild: Guild, user: User) =>
     };
   });
 
-const memberRemoveEffect = (member: GuildMember | PartialGuildMember) =>
+export const memberRemoveEffect = (member: GuildMember | PartialGuildMember) =>
   Effect.gen(function* () {
     const { guild, user } = member;
 
@@ -190,7 +187,7 @@ const memberRemoveEffect = (member: GuildMember | PartialGuildMember) =>
     });
   }).pipe(Effect.withSpan("handleMemberRemove"));
 
-const automodActionEffect = (execution: AutoModerationActionExecution) =>
+export const automodActionEffect = (execution: AutoModerationActionExecution) =>
   Effect.gen(function* () {
     const {
       guild,
@@ -228,7 +225,7 @@ const automodActionEffect = (execution: AutoModerationActionExecution) =>
     });
   }).pipe(Effect.withSpan("handleAutomodAction"));
 
-const memberUpdateEffect = (
+export const memberUpdateEffect = (
   oldMember: GuildMember | PartialGuildMember,
   newMember: GuildMember | PartialGuildMember,
 ) =>
@@ -310,23 +307,3 @@ const memberUpdateEffect = (
       });
     }
   }).pipe(Effect.withSpan("handleMemberUpdate"));
-
-// Thin async wrappers that execute the Effects
-const handleBanAdd = (ban: GuildBan) => runEffect(banAddEffect(ban));
-const handleBanRemove = (ban: GuildBan) => runEffect(banRemoveEffect(ban));
-const handleMemberRemove = (member: GuildMember | PartialGuildMember) =>
-  runEffect(memberRemoveEffect(member));
-const handleAutomodAction = (execution: AutoModerationActionExecution) =>
-  runEffect(automodActionEffect(execution));
-const handleMemberUpdate = (
-  oldMember: GuildMember | PartialGuildMember,
-  newMember: GuildMember | PartialGuildMember,
-) => runEffect(memberUpdateEffect(oldMember, newMember));
-
-export default async (bot: Client) => {
-  bot.on(Events.GuildBanAdd, handleBanAdd);
-  bot.on(Events.GuildBanRemove, handleBanRemove);
-  bot.on(Events.GuildMemberRemove, handleMemberRemove);
-  bot.on(Events.GuildMemberUpdate, handleMemberUpdate);
-  bot.on(Events.AutoModerationActionExecution, handleAutomodAction);
-};

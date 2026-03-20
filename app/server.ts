@@ -13,14 +13,12 @@ import { EscalationCommands } from "#~/commands/escalationControls";
 import { Command as forceBan } from "#~/commands/force-ban";
 import { Command as modreport } from "#~/commands/modreport";
 import { Command as report } from "#~/commands/report";
-import modActionLogger from "#~/commands/report/modActionLogger";
 import { Command as setup } from "#~/commands/setup";
 import { SetupComponentCommands } from "#~/commands/setupHandlers";
 import { Command as setupHoneypot } from "#~/commands/setupHoneypot";
 import { Command as setupReactjiChannel } from "#~/commands/setupReactjiChannel";
 import { Command as setupTicket } from "#~/commands/setupTickets";
 import { Command as track } from "#~/commands/track";
-import { startActivityTracking } from "#~/discord/activityTracker";
 import {
   deployCommands,
   registerCommand,
@@ -34,6 +32,7 @@ import {
 import onboardGuild from "#~/discord/onboardGuild";
 import { automodPipeline } from "#~/discord/pipelines/automod";
 import { deletionLoggerPipeline } from "#~/discord/pipelines/deletionLogger";
+import { modActionLoggerPipeline } from "#~/discord/pipelines/modActionLogger";
 import { startReactjiChanneler } from "#~/discord/reactjiChanneler";
 import { applicationKey } from "#~/helpers/env.server";
 
@@ -121,7 +120,6 @@ const startup = Effect.gen(function* () {
       try: () =>
         Promise.allSettled([
           onboardGuild(discordClient),
-          modActionLogger(discordClient),
           deployCommands(discordClient),
           startActivityTracking(discordClient),
           startReactjiChanneler(discordClient),
@@ -209,6 +207,7 @@ const startup = Effect.gen(function* () {
   globalThis.__pipelineFibers = [
     yield* deletionLoggerPipeline.pipe(Effect.fork),
     yield* automodPipeline.pipe(Effect.fork),
+    yield* modActionLoggerPipeline.pipe(Effect.fork),
   ];
   yield* logEffect("info", "Server", "Pipeline fibers forked");
 });
