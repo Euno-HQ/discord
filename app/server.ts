@@ -2,7 +2,7 @@ import "react-router";
 
 import bodyParser from "body-parser";
 import { verifyKey } from "discord-interactions";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import express from "express";
 import pinoHttp from "pino-http";
 
@@ -22,18 +22,22 @@ import { Command as setupTicket } from "#~/commands/setupTickets";
 import { Command as track } from "#~/commands/track";
 import { startActivityTracking } from "#~/discord/activityTracker";
 import automod from "#~/discord/automod";
-import { startDeletionLogging } from "#~/discord/deletionLogger";
 import {
   deployCommands,
   registerCommand,
 } from "#~/discord/deployCommands.server";
 import { startEscalationResolver } from "#~/discord/escalationResolver";
 import { initDiscordBot } from "#~/discord/gateway";
+import {
+  MessageCacheService,
+  startMessageCacheExpiration,
+} from "#~/discord/messageCacheService";
 import onboardGuild from "#~/discord/onboardGuild";
+import { deletionLoggerPipeline } from "#~/discord/pipelines/deletionLogger";
 import { startReactjiChanneler } from "#~/discord/reactjiChanneler";
 import { applicationKey } from "#~/helpers/env.server";
 
-import { runtime } from "./AppRuntime";
+import { runEffect, runtime } from "./AppRuntime";
 import { checkpointWal, runIntegrityCheck } from "./Database";
 import { DiscordApiError } from "./effects/errors";
 import { logEffect } from "./effects/observability";
@@ -85,6 +89,7 @@ app.post("/webhooks/discord", bodyParser.json(), async (req, res, next) => {
 // functions change when command files are edited.
 declare global {
   var __discordOneTimeSetupDone: boolean | undefined;
+  var __pipelineFibers: Fiber.RuntimeFiber<void, never>[] | undefined;
 }
 
 const startup = Effect.gen(function* () {
@@ -120,12 +125,33 @@ const startup = Effect.gen(function* () {
           modActionLogger(discordClient),
           deployCommands(discordClient),
           startActivityTracking(discordClient),
-          startDeletionLogging(discordClient),
           startReactjiChanneler(discordClient),
         ]),
       catch: (error) =>
         new DiscordApiError({ operation: "init", cause: error }),
     });
+
+    // Message cache expiration (was inside startDeletionLogging, now standalone)
+    startMessageCacheExpiration(() =>
+      runEffect(
+        Effect.gen(function* () {
+          const cache = yield* MessageCacheService;
+          yield* cache.expireContent();
+          yield* cache.expireRows();
+        }).pipe(
+          Effect.catchAll((e) =>
+            logEffect(
+              "warn",
+              "MessageCacheExpiration",
+              "Expiration run failed",
+              {
+                error: String(e),
+              },
+            ),
+          ),
+        ),
+      ),
+    );
 
     // Start escalation resolver scheduler (must be after client is ready)
     startEscalationResolver(discordClient);
@@ -171,6 +197,20 @@ const startup = Effect.gen(function* () {
       "HMR reload — commands re-registered, skipping one-time setup",
     );
   }
+
+  // Pipeline (re)start — runs every reload for HMR support.
+  // Interrupt stale fibers, fork fresh pipelines with updated handler code.
+  // The event bus queue buffers events during the brief swap.
+  if (globalThis.__pipelineFibers) {
+    yield* Effect.all(
+      globalThis.__pipelineFibers.map((f) => Fiber.interrupt(f)),
+    );
+    yield* logEffect("info", "Server", "Interrupted old pipeline fibers");
+  }
+  globalThis.__pipelineFibers = [
+    yield* deletionLoggerPipeline.pipe(Effect.fork),
+  ];
+  yield* logEffect("info", "Server", "Pipeline fibers forked");
 });
 
 console.log("running program");
