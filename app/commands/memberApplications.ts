@@ -56,6 +56,37 @@ const syncChannelName = (guildId: string) =>
     Effect.catchAll(() => Effect.void),
   );
 
+/** Update the mod-log summary message with resolution details. */
+const resolveLogMessage = (
+  guildId: string,
+  applicantUserId: string,
+  content: string,
+) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+    const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(guildId, [
+      SETTINGS.modLog,
+    ]);
+
+    const [app] = yield* db
+      .selectFrom("applications")
+      .select("log_message_id")
+      .where("guild_id", "=", guildId)
+      .where("user_id", "=", applicantUserId)
+      .orderBy("created_at", "desc");
+
+    if (!app?.log_message_id) return;
+
+    yield* Effect.tryPromise(() =>
+      rest.patch(Routes.channelMessage(modLog, app.log_message_id!), {
+        body: {
+          content,
+          allowedMentions: {},
+        },
+      }),
+    );
+  }).pipe(Effect.catchAll(() => Effect.void));
+
 export const Command = [
   {
     command: {
@@ -255,7 +286,7 @@ export const Command = [
         // Post review message with approve/deny buttons to the mod-log user thread
         const modThread = yield* getOrCreateUserThread(interaction.guild, user);
 
-        yield* Effect.tryPromise(() =>
+        const reviewMsg = (yield* Effect.tryPromise(() =>
           rest.post(Routes.channelMessages(modThread.id), {
             body: {
               flags: MessageFlags.IsComponentsV2,
@@ -292,7 +323,30 @@ export const Command = [
               ],
             },
           }),
+        )) as { id: string };
+
+        // Post summary to mod-log channel with link to the review message
+        const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(
+          interaction.guild.id,
+          [SETTINGS.modLog],
         );
+        const reviewLink = `https://discord.com/channels/${interaction.guild.id}/${modThread.id}/${reviewMsg.id}`;
+        const logMsg = (yield* Effect.tryPromise(() =>
+          rest.post(Routes.channelMessages(modLog), {
+            body: {
+              content: `<@${user.id}> applied to join — [review application](${reviewLink})`,
+              allowedMentions: {},
+            },
+          }),
+        )) as { id: string };
+
+        // Store the log message ID so we can update it on resolution
+        yield* db
+          .updateTable("applications")
+          .set({ log_message_id: logMsg.id })
+          .where("guild_id", "=", interaction.guild.id)
+          .where("user_id", "=", user.id)
+          .where("status", "=", "pending");
 
         yield* interactionReply(interaction, {
           content:
@@ -383,20 +437,11 @@ export const Command = [
           allowedMentions: {},
         });
 
-        const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(
-          guildId,
-          [SETTINGS.modLog],
-        );
-
         const appMsgLink = `https://discord.com/channels/${guildId}/${interaction.channelId}/${interaction.message?.id}`;
-
-        yield* Effect.tryPromise(() =>
-          rest.post(Routes.channelMessages(modLog), {
-            body: {
-              content: `<@${applicantUserId}>'s [application](${appMsgLink}) approved by <@${approverId}>`,
-              allowedMentions: {},
-            },
-          }),
+        yield* resolveLogMessage(
+          guildId,
+          applicantUserId,
+          `<@${applicantUserId}>'s [application](${appMsgLink}) approved by <@${approverId}>`,
         );
 
         yield* Effect.tryPromise(() =>
@@ -463,25 +508,23 @@ export const Command = [
           .where("user_id", "=", applicantUserId)
           .where("status", "=", "pending");
 
+        // Kick the applicant
+        yield* Effect.tryPromise(() =>
+          rest.delete(Routes.guildMember(guildId, applicantUserId), {
+            reason: `Application denied by ${denierId}`,
+          }),
+        );
+
         yield* interactionReply(interaction, {
-          content: `<@${applicantUserId}>'s application has been denied by <@${denierId}>.`,
+          content: `<@${applicantUserId}>'s application has been denied by <@${denierId}>. They have been kicked from the server.`,
           allowedMentions: {},
         });
 
-        const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(
-          guildId,
-          [SETTINGS.modLog],
-        );
-
         const appMsgLink = `https://discord.com/channels/${guildId}/${interaction.channelId}/${interaction.message?.id}`;
-
-        yield* Effect.tryPromise(() =>
-          rest.post(Routes.channelMessages(modLog), {
-            body: {
-              content: `<@${applicantUserId}>'s [application](${appMsgLink}) denied by <@${denierId}>`,
-              allowedMentions: {},
-            },
-          }),
+        yield* resolveLogMessage(
+          guildId,
+          applicantUserId,
+          `<@${applicantUserId}>'s [application](${appMsgLink}) denied by <@${denierId}> (kicked)`,
         );
 
         yield* Effect.tryPromise(() =>
@@ -561,18 +604,10 @@ export const Command = [
             "Your application has been retracted. You can apply again at any time.",
         });
 
-        const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(
+        yield* resolveLogMessage(
           guildId,
-          [SETTINGS.modLog],
-        );
-
-        yield* Effect.tryPromise(() =>
-          rest.post(Routes.channelMessages(modLog), {
-            body: {
-              content: `<@${applicantUserId}> retracted their application`,
-              allowedMentions: {},
-            },
-          }),
+          applicantUserId,
+          `<@${applicantUserId}> retracted their application`,
         );
 
         yield* Effect.tryPromise(() =>
