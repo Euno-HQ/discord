@@ -15,6 +15,7 @@ import { ssrDiscordSdk as rest } from "#~/discord/api";
 import { fetchChannel, interactionReply } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import {
+  hasModRole,
   quoteMessageContent,
   type MessageComponentCommand,
   type ModalCommand,
@@ -403,6 +404,19 @@ export const Command = [
         const guildId = interaction.guild.id;
         const approverId = interaction.user.id;
 
+        // Verify the user has the moderator role
+        const { [SETTINGS.moderator]: modRoleId } = yield* fetchSettingsEffect(
+          guildId,
+          [SETTINGS.moderator],
+        );
+        if (!hasModRole(interaction, modRoleId)) {
+          yield* interactionReply(interaction, {
+            content: "Only moderators can approve applications.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
         const db = yield* DatabaseService;
         const configRows = yield* db
           .selectFrom("application_config")
@@ -523,6 +537,17 @@ export const Command = [
 
         const guildId = interaction.guild.id;
         const denierId = interaction.user.id;
+
+        // Verify the user has the moderator role
+        const { [SETTINGS.moderator]: denyModRoleId } =
+          yield* fetchSettingsEffect(guildId, [SETTINGS.moderator]);
+        if (!hasModRole(interaction, denyModRoleId)) {
+          yield* interactionReply(interaction, {
+            content: "Only moderators can deny applications.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
 
         const db = yield* DatabaseService;
 
