@@ -1,7 +1,7 @@
 # Effect Advanced Patterns
 
-These patterns are **not currently used** in this codebase but are documented
-here for future reference. For patterns we actually use, see
+Some of these patterns are now used in the codebase (Streams, Queues) while
+others remain documented for future reference. For patterns we actually use, see
 [EFFECT.md](./EFFECT.md) and [EFFECT_REFERENCE.md](./EFFECT_REFERENCE.md).
 
 ## Stream Processing
@@ -32,12 +32,21 @@ const processed = stream.pipe(
 | Intervals       | `Stream.repeatEffect`       | `Stream.take`, `Stream.takeWhile`  |
 | File lines      | `Stream.fromReadableStream` | `Stream.transduce`                 |
 
+**In this codebase:** The `DiscordEventBus` Layer (`app/discord/eventBus.ts`)
+uses `Stream.fromQueue` and `Stream.broadcastDynamic` to distribute Discord
+events to consumer pipelines. The deletion logger pipeline
+(`app/discord/pipelines/deletionLogger.ts`) uses `Stream.filter`,
+`Stream.filterEffect`, `Stream.tap`, `Stream.mapEffect`, and `Stream.runDrain`
+to process events. See the design spec at
+`docs/superpowers/specs/2026-03-20-discord-event-streams-design.md`.
+
 ### When to Consider Streams
 
 - Processing more than ~1000 items
 - Real-time event processing
 - Data that arrives over time (not all at once)
 - Need backpressure control
+- Replacing `client.on()` event handlers with hot-swappable pipelines (HMR)
 
 ## Sink Patterns
 
@@ -125,6 +134,13 @@ yield* Queue.offer(queue, task);
 // Consumer
 const task = yield* Queue.take(queue);
 ```
+
+**In this codebase:** `Queue.sliding<DiscordEvent>(1024)` in the
+`DiscordEventBus` Layer provides backpressure-aware buffering between
+Discord.js callbacks and Effect Stream consumers. The sliding strategy drops
+oldest events under pressure rather than blocking the callback thread.
+`Effect.runFork(Queue.offer(queue, event))` bridges from callback-land to
+Effect without blocking.
 
 ## Ref / TRef State Management
 
