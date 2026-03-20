@@ -85,6 +85,53 @@ Adding a new environment variable needs to be done in several places to work cor
 - Add to `.github/workflows/ci.yml` (for E2E tests)
 - Add to `.github/workflows/cd.yml` (in the secret manifest step)
 
+## HMR (Hot Module Replacement) for Discord handlers
+
+The dev server (`index.dev.js`) uses Vite's HMR to reload server-side code
+without restarting the process. This keeps the Discord gateway connection alive
+across code changes. There are three different reload strategies depending on
+what you're editing:
+
+### Command handlers (slash commands, modals, component interactions)
+
+The `commands` Map in `deployCommands.server.ts` lives on `globalThis` so it
+survives module reloads. When you edit a command file:
+
+1. Vite reloads `server.ts`
+2. `registerCommand()` re-runs, updating the Map with fresh handler functions
+3. The `InteractionCreate` handler (registered once in `gateway.ts`) calls
+   `matchCommand()` which reads from the same `globalThis` Map
+4. Your new handler code runs on the next interaction
+
+### Event handler pipelines (deletionLogger, future: automod, etc.)
+
+Event handlers use Effect Streams subscribed to a `DiscordEventBus` Layer.
+When you edit a pipeline or handler file:
+
+1. Vite reloads `server.ts`
+2. Old pipeline Fibers are interrupted via `Fiber.interrupt()`
+3. New pipelines are forked with fresh handler code
+4. The event bus Queue buffers events during the brief swap — nothing is lost
+
+**Key files:**
+- `app/discord/eventBus.ts` — DiscordEventBus Layer (queue + broadcastDynamic)
+- `app/discord/pipelines/` — pipeline definitions and handler functions
+- `app/server.ts` — pipeline lifecycle (fork/interrupt)
+
+### One-time setup handlers (not yet migrated to pipelines)
+
+Some event handlers (`automod.ts`, `modActionLogger.ts`, `activityTracker.ts`,
+`reactjiChanneler.ts`, `onboardGuild.ts`) still use the old `client.on()`
+pattern. These are guarded by `globalThis.__discordOneTimeSetupDone` to prevent
+duplicate listener registration. **Changes to these files require a full dev
+server restart** — HMR won't pick them up.
+
+### Gateway lifecycle handlers
+
+Handlers in `gateway.ts` (`InteractionCreate`, `ThreadCreate`,
+`ShardDisconnect`, etc.) are registered once and never refreshed. These are thin
+gateway concerns — edits require a restart.
+
 # Useful DevOps commands
 
 This bot runs on a managed Kubernetes cluster on DigitalOcean. It's possible (tho beyond the scope of this document) to configure a local `kubectl` environment to access and control this cluster. What follows are reference commands for performing common tasks:
