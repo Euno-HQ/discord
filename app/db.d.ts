@@ -17,6 +17,17 @@ export interface ApplicationConfig {
   role_id: string;
 }
 
+export interface Applications {
+  created_at: string;
+  guild_id: string;
+  id: string;
+  resolved_at: string | null;
+  reviewed_by: string | null;
+  status: Generated<string>;
+  thread_id: string;
+  user_id: string;
+}
+
 export interface ChannelInfo {
   category: string | null;
   category_id: string | null;
@@ -166,6 +177,7 @@ export interface UserThreads {
 
 export interface DB {
   application_config: ApplicationConfig;
+  applications: Applications;
   channel_info: ChannelInfo;
   deletion_log_threads: DeletionLogThreads;
   escalation_records: EscalationRecords;
