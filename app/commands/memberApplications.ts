@@ -433,9 +433,27 @@ export const Command = [
           .where("status", "=", "pending");
 
         yield* interactionReply(interaction, {
-          content: `<@${applicantUserId}>'s application has been approved by <@${approverId}>. Welcome to the community!`,
+          content: `<@${applicantUserId}>'s application has been approved by <@${approverId}>.`,
           allowedMentions: {},
         });
+
+        // Notify the applicant in their thread
+        const [appRow] = yield* db
+          .selectFrom("applications")
+          .select("thread_id")
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId)
+          .orderBy("created_at", "desc");
+
+        if (appRow?.thread_id) {
+          yield* Effect.tryPromise(() =>
+            rest.post(Routes.channelMessages(appRow.thread_id), {
+              body: {
+                content: `<@${applicantUserId}>, your application has been approved! Welcome to the community!`,
+              },
+            }),
+          ).pipe(Effect.catchAll(() => Effect.void));
+        }
 
         const appMsgLink = `https://discord.com/channels/${guildId}/${interaction.channelId}/${interaction.message?.id}`;
         yield* resolveLogMessage(
@@ -497,6 +515,39 @@ export const Command = [
         const denierId = interaction.user.id;
 
         const db = yield* DatabaseService;
+
+        // Notify the applicant via DM before kicking, fall back to thread
+        const dmSent = yield* Effect.tryPromise(async () => {
+          const dmChannel = (await rest.post(Routes.userChannels(), {
+            body: { recipient_id: applicantUserId },
+          })) as { id: string };
+          await rest.post(Routes.channelMessages(dmChannel.id), {
+            body: {
+              content: `Your application to **${interaction.guild!.name}** has been denied.`,
+            },
+          });
+          return true;
+        }).pipe(Effect.catchAll(() => Effect.succeed(false)));
+
+        if (!dmSent) {
+          const [denyAppRow] = yield* db
+            .selectFrom("applications")
+            .select("thread_id")
+            .where("guild_id", "=", guildId)
+            .where("user_id", "=", applicantUserId)
+            .where("status", "=", "pending");
+
+          if (denyAppRow?.thread_id) {
+            yield* Effect.tryPromise(() =>
+              rest.post(Routes.channelMessages(denyAppRow.thread_id), {
+                body: {
+                  content: `<@${applicantUserId}>, your application has been denied.`,
+                },
+              }),
+            ).pipe(Effect.catchAll(() => Effect.void));
+          }
+        }
+
         yield* db
           .updateTable("applications")
           .set({
