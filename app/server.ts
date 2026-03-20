@@ -30,6 +30,7 @@ import {
   startMessageCacheExpiration,
 } from "#~/discord/messageCacheService";
 import onboardGuild from "#~/discord/onboardGuild";
+import { activityTrackerPipeline } from "#~/discord/pipelines/activityTracker";
 import { automodPipeline } from "#~/discord/pipelines/automod";
 import { deletionLoggerPipeline } from "#~/discord/pipelines/deletionLogger";
 import { modActionLoggerPipeline } from "#~/discord/pipelines/modActionLogger";
@@ -121,7 +122,6 @@ const startup = Effect.gen(function* () {
         Promise.allSettled([
           onboardGuild(discordClient),
           deployCommands(discordClient),
-          startActivityTracking(discordClient),
           startReactjiChanneler(discordClient),
         ]),
       catch: (error) =>
@@ -208,6 +208,7 @@ const startup = Effect.gen(function* () {
     yield* deletionLoggerPipeline.pipe(Effect.fork),
     yield* automodPipeline.pipe(Effect.fork),
     yield* modActionLoggerPipeline.pipe(Effect.fork),
+    yield* activityTrackerPipeline.pipe(Effect.fork),
   ];
   yield* logEffect("info", "Server", "Pipeline fibers forked");
 });
