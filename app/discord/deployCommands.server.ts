@@ -35,7 +35,7 @@ export const deployCommands = async (client: Client) => {
 
   await (isProd()
     ? deployProdCommands(client, localCommands)
-    : deployTestCommands(client, localCommands));
+    : deployTestCommands(client));
 };
 
 type ChangedCommands = ReturnType<typeof calculateChangedCommands>;
@@ -128,10 +128,7 @@ Global commands ${
   );
 };
 
-export const deployTestCommands = async (
-  client: Client,
-  localCommands: (ContextMenuCommandBuilder | SlashCommandBuilder)[],
-) => {
+export const deployTestCommands = async (client: Client) => {
   // Delete all global commands
   // This shouldn't happen, but ensures a consistent state esp in development
   const globalCommands = (await ssrDiscordSdk.get(
@@ -147,34 +144,43 @@ export const deployTestCommands = async (
   // Deploy directly to all connected guilds
   const guilds = await client.guilds.fetch();
   console.log(`Deploying test commands to ${guilds.size} guilds…`);
-  await Promise.all(
-    guilds.map(async (guild) => {
-      const guildCommands = (await ssrDiscordSdk.get(
-        Routes.applicationGuildCommands(applicationId, guild.id),
-      )) as APIApplicationCommand[];
+  await Promise.all(guilds.map((guild) => deployToGuild(guild.id, guild.name)));
+};
 
-      const changes = calculateChangedCommands(localCommands, guildCommands);
-      console.log(
-        `${guild.name} (${localCommands.length} local): ${
-          changes.didCommandsChange
-            ? `Upserting ${localCommands.length} commands.`
-            : "No command updates."
-        } ${
-          changes.toDelete.length > 0
-            ? `Deleting ${changes.toDelete.join(", ")}`
-            : ""
-        }`,
-      );
-      await applyCommandChanges(
-        localCommands,
-        changes.toDelete,
-        changes.didCommandsChange,
-        guildCommands.length,
-        () => Routes.applicationGuildCommands(applicationId, guild.id),
-        (commandId: string) =>
-          Routes.applicationGuildCommand(applicationId, guild.id, commandId),
-      );
-    }),
+export const deployToGuild = async (guildId: string, guildName?: string) => {
+  const localCommands = [...commands.values()]
+    .filter(
+      (c) =>
+        isSlashCommand(c) ||
+        isUserContextCommand(c) ||
+        isMessageContextCommand(c),
+    )
+    .map(({ command }) => command);
+
+  const guildCommands = (await ssrDiscordSdk.get(
+    Routes.applicationGuildCommands(applicationId, guildId),
+  )) as APIApplicationCommand[];
+
+  const changes = calculateChangedCommands(localCommands, guildCommands);
+  console.log(
+    `${guildName ?? guildId} (${localCommands.length} local): ${
+      changes.didCommandsChange
+        ? `Upserting ${localCommands.length} commands.`
+        : "No command updates."
+    } ${
+      changes.toDelete.length > 0
+        ? `Deleting ${changes.toDelete.join(", ")}`
+        : ""
+    }`,
+  );
+  await applyCommandChanges(
+    localCommands,
+    changes.toDelete,
+    changes.didCommandsChange,
+    guildCommands.length,
+    () => Routes.applicationGuildCommands(applicationId, guildId),
+    (commandId: string) =>
+      Routes.applicationGuildCommand(applicationId, guildId, commandId),
   );
 };
 
