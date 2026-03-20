@@ -138,8 +138,52 @@ export const DiscordEventBusLive = Layer.scoped(
       if (event) Effect.runFork(Queue.offer(queue, event));
     });
 
-    // TODO: Add remaining event types as handlers are migrated to pipelines.
-    // For now, only message events are queued (deletion logger is first consumer).
+    client.on(Events.MessageReactionAdd, (reaction, user) => {
+      Effect.runFork(
+        Queue.offer(queue, { type: "MessageReactionAdd", reaction, user }),
+      );
+    });
+
+    client.on(Events.MessageReactionRemove, (reaction, user) => {
+      Effect.runFork(
+        Queue.offer(queue, { type: "MessageReactionRemove", reaction, user }),
+      );
+    });
+
+    client.on(Events.GuildBanAdd, (ban) => {
+      Effect.runFork(Queue.offer(queue, { type: "GuildBanAdd", ban }));
+    });
+
+    client.on(Events.GuildBanRemove, (ban) => {
+      Effect.runFork(Queue.offer(queue, { type: "GuildBanRemove", ban }));
+    });
+
+    client.on(Events.GuildMemberRemove, (member) => {
+      Effect.runFork(Queue.offer(queue, { type: "GuildMemberRemove", member }));
+    });
+
+    client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
+      Effect.runFork(
+        Queue.offer(queue, { type: "GuildMemberUpdate", oldMember, newMember }),
+      );
+    });
+
+    client.on(Events.AutoModerationActionExecution, (execution) => {
+      Effect.runFork(
+        Queue.offer(queue, {
+          type: "AutoModerationActionExecution",
+          execution,
+        }),
+      );
+    });
+
+    client.on(Events.GuildCreate, (guild) => {
+      Effect.runFork(Queue.offer(queue, { type: "GuildCreate", guild }));
+    });
+
+    client.on(Events.GuildDelete, (guild) => {
+      Effect.runFork(Queue.offer(queue, { type: "GuildDelete", guild }));
+    });
 
     log("info", "DiscordEventBus", "Event source registered");
 
