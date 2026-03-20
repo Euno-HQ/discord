@@ -69,11 +69,13 @@ const makeMockCache = (
   expireRows: () => Effect.void,
 });
 
+ 
 const runHandler = (
   effect: Effect.Effect<void, unknown, any>,
   cache = makeMockCache(),
 ) =>
   Effect.runPromise(
+    // @ts-expect-error - test mock: RuntimeContext services are vi.mocked, Layer.succeed covers MessageCacheService
     effect.pipe(Effect.provide(Layer.succeed(MessageCacheService, cache))),
   );
 
