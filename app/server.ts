@@ -29,12 +29,12 @@ import {
   MessageCacheService,
   startMessageCacheExpiration,
 } from "#~/discord/messageCacheService";
-import onboardGuild from "#~/discord/onboardGuild";
 import { activityTrackerPipeline } from "#~/discord/pipelines/activityTracker";
 import { automodPipeline } from "#~/discord/pipelines/automod";
 import { deletionLoggerPipeline } from "#~/discord/pipelines/deletionLogger";
 import { modActionLoggerPipeline } from "#~/discord/pipelines/modActionLogger";
-import { startReactjiChanneler } from "#~/discord/reactjiChanneler";
+import { onboardGuildPipeline } from "#~/discord/pipelines/onboardGuild";
+import { reactjiChannelerPipeline } from "#~/discord/pipelines/reactjiChanneler";
 import { applicationKey } from "#~/helpers/env.server";
 
 import { runEffect, runtime } from "./AppRuntime";
@@ -118,12 +118,7 @@ const startup = Effect.gen(function* () {
     globalThis.__discordOneTimeSetupDone = true;
 
     yield* Effect.tryPromise({
-      try: () =>
-        Promise.allSettled([
-          onboardGuild(discordClient),
-          deployCommands(discordClient),
-          startReactjiChanneler(discordClient),
-        ]),
+      try: () => Promise.allSettled([deployCommands(discordClient)]),
       catch: (error) =>
         new DiscordApiError({ operation: "init", cause: error }),
     });
@@ -209,6 +204,8 @@ const startup = Effect.gen(function* () {
     yield* automodPipeline.pipe(Effect.fork),
     yield* modActionLoggerPipeline.pipe(Effect.fork),
     yield* activityTrackerPipeline.pipe(Effect.fork),
+    yield* onboardGuildPipeline.pipe(Effect.fork),
+    yield* reactjiChannelerPipeline.pipe(Effect.fork),
   ];
   yield* logEffect("info", "Server", "Pipeline fibers forked");
 });
