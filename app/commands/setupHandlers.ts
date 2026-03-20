@@ -18,6 +18,10 @@ import { logEffect } from "#~/effects/observability";
 import type { MessageComponentCommand } from "#~/helpers/discord";
 import { commandStats } from "#~/helpers/metrics";
 import { CREATE_SENTINEL, setupAll } from "#~/helpers/setupAll.server.ts";
+import {
+  checkSetupPermissions,
+  type SetupPermissionCheckResult,
+} from "#~/helpers/setupPermissionCheck";
 import { fetchGuild } from "#~/models/guilds.server";
 
 // --- State management ---
@@ -409,7 +413,42 @@ function roleValue(roleId: string | undefined): string {
   return roleId ? `<@&${roleId}>` : "None";
 }
 
-function buildSetupConfirmMessage(guildId: string, state: PendingSetup) {
+function buildPermWarnings(permCheck?: SetupPermissionCheckResult) {
+  if (!permCheck) return [];
+
+  const lines: string[] = [];
+
+  if (permCheck.missingGuildPerms.length > 0) {
+    lines.push(
+      `**Missing server permissions:** ${permCheck.missingGuildPerms.join(", ")}`,
+    );
+  }
+
+  for (const issue of permCheck.channelIssues) {
+    lines.push(`**${issue.label}:** missing ${issue.missing.join(", ")}`);
+  }
+
+  if (lines.length === 0) return [];
+
+  const icon = permCheck.hasHardBlock ? "⛔" : "⚠️";
+  const heading = permCheck.hasHardBlock
+    ? `### ${icon} Permission Issues (must fix before confirming)`
+    : `### ${icon} Permission Warnings`;
+
+  return [
+    { type: ComponentType.Separator },
+    {
+      type: ComponentType.TextDisplay,
+      content: `${heading}\n${lines.map((l) => `- ${l}`).join("\n")}`,
+    },
+  ];
+}
+
+function buildSetupConfirmMessage(
+  guildId: string,
+  state: PendingSetup,
+  permCheck?: SetupPermissionCheckResult,
+) {
   // --- Configuration summary table ---
   const configRows = [
     ["Moderator Role", roleValue(state.modRoleId)],
@@ -500,6 +539,7 @@ function buildSetupConfirmMessage(guildId: string, state: PendingSetup) {
                 },
               ]
             : []),
+          ...buildPermWarnings(permCheck),
           { type: ComponentType.Separator },
           {
             type: ComponentType.ActionRow,
@@ -515,6 +555,7 @@ function buildSetupConfirmMessage(guildId: string, state: PendingSetup) {
                 custom_id: `setup-exec|${guildId}`,
                 label: "Confirm ✓",
                 style: ButtonStyle.Primary,
+                ...(permCheck?.hasHardBlock ? { disabled: true } : {}),
               },
             ],
           },
@@ -629,9 +670,19 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           return;
         }
 
+        const guild = interaction.guild;
+        const botMember = guild?.members.me;
+        let permCheck: SetupPermissionCheckResult | undefined;
+
+        if (guild && botMember) {
+          permCheck = yield* Effect.tryPromise(() =>
+            checkSetupPermissions(guild, botMember, state),
+          );
+        }
+
         yield* interactionUpdate(
           interaction,
-          buildSetupConfirmMessage(guildId, state),
+          buildSetupConfirmMessage(guildId, state, permCheck),
         );
       }).pipe(
         Effect.catchAll((error) =>
