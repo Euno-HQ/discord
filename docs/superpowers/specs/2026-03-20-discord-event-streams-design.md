@@ -64,11 +64,13 @@ events that pipelines can consume without redundant checks:
 
 ```typescript
 type DiscordEvent =
-  // Enriched — bot/system/DM filtered, guild + member resolved
-  | { type: "GuildMemberMessage"; message: Message; guild: Guild; member: GuildMember }
-  | { type: "GuildMemberMessageDelete"; message: Message | PartialMessage; guild: Guild; cached: CachedMessage | null }
-  | { type: "GuildMemberMessageUpdate"; oldMessage: Message | PartialMessage; newMessage: Message | PartialMessage; guild: Guild; cached: CachedMessage | null }
-  | { type: "GuildMessageBulkDelete"; messages: Collection<...>; channel: GuildTextBasedChannel; guild: Guild }
+  // Enriched — bot/system/DM filtered, guild resolved from client cache.
+  // MessageCreate gets full enrichment (member available sync from Discord.js).
+  // Delete/Update/BulkDelete get guild only; cache lookup happens in pipelines.
+  | { type: "GuildMemberMessage"; message: Message<true>; guild: Guild; member: GuildMember }
+  | { type: "GuildMessageDelete"; message: Message | PartialMessage; guild: Guild; guildId: string }
+  | { type: "GuildMessageUpdate"; oldMessage: Message | PartialMessage; newMessage: Message | PartialMessage; guild: Guild; guildId: string }
+  | { type: "GuildMessageBulkDelete"; messages: Collection<...>; channel: GuildTextBasedChannel; guild: Guild; guildId: string }
   // Raw — don't need enrichment or aren't consumed by pipelines yet
   | { type: "InteractionCreate"; interaction: Interaction }
   | { type: "GuildBanAdd"; ban: GuildBan }
