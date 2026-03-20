@@ -252,56 +252,77 @@ export async function setupAll(
         ),
     );
 
-    // Step 7: Bulk-assign @member to all current members (before changing @everyone)
-    let after = "0";
-    while (true) {
-      const members = (await ssrDiscordSdk.get(Routes.guildMembers(guildId), {
-        query: new URLSearchParams({ limit: "1000", after }),
-      })) as APIGuildMember[];
+    // Steps 7–9: Bulk-assign @member role then update permissions.
+    // This runs in the background so setup returns immediately.
+    const bulkRoleId = resolvedMemberRoleId;
+    log("info", "setupAll", "Starting background member-role assignment", {
+      guildId,
+    });
+    void (async () => {
+      try {
+        // Step 7: Bulk-assign @member to all current members (before changing @everyone)
+        let after = "0";
+        let assigned = 0;
+        while (true) {
+          const members = (await ssrDiscordSdk.get(
+            Routes.guildMembers(guildId),
+            {
+              query: new URLSearchParams({ limit: "1000", after }),
+            },
+          )) as APIGuildMember[];
 
-      if (members.length === 0) break;
+          if (members.length === 0) break;
 
-      for (const member of members) {
-        if (!member.user) continue; // skip partial member objects
-        if (member.user.bot) continue; // skip bots
-        try {
-          await ssrDiscordSdk.put(
-            Routes.guildMemberRole(
-              guildId,
-              member.user.id,
-              resolvedMemberRoleId,
-            ),
-          );
-        } catch {
-          // Member may have left or role hierarchy issue — log and continue
-          log("warn", "setupAll", "Failed to assign member role", {
-            guildId,
-            userId: member.user?.id,
-          });
+          for (const member of members) {
+            if (!member.user) continue; // skip partial member objects
+            if (member.user.bot) continue; // skip bots
+            try {
+              await ssrDiscordSdk.put(
+                Routes.guildMemberRole(guildId, member.user.id, bulkRoleId),
+              );
+              assigned++;
+            } catch {
+              // Member may have left or role hierarchy issue — log and continue
+              log("warn", "setupAll", "Failed to assign member role", {
+                guildId,
+                userId: member.user?.id,
+              });
+            }
+          }
+
+          after = members[members.length - 1].user.id;
+          if (members.length < 1000) break;
         }
+
+        // Step 8: Deny ViewChannel on @everyone
+        await ssrDiscordSdk.patch(Routes.guildRole(guildId, guildId), {
+          body: {
+            permissions: String(
+              everyonePerms &
+                ~PermissionFlagsBits.ViewChannel &
+                ~PermissionFlagsBits.MentionEveryone,
+            ),
+          },
+        });
+
+        // Step 9: Grant ViewChannel on @member role
+        await ssrDiscordSdk.patch(Routes.guildRole(guildId, bulkRoleId), {
+          body: {
+            permissions: String(memberPerms | PermissionFlagsBits.ViewChannel),
+          },
+        });
+
+        log("info", "setupAll", "Background member-role assignment complete", {
+          guildId,
+          assigned,
+        });
+      } catch (err) {
+        log("error", "setupAll", "Background member-role assignment failed", {
+          guildId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-
-      after = members[members.length - 1].user.id;
-      if (members.length < 1000) break;
-    }
-
-    // Step 8: Deny ViewChannel on @everyone
-    await ssrDiscordSdk.patch(Routes.guildRole(guildId, guildId), {
-      body: {
-        permissions: String(
-          everyonePerms &
-            ~PermissionFlagsBits.ViewChannel &
-            ~PermissionFlagsBits.MentionEveryone,
-        ),
-      },
-    });
-
-    // Step 9: Grant ViewChannel on @member role
-    await ssrDiscordSdk.patch(Routes.guildRole(guildId, resolvedMemberRoleId), {
-      body: {
-        permissions: String(memberPerms | PermissionFlagsBits.ViewChannel),
-      },
-    });
+    })();
   }
 
   // --- Save guild settings ---
