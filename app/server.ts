@@ -78,6 +78,15 @@ app.post("/webhooks/discord", bodyParser.json(), async (req, res, next) => {
   next();
 });
 
+// Track whether one-time setup (event handlers, schedulers, signal handlers)
+// has already run. These must not re-register on HMR reloads — the closures
+// use Effect services from the stable ManagedRuntime, so re-registering just
+// creates duplicates. Command registration DOES re-run because command handler
+// functions change when command files are edited.
+declare global {
+  var __discordOneTimeSetupDone: boolean | undefined;
+}
+
 const startup = Effect.gen(function* () {
   yield* logEffect("debug", "Server", "initializing commands");
 
@@ -98,57 +107,70 @@ const startup = Effect.gen(function* () {
   yield* logEffect("debug", "Server", "initializing Discord bot");
   const discordClient = yield* initDiscordBot;
 
-  yield* Effect.tryPromise({
-    try: () =>
-      Promise.allSettled([
-        onboardGuild(discordClient),
-        automod(discordClient),
-        modActionLogger(discordClient),
-        deployCommands(discordClient),
-        startActivityTracking(discordClient),
-        startDeletionLogging(discordClient),
-        startReactjiChanneler(discordClient),
-      ]),
-    catch: (error) => new DiscordApiError({ operation: "init", cause: error }),
-  });
+  // One-time setup: event handlers, schedulers, signal handlers.
+  // Skipped on HMR reloads to prevent duplicate listeners.
+  if (!globalThis.__discordOneTimeSetupDone) {
+    globalThis.__discordOneTimeSetupDone = true;
 
-  // Start escalation resolver scheduler (must be after client is ready)
-  startEscalationResolver(discordClient);
+    yield* Effect.tryPromise({
+      try: () =>
+        Promise.allSettled([
+          onboardGuild(discordClient),
+          automod(discordClient),
+          modActionLogger(discordClient),
+          deployCommands(discordClient),
+          startActivityTracking(discordClient),
+          startDeletionLogging(discordClient),
+          startReactjiChanneler(discordClient),
+        ]),
+      catch: (error) =>
+        new DiscordApiError({ operation: "init", cause: error }),
+    });
 
-  yield* logEffect("info", "Gateway", "Gateway initialization completed", {
-    guildCount: discordClient.guilds.cache.size,
-    userCount: discordClient.users.cache.size,
-  });
+    // Start escalation resolver scheduler (must be after client is ready)
+    startEscalationResolver(discordClient);
 
-  // Track bot startup in business analytics
-  botStats.botStarted(
-    discordClient.guilds.cache.size,
-    discordClient.users.cache.size,
-  );
+    yield* logEffect("info", "Gateway", "Gateway initialization completed", {
+      guildCount: discordClient.guilds.cache.size,
+      userCount: discordClient.users.cache.size,
+    });
 
-  // Initialize PostHog group analytics for guilds
-  yield* initializeGroups(discordClient.guilds.cache);
+    // Track bot startup in business analytics
+    botStats.botStarted(
+      discordClient.guilds.cache.size,
+      discordClient.users.cache.size,
+    );
 
-  yield* logEffect("debug", "Server", "scheduling integrity check");
-  runtime.runFork(runIntegrityCheck);
+    // Initialize PostHog group analytics for guilds
+    yield* initializeGroups(discordClient.guilds.cache);
 
-  // Graceful shutdown handler to checkpoint WAL and dispose the runtime
-  // (tears down PostHog finalizer, feature flag interval, and SQLite connection)
-  const handleShutdown = (signal: string) =>
-    runtime
-      .runPromise(
-        Effect.gen(function* () {
-          yield* logEffect("info", "Server", `Received ${signal}`);
-          yield* checkpointWal();
-          yield* logEffect("info", "Server", "Database WAL checkpointed");
-          process.exit(0);
-        }),
-      )
-      .then(() => runtime.dispose().then(() => console.log("ok")));
+    yield* logEffect("debug", "Server", "scheduling integrity check");
+    runtime.runFork(runIntegrityCheck);
 
-  yield* logEffect("debug", "Server", "setting signal handlers");
-  process.on("SIGTERM", () => void handleShutdown("SIGTERM"));
-  process.on("SIGINT", () => void handleShutdown("SIGINT"));
+    // Graceful shutdown handler to checkpoint WAL and dispose the runtime
+    // (tears down PostHog finalizer, feature flag interval, and SQLite connection)
+    const handleShutdown = (signal: string) =>
+      runtime
+        .runPromise(
+          Effect.gen(function* () {
+            yield* logEffect("info", "Server", `Received ${signal}`);
+            yield* checkpointWal();
+            yield* logEffect("info", "Server", "Database WAL checkpointed");
+            process.exit(0);
+          }),
+        )
+        .then(() => runtime.dispose().then(() => console.log("ok")));
+
+    yield* logEffect("debug", "Server", "setting signal handlers");
+    process.on("SIGTERM", () => void handleShutdown("SIGTERM"));
+    process.on("SIGINT", () => void handleShutdown("SIGINT"));
+  } else {
+    yield* logEffect(
+      "info",
+      "Server",
+      "HMR reload — commands re-registered, skipping one-time setup",
+    );
+  }
 });
 
 console.log("running program");

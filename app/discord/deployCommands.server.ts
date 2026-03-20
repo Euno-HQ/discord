@@ -178,7 +178,15 @@ export const deployTestCommands = async (
   );
 };
 
-const commands = new Map<string, AnyCommand>();
+// Use globalThis so the commands Map survives HMR module reloads.
+// The InteractionCreate handler in gateway.ts is registered once and holds a
+// closure over matchCommand — if we used a module-level Map, the handler would
+// reference a stale Map after every reload.
+declare global {
+  var __discordCommands: Map<string, AnyCommand> | undefined;
+}
+globalThis.__discordCommands ??= new Map<string, AnyCommand>();
+const commands = globalThis.__discordCommands;
 export const registerCommand = (
   config: AnyCommand | AnyCommand[],
 ): Effect.Effect<void> =>
