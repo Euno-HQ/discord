@@ -22,6 +22,7 @@ export const REQUIRED_PERMISSIONS = [
     flag: PermissionFlagsBits.CreatePrivateThreads,
     name: "Create Private Threads",
   },
+  { flag: PermissionFlagsBits.ManageThreads, name: "Manage Threads" },
   { flag: PermissionFlagsBits.ViewAuditLog, name: "View Audit Log" },
 ] as const;
 

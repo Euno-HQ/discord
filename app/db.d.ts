@@ -10,6 +10,26 @@ export type Generated<T> =
     ? ColumnType<S, I | undefined, U>
     : ColumnType<T, T | undefined, T>;
 
+export interface ApplicationConfig {
+  channel_id: string;
+  guild_id: string;
+  message_id: string;
+  role_id: string;
+}
+
+export interface Applications {
+  created_at: string;
+  guild_id: string;
+  id: string;
+  log_message_id: string | null;
+  resolved_at: string | null;
+  review_message_id: string | null;
+  reviewed_by: string | null;
+  status: Generated<string>;
+  thread_id: string;
+  user_id: string;
+}
+
 export interface ChannelInfo {
   category: string | null;
   category_id: string | null;
@@ -158,6 +178,8 @@ export interface UserThreads {
 }
 
 export interface DB {
+  application_config: ApplicationConfig;
+  applications: Applications;
   channel_info: ChannelInfo;
   deletion_log_threads: DeletionLogThreads;
   escalation_records: EscalationRecords;
