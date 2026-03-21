@@ -11,7 +11,13 @@ import { logEffect } from "#~/effects/observability.ts";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server.ts";
 
 import { analyzeBehavior } from "./behaviorAnalyzer.ts";
-import { analyzeContent } from "./contentAnalyzer.ts";
+import {
+  analyzeContent,
+  buildContentHash,
+  buildEmbedBody,
+  buildEmbedText,
+  hasLinkInContentOrEmbeds,
+} from "./contentAnalyzer.ts";
 import {
   cleanupTracker,
   getRecentMessages,
@@ -167,42 +173,17 @@ export const SpamDetectionServiceLive = Layer.effect(
           const content = message.content;
 
           // Build a text representation of all embeds for hashing and analysis
-          const embedText = message.embeds
-            .map((e) =>
-              [e.url, e.title, e.description].filter(Boolean).join(" "),
-            )
-            .join(" ")
-            .toLowerCase()
-            .trim();
-
-          const embedBody = message.embeds
-            .map((e) =>
-              [
-                e.url,
-                e.title,
-                e.description,
-                e.footer?.text,
-                ...e.fields.map((f) => `${f.name} ${f.value}`),
-              ]
-                .filter(Boolean)
-                .join(" "),
-            )
-            .join(" ");
-
-          const hasLink =
-            content.includes("http") ||
-            message.embeds.some((e) => e.url != null);
+          const embedText = buildEmbedText(message.embeds);
+          const embedBody = buildEmbedBody(message.embeds);
+          const hasLink = hasLinkInContentOrEmbeds(content, message.embeds);
 
           // Record in activity tracker
-          const attachmentIds = Array.from(message.attachments.keys())
-            .sort()
-            .join(",");
-          const baseContent = [content.toLowerCase().trim(), embedText]
-            .filter(Boolean)
-            .join(" ");
-          const contentHash = attachmentIds
-            ? `${baseContent}::attachments:${attachmentIds}`
-            : baseContent;
+          const attachmentIds = Array.from(message.attachments.keys());
+          const contentHash = buildContentHash(
+            content,
+            embedText,
+            attachmentIds,
+          );
           recordMessage(tracker, guildId, userId, {
             messageId: message.id,
             channelId: message.channelId,

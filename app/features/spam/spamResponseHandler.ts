@@ -28,7 +28,7 @@ import { AUTO_KICK_THRESHOLD, type SpamVerdict } from "./spamScorer.ts";
  * This threshold indicates an account is likely compromised and being used to spam
  * across multiple communities simultaneously.
  */
-const CROSS_GUILD_SPAM_THRESHOLD = 3;
+export const CROSS_GUILD_SPAM_THRESHOLD = 3;
 
 /**
  * In-memory set tracking users who have already been sent a cross-guild DM this session.

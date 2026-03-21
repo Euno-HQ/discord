@@ -26,7 +26,7 @@ import { fetchGuild } from "#~/models/guilds.server";
 
 // --- State management ---
 
-interface PendingSetup {
+export interface PendingSetup {
   modRoleId?: string; // undefined until selected (required)
   modLogChannel: string; // channel ID or CREATE_SENTINEL
   deletionLogChannel: string | null; // channel ID, CREATE_SENTINEL, or null (disabled)
@@ -54,7 +54,7 @@ function cleanupStaleSetups() {
   }
 }
 
-function defaultSetup(): Omit<PendingSetup, "createdAt"> {
+export function defaultSetup(): Omit<PendingSetup, "createdAt"> {
   return {
     modRoleId: undefined,
     modLogChannel: CREATE_SENTINEL,
@@ -82,7 +82,10 @@ type FieldKey = keyof typeof FIELD_MAP;
 
 // --- Helper functions ---
 
-function channelValue(value: string | null, createLabel: string): string {
+export function channelValue(
+  value: string | null,
+  createLabel: string,
+): string {
   if (value === null) return "Disabled";
   if (value === CREATE_SENTINEL) return `Create new #${createLabel}`;
   return `<#${value}>`;
@@ -95,7 +98,7 @@ const OPTIONAL_CHANNELS = [
   { field: "applications", label: "Member Applications" },
 ] as const;
 
-function buildFeatureToggleRow(guildId: string, state: PendingSetup) {
+export function buildFeatureToggleRow(guildId: string, state: PendingSetup) {
   return {
     type: ComponentType.ActionRow,
     components: OPTIONAL_CHANNELS.map(({ field, label }) => {
@@ -410,7 +413,7 @@ function roleValue(roleId: string | undefined): string {
   return roleId ? `<@&${roleId}>` : "None";
 }
 
-function buildPermWarnings(permCheck?: SetupPermissionCheckResult) {
+export function buildPermWarnings(permCheck?: SetupPermissionCheckResult) {
   if (!permCheck) return [];
 
   const lines: string[] = [];
@@ -441,7 +444,7 @@ function buildPermWarnings(permCheck?: SetupPermissionCheckResult) {
   ];
 }
 
-function buildSetupConfirmMessage(
+export function buildSetupConfirmMessage(
   guildId: string,
   state: PendingSetup,
   permCheck?: SetupPermissionCheckResult,

@@ -1,4 +1,9 @@
-import { analyzeContent } from "./contentAnalyzer";
+import {
+  analyzeContent,
+  buildEmbedBody,
+  buildEmbedText,
+  hasLinkInContentOrEmbeds,
+} from "./contentAnalyzer";
 import { computeVerdict } from "./spamScorer";
 
 /** Helper: run content through the full scoring pipeline */
@@ -79,49 +84,8 @@ test("mass ping detection", () => {
 });
 
 // ── Embed content tests ──
-// These tests exercise the embed text extraction logic that service.ts applies
-// before calling analyzeContent. We replicate the same inline transformation
-// here so we can test it without spinning up the full Effect runtime.
-
-/** Mirrors the embedText extraction in service.ts */
-function buildEmbedText(
-  embeds: {
-    url?: string | null;
-    title?: string | null;
-    description?: string | null;
-  }[],
-): string {
-  return embeds
-    .map((e) => [e.url, e.title, e.description].filter(Boolean).join(" "))
-    .join(" ")
-    .toLowerCase()
-    .trim();
-}
-
-/** Mirrors the embedBody extraction in service.ts */
-function buildEmbedBody(
-  embeds: {
-    url?: string | null;
-    title?: string | null;
-    description?: string | null;
-    footer?: { text?: string | null } | null;
-    fields?: { name: string; value: string }[];
-  }[],
-): string {
-  return embeds
-    .map((e) =>
-      [
-        e.url,
-        e.title,
-        e.description,
-        e.footer?.text,
-        ...(e.fields ?? []).map((f) => `${f.name} ${f.value}`),
-      ]
-        .filter(Boolean)
-        .join(" "),
-    )
-    .join(" ");
-}
+// These tests exercise the embed text extraction and content hashing logic
+// exported from contentAnalyzer.ts and used by service.ts.
 
 test("embed-only message produces a non-empty content hash", () => {
   const embeds = [
@@ -176,17 +140,12 @@ test("hasLink detects links in embed URLs even when message.content is empty", (
     },
   ];
 
-  // Mirrors: content.includes("http") || message.embeds.some((e) => e.url != null)
-  const hasLink = content.includes("http") || embeds.some((e) => e.url != null);
-
-  expect(hasLink).toBe(true);
+  expect(hasLinkInContentOrEmbeds(content, embeds)).toBe(true);
 });
 
 test("hasLink is false when content has no http and embeds have no url", () => {
   const content = "just a plain message";
   const embeds = [{ url: null, title: "No link here", description: null }];
 
-  const hasLink = content.includes("http") || embeds.some((e) => e.url != null);
-
-  expect(hasLink).toBe(false);
+  expect(hasLinkInContentOrEmbeds(content, embeds)).toBe(false);
 });
