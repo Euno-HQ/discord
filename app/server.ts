@@ -118,7 +118,7 @@ const startup = Effect.gen(function* () {
     globalThis.__discordOneTimeSetupDone = true;
 
     yield* Effect.tryPromise({
-      try: () => Promise.allSettled([deployCommands(discordClient)]),
+      try: () => deployCommands(discordClient),
       catch: (error) =>
         new DiscordApiError({ operation: "init", cause: error }),
     });

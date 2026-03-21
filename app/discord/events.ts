@@ -4,7 +4,6 @@ import type {
   GuildBan,
   GuildMember,
   GuildTextBasedChannel,
-  Interaction,
   Message,
   MessageReaction,
   PartialGuildMember,
@@ -12,7 +11,6 @@ import type {
   PartialMessageReaction,
   PartialUser,
   ReadonlyCollection,
-  ThreadChannel,
   User,
 } from "discord.js";
 
@@ -53,11 +51,6 @@ export interface GuildMessageBulkDelete {
 }
 
 // --- Raw events (not enriched, passed through as-is) ---
-
-export interface InteractionCreateEvent {
-  readonly type: "InteractionCreate";
-  readonly interaction: Interaction;
-}
 
 export interface GuildBanAddEvent {
   readonly type: "GuildBanAdd";
@@ -107,10 +100,7 @@ export interface MessageReactionRemoveEvent {
   readonly user: User | PartialUser;
 }
 
-export interface ThreadCreateEvent {
-  readonly type: "ThreadCreate";
-  readonly thread: ThreadChannel;
-}
+// Note: InteractionCreate and ThreadCreate are handled directly in gateway.ts, not through the event bus.
 
 // --- Union type ---
 
@@ -122,7 +112,6 @@ export type GuildMessageEvent =
 
 export type DiscordEvent =
   | GuildMessageEvent
-  | InteractionCreateEvent
   | GuildBanAddEvent
   | GuildBanRemoveEvent
   | GuildMemberRemoveEvent
@@ -131,8 +120,7 @@ export type DiscordEvent =
   | GuildDeleteEvent
   | AutoModerationActionEvent
   | MessageReactionAddEvent
-  | MessageReactionRemoveEvent
-  | ThreadCreateEvent;
+  | MessageReactionRemoveEvent;
 
 // --- Type guards ---
 

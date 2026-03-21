@@ -2,10 +2,10 @@ import { describe, expect, test } from "vitest";
 
 import {
   isGuildMessageEvent,
+  type GuildBanAddEvent,
   type GuildMemberMessage,
   type GuildMessageBulkDelete,
   type GuildMessageDelete,
-  type InteractionCreateEvent,
 } from "./events";
 
 describe("isGuildMessageEvent", () => {
@@ -24,8 +24,8 @@ describe("isGuildMessageEvent", () => {
     expect(isGuildMessageEvent(event)).toBe(true);
   });
 
-  test("returns false for InteractionCreate", () => {
-    const event = { type: "InteractionCreate" } as InteractionCreateEvent;
+  test("returns false for GuildBanAdd", () => {
+    const event = { type: "GuildBanAdd" } as GuildBanAddEvent;
     expect(isGuildMessageEvent(event)).toBe(false);
   });
 });
