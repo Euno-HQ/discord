@@ -2,8 +2,7 @@ import { ChannelType, type Guild, type TextChannel } from "discord.js";
 import { Effect } from "effect";
 
 import type { RuntimeContext } from "#~/AppRuntime";
-import { client } from "#~/discord/client.server";
-import { deployCommands } from "#~/discord/deployCommands.server";
+import { deployToGuild } from "#~/discord/deployCommands.server";
 import type { GuildCreateEvent, GuildDeleteEvent } from "#~/discord/events";
 import { logEffect } from "#~/effects/observability";
 import { botStats } from "#~/helpers/metrics";
@@ -80,7 +79,7 @@ export const handleGuildCreate = (
     });
 
     yield* Effect.tryPromise({
-      try: () => deployCommands(client),
+      try: () => deployToGuild(e.guild.id, e.guild.name),
       catch: (err) => err,
     });
 

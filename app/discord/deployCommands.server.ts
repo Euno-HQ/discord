@@ -178,6 +178,43 @@ export const deployTestCommands = async (
   );
 };
 
+export const deployToGuild = async (guildId: string, guildName?: string) => {
+  const localCommands = [...commands.values()]
+    .filter(
+      (c) =>
+        isSlashCommand(c) ||
+        isUserContextCommand(c) ||
+        isMessageContextCommand(c),
+    )
+    .map(({ command }) => command);
+
+  const guildCommands = (await ssrDiscordSdk.get(
+    Routes.applicationGuildCommands(applicationId, guildId),
+  )) as APIApplicationCommand[];
+
+  const changes = calculateChangedCommands(localCommands, guildCommands);
+  console.log(
+    `${guildName ?? guildId} (${localCommands.length} local): ${
+      changes.didCommandsChange
+        ? `Upserting ${localCommands.length} commands.`
+        : "No command updates."
+    } ${
+      changes.toDelete.length > 0
+        ? `Deleting ${changes.toDelete.join(", ")}`
+        : ""
+    }`,
+  );
+  await applyCommandChanges(
+    localCommands,
+    changes.toDelete,
+    changes.didCommandsChange,
+    guildCommands.length,
+    () => Routes.applicationGuildCommands(applicationId, guildId),
+    (commandId: string) =>
+      Routes.applicationGuildCommand(applicationId, guildId, commandId),
+  );
+};
+
 // Use globalThis so the commands Map survives HMR module reloads.
 // The InteractionCreate handler in gateway.ts is registered once and holds a
 // closure over matchCommand — if we used a module-level Map, the handler would
