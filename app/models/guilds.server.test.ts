@@ -123,3 +123,102 @@ describe("setSettings coalesce fix", () => {
     expect(settings.quorum).toBe(5);
   });
 });
+
+describe("registerGuild", () => {
+  test("registers a new guild with settings = '{}'", async () => {
+    const { registerGuild } = await loadModule();
+
+    await registerGuild("guild-new");
+
+    const row = rawDb
+      .prepare("SELECT id, settings FROM guilds WHERE id = ?")
+      .get("guild-new") as { id: string; settings: string };
+    expect(row).toBeDefined();
+    expect(row.id).toBe("guild-new");
+    expect(row.settings).toBe("{}");
+  });
+
+  test("calling registerGuild twice with the same ID doesn't error", async () => {
+    const { registerGuild } = await loadModule();
+
+    await registerGuild("guild-dup");
+    await expect(registerGuild("guild-dup")).resolves.not.toThrow();
+  });
+
+  test("second registerGuild doesn't overwrite existing settings", async () => {
+    const { registerGuild, setSettings, fetchGuild } = await loadModule();
+
+    await registerGuild("guild-keep");
+    await setSettings("guild-keep", {
+      modLog: "ch-keep",
+      moderator: "role-keep",
+    });
+
+    // Re-register the same guild
+    await registerGuild("guild-keep");
+
+    const guild = await fetchGuild("guild-keep");
+    expect(guild).toBeDefined();
+    const settings = JSON.parse(guild!.settings!);
+    expect(settings.modLog).toBe("ch-keep");
+    expect(settings.moderator).toBe("role-keep");
+  });
+});
+
+describe("fetchGuild", () => {
+  test("returns the guild with correct id and settings after registration", async () => {
+    const { registerGuild, fetchGuild } = await loadModule();
+
+    await registerGuild("guild-fetch");
+
+    const guild = await fetchGuild("guild-fetch");
+    expect(guild).toBeDefined();
+    expect(guild!.id).toBe("guild-fetch");
+    expect(guild!.settings).toBe("{}");
+  });
+
+  test("returns undefined for a non-existent guild", async () => {
+    const { fetchGuild } = await loadModule();
+
+    const guild = await fetchGuild("guild-nonexistent");
+    expect(guild).toBeUndefined();
+  });
+});
+
+describe("fetchSettings key extraction", () => {
+  test("returns correct values for requested keys", async () => {
+    const { registerGuild, setSettings, fetchSettings, SETTINGS } =
+      await loadModule();
+
+    await registerGuild("guild-settings");
+    await setSettings("guild-settings", {
+      modLog: "ch-1",
+      moderator: "role-1",
+    });
+
+    const result = await fetchSettings("guild-settings", [
+      SETTINGS.moderator,
+      SETTINGS.modLog,
+    ]);
+    expect(result.moderator).toBe("role-1");
+    expect(result.modLog).toBe("ch-1");
+  });
+
+  test("returns null for a key that wasn't set", async () => {
+    const { registerGuild, setSettings, fetchSettings, SETTINGS } =
+      await loadModule();
+
+    await registerGuild("guild-partial");
+    await setSettings("guild-partial", {
+      modLog: "ch-2",
+      moderator: "role-2",
+    });
+
+    const result = await fetchSettings("guild-partial", [
+      SETTINGS.moderator,
+      SETTINGS.deletionLog,
+    ]);
+    expect(result.moderator).toBe("role-2");
+    expect(result.deletionLog).toBeNull();
+  });
+});
