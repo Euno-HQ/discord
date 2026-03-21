@@ -4,8 +4,7 @@ import { botStats } from "#~/helpers/metrics";
 import { retry } from "#~/helpers/misc";
 import { fetchGuild } from "#~/models/guilds.server";
 
-import { client } from "./client.server";
-import { deployCommands } from "./deployCommands.server";
+import { deployToGuild } from "./deployCommands.server";
 
 export default async (bot: Client) => {
   // This is called any time the bot comes online, when a server becomes
@@ -16,7 +15,7 @@ export default async (bot: Client) => {
     if (appGuild) return;
 
     // New installation - deploy commands and send welcome message
-    await deployCommands(client);
+    await deployToGuild(guild.id, guild.name);
 
     const welcomeMessage = `Euno is here! Run \`/setup\` to get started.`;
 

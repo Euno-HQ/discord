@@ -85,7 +85,7 @@ export class DbFixture {
       .insertInto("guilds")
       .values({
         id: guildId,
-        settings: null,
+        settings: JSON.stringify({}),
       })
       .execute();
 
