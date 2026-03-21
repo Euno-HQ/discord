@@ -23,6 +23,7 @@ export type ModActionReport =
       executor: User | PartialUser | null;
       reason: string;
       duration: string;
+      isAutomod?: boolean;
     }
   | {
       guild: Guild;
@@ -78,11 +79,18 @@ export const logModAction = (report: ModActionReport) =>
       left: "left",
     };
     const actionLabel = actionLabels[actionType];
+    const isAutomod = "isAutomod" in report && report.isAutomod === true;
     const executorMention = executor
       ? ` by <@${executor.id}> (${executor.username})`
-      : " by unknown";
+      : isAutomod
+        ? " by AutoMod"
+        : " by unknown";
 
-    const reasonText = reason ? ` ${reason}` : " for no reason";
+    const reasonText = reason
+      ? ` ${reason}`
+      : isAutomod
+        ? ""
+        : " for no reason";
     const durationText =
       actionType === "timeout" ? ` for ${report.duration}` : "";
 
