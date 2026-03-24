@@ -24,6 +24,7 @@ import {
 
 import {
   banUser,
+  banUserAndDeleteMessages,
   deleteMessages,
   kickUser,
   restrictUser,
@@ -338,6 +339,43 @@ export const EscalationHandlers = {
         }).pipe(() =>
           interactionReply(interaction, {
             content: "Failed to ban user",
+            flags: [MessageFlags.Ephemeral],
+          }).pipe(Effect.catchAll(() => Effect.void)),
+        ),
+      ),
+    ),
+  banAndDelete: (interaction: MessageComponentInteraction) =>
+    Effect.gen(function* () {
+      const reportedUserId = interaction.customId.split("|")[1];
+
+      const result = yield* banUserAndDeleteMessages(interaction);
+
+      yield* interactionReply(
+        interaction,
+        `<@${reportedUserId}> banned + messages deleted by ${result.actionBy}`,
+      );
+    }).pipe(
+      Effect.withSpan("escalation-banUserAndDeleteMessages", {
+        attributes: {
+          guildId: interaction.guildId,
+          userId: interaction.user.id,
+        },
+      }),
+      Effect.catchTag("NotAuthorizedError", () =>
+        interactionReply(interaction, {
+          content: "Insufficient permissions",
+          flags: [MessageFlags.Ephemeral],
+        }).pipe(Effect.catchAll(() => Effect.void)),
+      ),
+      Effect.catchAll((error) =>
+        logEffect(
+          "error",
+          "EscalationHandlers",
+          "Error banning user and deleting messages",
+          { error },
+        ).pipe(() =>
+          interactionReply(interaction, {
+            content: "Failed to ban user and delete messages",
             flags: [MessageFlags.Ephemeral],
           }).pipe(Effect.catchAll(() => Effect.void)),
         ),

@@ -60,6 +60,74 @@ function getUserMentionCount(content: string): number {
   return mentions ? new Set(mentions).size : 0;
 }
 
+// ── Embed extraction & content hashing (pure helpers used by service.ts) ──
+
+export interface EmbedLike {
+  url?: string | null;
+  title?: string | null;
+  description?: string | null;
+  footer?: { text?: string | null } | null;
+  fields?: { name: string; value: string }[];
+}
+
+/**
+ * Build a compact text representation of embed URLs, titles, and descriptions.
+ * Used for content hashing (duplicate detection).
+ */
+export function buildEmbedText(embeds: EmbedLike[]): string {
+  return embeds
+    .map((e) => [e.url, e.title, e.description].filter(Boolean).join(" "))
+    .join(" ")
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * Build a full text representation of all embed content including footer and fields.
+ * Used for content analysis (spam keyword detection).
+ */
+export function buildEmbedBody(embeds: EmbedLike[]): string {
+  return embeds
+    .map((e) =>
+      [
+        e.url,
+        e.title,
+        e.description,
+        e.footer?.text,
+        ...(e.fields ?? []).map((f) => `${f.name} ${f.value}`),
+      ]
+        .filter(Boolean)
+        .join(" "),
+    )
+    .join(" ");
+}
+
+/**
+ * Build a content hash for duplicate detection.
+ * Combines normalized message text, embed text, and attachment IDs.
+ */
+export function buildContentHash(
+  content: string,
+  embedText: string,
+  attachmentIds: string[],
+): string {
+  const baseContent = [content.toLowerCase().trim(), embedText]
+    .filter(Boolean)
+    .join(" ");
+  const sortedIds = [...attachmentIds].sort().join(",");
+  return sortedIds ? `${baseContent}::attachments:${sortedIds}` : baseContent;
+}
+
+/**
+ * Check if a message or its embeds contain a link.
+ */
+export function hasLinkInContentOrEmbeds(
+  content: string,
+  embeds: EmbedLike[],
+): boolean {
+  return content.includes("http") || embeds.some((e) => e.url != null);
+}
+
 /** Analyze message content and return scored signals */
 export function analyzeContent(content: string): SpamSignal[] {
   const signals: SpamSignal[] = [];

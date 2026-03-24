@@ -11,6 +11,7 @@ import { createRequestHandler } from "@react-router/express";
 import { Command as checkRequirements } from "#~/commands/checkRequirements";
 import { EscalationCommands } from "#~/commands/escalationControls";
 import { Command as forceBan } from "#~/commands/force-ban";
+import { Command as memberApplications } from "#~/commands/memberApplications";
 import { Command as modreport } from "#~/commands/modreport";
 import { Command as report } from "#~/commands/report";
 import modActionLogger from "#~/commands/report/modActionLogger";
@@ -32,6 +33,7 @@ import { initDiscordBot } from "#~/discord/gateway";
 import onboardGuild from "#~/discord/onboardGuild";
 import { startReactjiChanneler } from "#~/discord/reactjiChanneler";
 import { applicationKey } from "#~/helpers/env.server";
+import { runJobPoller } from "#~/jobs/jobRunner";
 
 import { runtime } from "./AppRuntime";
 import { checkpointWal, runIntegrityCheck } from "./Database";
@@ -93,6 +95,7 @@ const startup = Effect.gen(function* () {
     registerCommand(SetupComponentCommands),
     registerCommand(checkRequirements),
     registerCommand(modreport),
+    registerCommand(memberApplications),
   ]);
 
   yield* logEffect("debug", "Server", "initializing Discord bot");
@@ -114,6 +117,7 @@ const startup = Effect.gen(function* () {
 
   // Start escalation resolver scheduler (must be after client is ready)
   startEscalationResolver(discordClient);
+  runtime.runFork(runJobPoller);
 
   yield* logEffect("info", "Gateway", "Gateway initialization completed", {
     guildCount: discordClient.guilds.cache.size,

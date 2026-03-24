@@ -1,4 +1,6 @@
+import { Routes } from "discord-api-types/v10";
 import {
+  ComponentType,
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
@@ -6,6 +8,7 @@ import {
 import { Effect } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
+import { ssrDiscordSdk as rest } from "#~/discord/api";
 import {
   fetchChannel,
   interactionDeferReply,
@@ -17,10 +20,59 @@ import type { SlashCommand } from "#~/helpers/discord";
 import { commandStats } from "#~/helpers/metrics";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 
-interface CheckResult {
+export interface CheckResult {
   name: string;
   ok: boolean;
+  optional?: boolean;
   detail: string;
+}
+
+/**
+ * Build a CheckResult for a configured log channel.
+ * Returns null when the channel ID is configured but the channel no longer
+ * exists — deleted channels are not actionable from this command, so callers
+ * should silently skip a null return value instead of surfacing a failure.
+ */
+export function buildLogChannelResult(
+  name: string,
+  channelId: string | undefined,
+  fetchedChannelId: string | null,
+  unconfiguredDetail: string,
+): CheckResult | null {
+  if (!channelId) {
+    return { name, ok: false, detail: unconfiguredDetail };
+  }
+  if (!fetchedChannelId) {
+    // Configured but deleted — not actionable here, skip silently.
+    return null;
+  }
+  return { name, ok: true, detail: `<#${fetchedChannelId}>` };
+}
+
+/**
+ * Build the honeypot CheckResult given the set of valid (fetched) channel IDs.
+ * Missing channel IDs (configured but deleted) are simply absent from
+ * `validChannelIds`; they are silently skipped rather than surfaced as failures.
+ */
+export function buildHoneypotResult(
+  configuredCount: number,
+  validChannelIds: string[],
+): CheckResult {
+  if (configuredCount === 0) {
+    return {
+      name: "Honeypot",
+      ok: false,
+      detail: "No honeypot channels configured",
+    };
+  }
+  return {
+    name: "Honeypot",
+    ok: validChannelIds.length > 0,
+    detail:
+      validChannelIds.length > 0
+        ? validChannelIds.map((id) => `<#${id}>`).join(", ")
+        : "No honeypot channels found",
+  };
 }
 
 export const Command = {
@@ -94,45 +146,38 @@ export const Command = {
       }
 
       // --- Mod-log channel ---
-      if (settings?.modLog) {
-        const ch = yield* fetchChannel(guild, settings.modLog).pipe(
-          Effect.catchAll(() => Effect.succeed(null)),
+      {
+        const ch = settings?.modLog
+          ? yield* fetchChannel(guild, settings.modLog).pipe(
+              Effect.catchAll(() => Effect.succeed(null)),
+            )
+          : null;
+        const result = buildLogChannelResult(
+          "Mod Log Channel",
+          settings?.modLog,
+          ch?.id ?? null,
+          "Not configured",
         );
-
-        results.push({
-          name: "Mod Log Channel",
-          ok: !!ch,
-          detail: ch
-            ? `<#${ch.id}>`
-            : `Channel \`${settings.modLog}\` not found`,
-        });
-      } else {
-        results.push({
-          name: "Mod Log Channel",
-          ok: false,
-          detail: "Not configured",
-        });
+        if (result) results.push(result);
       }
 
       // --- Deletion-log channel (optional) ---
-      if (settings?.deletionLog) {
-        const ch = yield* fetchChannel(guild, settings.deletionLog).pipe(
-          Effect.catchAll(() => Effect.succeed(null)),
+      {
+        const ch = settings?.deletionLog
+          ? yield* fetchChannel(guild, settings.deletionLog).pipe(
+              Effect.catchAll(() => Effect.succeed(null)),
+            )
+          : null;
+        const result = buildLogChannelResult(
+          "Deletion Log Channel",
+          settings?.deletionLog,
+          ch?.id ?? null,
+          "Not configured (optional but recommended)",
         );
-
-        results.push({
-          name: "Deletion Log Channel",
-          ok: !!ch,
-          detail: ch
-            ? `<#${ch.id}>`
-            : `Channel \`${settings.deletionLog}\` not found`,
-        });
-      } else {
-        results.push({
-          name: "Deletion Log Channel",
-          ok: false,
-          detail: "Not configured (optional but recommended)",
-        });
+        if (result) {
+          if (!result.ok) result.optional = true;
+          results.push(result);
+        }
       }
 
       // --- Restricted role (optional) ---
@@ -152,6 +197,7 @@ export const Command = {
         results.push({
           name: "Restricted Role",
           ok: false,
+          optional: true,
           detail: "Not configured (optional)",
         });
       }
@@ -163,31 +209,18 @@ export const Command = {
         .selectAll()
         .where("guild_id", "=", guildId);
 
-      if (honeypotRows.length === 0) {
-        results.push({
-          name: "Honeypot",
-          ok: false,
-          detail: "No honeypot channels configured",
-        });
-      } else {
-        let validCount = 0;
-        const details: string[] = [];
+      {
+        const validChannelIds: string[] = [];
         for (const row of honeypotRows) {
           const ch = yield* fetchChannel(guild, row.channel_id).pipe(
             Effect.catchAll(() => Effect.succeed(null)),
           );
           if (ch) {
-            validCount++;
-            details.push(`<#${ch.id}>`);
-          } else {
-            details.push(`\`${row.channel_id}\` (missing)`);
+            validChannelIds.push(ch.id);
           }
+          // Silently skip deleted/missing channels — they're not actionable here.
         }
-        results.push({
-          name: "Honeypot",
-          ok: validCount > 0,
-          detail: details.join(", "),
-        });
+        results.push(buildHoneypotResult(honeypotRows.length, validChannelIds));
       }
 
       // --- Ticket configuration ---
@@ -225,8 +258,147 @@ export const Command = {
         });
       }
 
-      // --- Bot permissions ---
       const botMember = guild.members.me;
+
+      // --- Member applications ---
+      const appConfigRows = yield* db
+        .selectFrom("application_config")
+        .selectAll()
+        .where("guild_id", "=", guildId);
+      const appConfig = appConfigRows[0];
+
+      if (appConfig) {
+        // Check channel exists and has correct permissions
+        const appCh = yield* fetchChannel(guild, appConfig.channel_id).pipe(
+          Effect.catchAll(() => Effect.succeed(null)),
+        );
+
+        if (!appCh) {
+          results.push({
+            name: "Application Channel",
+            ok: false,
+            detail: `Channel \`${appConfig.channel_id}\` not found`,
+          });
+        } else {
+          const channelIssues: string[] = [];
+
+          // Check @everyone can view the channel
+          const everyoneOverwrite =
+            appCh.isTextBased() && "permissionOverwrites" in appCh
+              ? appCh.permissionOverwrites.cache.get(guildId)
+              : undefined;
+          if (!everyoneOverwrite?.allow.has(PermissionFlagsBits.ViewChannel)) {
+            channelIssues.push(
+              "@everyone missing ViewChannel allow on channel",
+            );
+          }
+
+          // Check @member is denied view
+          const memberOverwrite =
+            appCh.isTextBased() && "permissionOverwrites" in appCh
+              ? appCh.permissionOverwrites.cache.get(appConfig.role_id)
+              : undefined;
+          if (!memberOverwrite?.deny.has(PermissionFlagsBits.ViewChannel)) {
+            channelIssues.push(
+              "Member role missing ViewChannel deny on channel",
+            );
+          }
+
+          // Check bot has required permissions on channel
+          if (botMember && "permissionsFor" in appCh) {
+            const botPerms = appCh.permissionsFor(botMember);
+            const needed = [
+              { flag: PermissionFlagsBits.ViewChannel, name: "ViewChannel" },
+              { flag: PermissionFlagsBits.SendMessages, name: "SendMessages" },
+              {
+                flag: PermissionFlagsBits.CreatePrivateThreads,
+                name: "CreatePrivateThreads",
+              },
+              {
+                flag: PermissionFlagsBits.ManageThreads,
+                name: "ManageThreads",
+              },
+            ];
+            const missingPerms = needed.filter(
+              ({ flag }) => !botPerms.has(flag),
+            );
+            if (missingPerms.length > 0) {
+              channelIssues.push(
+                `Bot missing: ${missingPerms.map((p) => p.name).join(", ")}`,
+              );
+            }
+          }
+
+          results.push({
+            name: "Application Channel",
+            ok: channelIssues.length === 0,
+            detail:
+              channelIssues.length === 0
+                ? `<#${appCh.id}>`
+                : `<#${appCh.id}> — ${channelIssues.join("; ")}`,
+          });
+        }
+
+        // Check button message still exists
+        const buttonMsg = yield* Effect.tryPromise(() =>
+          rest.get(
+            Routes.channelMessage(appConfig.channel_id, appConfig.message_id),
+          ),
+        ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+
+        results.push({
+          name: "Apply Button",
+          ok: !!buttonMsg,
+          detail: buttonMsg
+            ? "Button message present"
+            : "Button message not found — run `/setup` to recreate",
+        });
+
+        // Check @everyone has ViewChannel denied server-wide
+        const everyoneRole = yield* Effect.tryPromise(() =>
+          guild.roles.fetch(guildId),
+        ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+
+        if (everyoneRole) {
+          const hasViewDenied = !everyoneRole.permissions.has(
+            PermissionFlagsBits.ViewChannel,
+          );
+          results.push({
+            name: "Channel Gating",
+            ok: hasViewDenied,
+            detail: hasViewDenied
+              ? "@everyone denied ViewChannel (server-wide)"
+              : "@everyone still has ViewChannel — channels are not gated",
+          });
+        }
+
+        // Check member role exists and bot can manage it
+        const memberRole = yield* Effect.tryPromise(() =>
+          guild.roles.fetch(appConfig.role_id),
+        ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+
+        if (!memberRole) {
+          results.push({
+            name: "Member Role",
+            ok: false,
+            detail: `Role \`${appConfig.role_id}\` not found`,
+          });
+        } else {
+          const botHighest = botMember?.roles.highest;
+          const canManage =
+            botHighest && botHighest.position > memberRole.position;
+
+          results.push({
+            name: "Member Role",
+            ok: !!canManage,
+            detail: canManage
+              ? `<@&${memberRole.id}>`
+              : `<@&${memberRole.id}> — bot's role must be above this role to assign it`,
+          });
+        }
+      }
+
+      // --- Bot permissions ---
       if (botMember) {
         const missing = REQUIRED_PERMISSIONS.filter(
           ({ flag }) => !botMember.permissions.has(flag),
@@ -249,37 +421,44 @@ export const Command = {
       }
 
       // --- Build result ---
-      const allOk = results.every((r) => r.ok);
-      const requiredFailing = results
-        .filter(
-          (r) =>
-            !r.ok &&
-            !r.name.includes("Restricted") &&
-            !r.name.includes("Deletion"),
-        )
-        .map((r) => r.name);
+      const hasRequiredFailure = results.some((r) => !r.ok && !r.optional);
+
+      function icon(r: CheckResult): string {
+        if (r.ok) return "🟢";
+        if (r.optional) return "🔵";
+        return "🔴";
+      }
+
+      const lines = results.map((r) => `${icon(r)} ${r.name}: ${r.detail}`);
 
       yield* interactionEditReply(interaction, {
-        embeds: [
+        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+        components: [
           {
-            title: "Euno Configuration Check",
-            color: requiredFailing.length === 0 ? 0x00cc00 : 0xcc0000,
-            fields: results.map((r) => ({
-              name: `${r.ok ? "\u2713" : "\u2717"} ${r.name}`,
-              value: r.detail,
-              inline: true,
-            })),
-            footer: {
-              text:
-                requiredFailing.length === 0
-                  ? allOk
-                    ? "All checks passed"
-                    : "Core features configured. Optional features noted above."
-                  : "Run /setup to fix configuration",
-            },
+            type: ComponentType.Container,
+            accent_color: hasRequiredFailure ? 0xcc0000 : 0x00cc00,
+            components: [
+              {
+                type: ComponentType.TextDisplay,
+                content: "## Euno Configuration Check",
+              },
+              { type: ComponentType.Separator },
+              {
+                type: ComponentType.TextDisplay,
+                content: lines.join("\n"),
+              },
+              { type: ComponentType.Separator },
+              {
+                type: ComponentType.TextDisplay,
+                content: hasRequiredFailure
+                  ? "Run `/setup` to fix configuration"
+                  : "All required checks passed",
+              },
+            ],
           },
         ],
-      });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Components V2 types not fully supported by discord.js
+      } as any);
 
       commandStats.commandExecuted(interaction, "check-requirements", true);
     }).pipe(

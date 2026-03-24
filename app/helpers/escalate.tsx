@@ -33,6 +33,10 @@ export async function escalationControls(
           .setCustomId(`escalate-ban|${reportedUserId}`)
           .setLabel("Ban")
           .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`escalate-ban-delete|${reportedUserId}`)
+          .setLabel("Ban + Delete (7d)")
+          .setStyle(ButtonStyle.Danger),
       ),
     )
     .addActionRowComponents(

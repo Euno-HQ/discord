@@ -386,9 +386,22 @@ export async function refreshDiscordSession(request: Request) {
   const dbSession = await getDbSession(request.headers.get("Cookie"));
   const token = await retrieveDiscordToken(request);
   const newToken = await token.refresh();
-  dbSession.set(CookieSessionKeys.discordToken, JSON.stringify(newToken));
+  // @ts-expect-error token.toJSON() isn't in the types but it works
+  dbSession.set(CookieSessionKeys.discordToken, newToken.toJSON());
 
   return dbSession;
+}
+
+/**
+ * Refresh the Discord OAuth token and persist the updated session to the DB.
+ * Returns the `Set-Cookie` header value that must be sent back to the client so
+ * future requests read the new token instead of the expired one.
+ */
+export async function refreshAndPersistDiscordSession(
+  request: Request,
+): Promise<string> {
+  const session = await refreshDiscordSession(request);
+  return commitDbSession(session);
 }
 
 export async function logout(request: Request) {

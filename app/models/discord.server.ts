@@ -32,6 +32,13 @@ export async function fetchUser(access: AccessToken): Promise<DiscordUserInfo> {
   const res = await fetch("https://discord.com/api/users/@me", {
     headers: { authorization: `${tokenType} ${accessToken}` },
   });
+
+  if (!res.ok) {
+    throw new Error(
+      `Discord API returned ${res.status} ${res.statusText} for /users/@me`,
+    );
+  }
+
   const {
     id,
     username,
@@ -85,12 +92,19 @@ export const kick = async (member: GuildMember | null, reason: string) => {
   return member.guild.members.kick(member, reason);
 };
 
-export const ban = async (member: GuildMember | null, reason: string) => {
+export const ban = async (
+  member: GuildMember | null,
+  reason: string,
+  deleteMessageSeconds?: number,
+) => {
   if (!member) {
     console.log("Tried to ban a null member");
     return;
   }
-  return member.guild.bans.create(member, { reason });
+  return member.guild.bans.create(member, {
+    reason,
+    ...(deleteMessageSeconds !== undefined && { deleteMessageSeconds }),
+  });
 };
 
 const OVERNIGHT = 1000 * 60 * 60 * 20;
