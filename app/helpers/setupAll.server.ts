@@ -6,7 +6,6 @@ import {
   PermissionFlagsBits,
   Routes,
   type APIChannel,
-  type APIGuildMember,
   type APIMessage,
   type APIRole,
   type RESTPostAPIGuildChannelJSONBody,
@@ -18,6 +17,7 @@ import { DEFAULT_BUTTON_TEXT } from "#~/commands/setupTickets";
 import { ssrDiscordSdk } from "#~/discord/api";
 import { applicationId } from "#~/helpers/env.server";
 import { log } from "#~/helpers/observability";
+import { createJob } from "#~/jobs/jobRunner";
 import { registerGuild, setSettings, SETTINGS } from "#~/models/guilds.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
@@ -256,77 +256,31 @@ export async function setupAll(
         ),
     );
 
-    // Steps 7–9: Bulk-assign @member role then update permissions.
-    // This runs in the background so setup returns immediately.
+    // Create a persistent background job for bulk role assignment.
+    // The job will scan for the final cursor on first execution, then
+    // assign the role in batches with checkpointing, and finally update
+    // permissions once all members have the role.
     const bulkRoleId = resolvedMemberRoleId;
-    log("info", "setupAll", "Starting background member-role assignment", {
+    await createJob({
       guildId,
+      jobType: "bulk_role_assignment",
+      payload: {
+        roleId: bulkRoleId,
+        everyonePermissions: String(everyonePerms),
+        memberPermissions: String(memberPerms),
+      },
+      totalPhases: 2,
+      notifyChannelId: modLogChannelId,
     });
-    void (async () => {
-      try {
-        // Step 7: Bulk-assign @member to all current members (before changing @everyone)
-        let after = "0";
-        let assigned = 0;
-        while (true) {
-          const members = (await ssrDiscordSdk.get(
-            Routes.guildMembers(guildId),
-            {
-              query: new URLSearchParams({ limit: "1000", after }),
-            },
-          )) as APIGuildMember[];
 
-          if (members.length === 0) break;
-
-          for (const member of members) {
-            if (!member.user) continue; // skip partial member objects
-            if (member.user.bot) continue; // skip bots
-            try {
-              await ssrDiscordSdk.put(
-                Routes.guildMemberRole(guildId, member.user.id, bulkRoleId),
-              );
-              assigned++;
-            } catch {
-              // Member may have left or role hierarchy issue — log and continue
-              log("warn", "setupAll", "Failed to assign member role", {
-                guildId,
-                userId: member.user?.id,
-              });
-            }
-          }
-
-          after = members[members.length - 1].user.id;
-          if (members.length < 1000) break;
-        }
-
-        // Step 8: Deny ViewChannel on @everyone
-        await ssrDiscordSdk.patch(Routes.guildRole(guildId, guildId), {
-          body: {
-            permissions: String(
-              everyonePerms &
-                ~PermissionFlagsBits.ViewChannel &
-                ~PermissionFlagsBits.MentionEveryone,
-            ),
-          },
-        });
-
-        // Step 9: Grant ViewChannel on @member role
-        await ssrDiscordSdk.patch(Routes.guildRole(guildId, bulkRoleId), {
-          body: {
-            permissions: String(memberPerms | PermissionFlagsBits.ViewChannel),
-          },
-        });
-
-        log("info", "setupAll", "Background member-role assignment complete", {
-          guildId,
-          assigned,
-        });
-      } catch (err) {
-        log("error", "setupAll", "Background member-role assignment failed", {
-          guildId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    })();
+    log(
+      "info",
+      "setupAll",
+      "Created background job for member-role assignment",
+      {
+        guildId,
+      },
+    );
   }
 
   // --- Save guild settings ---

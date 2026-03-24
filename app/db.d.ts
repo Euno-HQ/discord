@@ -30,6 +30,25 @@ export interface Applications {
   user_id: string;
 }
 
+export interface BackgroundJobs {
+  completed_at: string | null;
+  created_at: string;
+  cursor: string | null;
+  error_count: Generated<number>;
+  final_cursor: string | null;
+  guild_id: string;
+  id: string;
+  job_type: string;
+  last_error: string | null;
+  notify_channel_id: string | null;
+  payload: string;
+  phase: Generated<number>;
+  progress_count: Generated<number>;
+  status: Generated<string>;
+  total_phases: Generated<number>;
+  updated_at: string;
+}
+
 export interface ChannelInfo {
   category: string | null;
   category_id: string | null;
@@ -180,6 +199,7 @@ export interface UserThreads {
 export interface DB {
   application_config: ApplicationConfig;
   applications: Applications;
+  background_jobs: BackgroundJobs;
   channel_info: ChannelInfo;
   deletion_log_threads: DeletionLogThreads;
   escalation_records: EscalationRecords;

@@ -33,6 +33,7 @@ import { initDiscordBot } from "#~/discord/gateway";
 import onboardGuild from "#~/discord/onboardGuild";
 import { startReactjiChanneler } from "#~/discord/reactjiChanneler";
 import { applicationKey } from "#~/helpers/env.server";
+import { runJobPoller } from "#~/jobs/jobRunner";
 
 import { runtime } from "./AppRuntime";
 import { checkpointWal, runIntegrityCheck } from "./Database";
@@ -116,6 +117,7 @@ const startup = Effect.gen(function* () {
 
   // Start escalation resolver scheduler (must be after client is ready)
   startEscalationResolver(discordClient);
+  runtime.runFork(runJobPoller);
 
   yield* logEffect("info", "Gateway", "Gateway initialization completed", {
     guildCount: discordClient.guilds.cache.size,
