@@ -136,6 +136,12 @@ export const Command = [
               "Error setting up tickets",
               { error },
             );
+
+            yield* interactionReply(interaction, {
+              content:
+                "Failed to set up tickets. Check bot permissions and try again.",
+              flags: MessageFlags.Ephemeral,
+            }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
         Effect.withSpan("ticketsChannelCommand", {
