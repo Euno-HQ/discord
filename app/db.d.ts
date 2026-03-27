@@ -125,6 +125,16 @@ export interface ModActions {
   user_id: string;
 }
 
+export interface PendingTicketClosures {
+  closed_by_user_id: string;
+  created_at: Generated<string>;
+  guild_id: string;
+  id: string;
+  opener_user_id: string;
+  scheduled_for: string;
+  thread_id: string;
+}
+
 export interface ReactjiChannelerConfig {
   channel_id: string;
   configured_by_id: string;
@@ -190,6 +200,7 @@ export interface DB {
   message_cache: MessageCache;
   message_stats: MessageStats;
   mod_actions: ModActions;
+  pending_ticket_closures: PendingTicketClosures;
   reactji_channeler_config: ReactjiChannelerConfig;
   reported_messages: ReportedMessages;
   sessions: Sessions;

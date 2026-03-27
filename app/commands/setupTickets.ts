@@ -341,10 +341,22 @@ export const Command = [
         const { user } = interaction.member;
         const interactionUserId = user.id;
 
+        const db = yield* DatabaseService;
+        const CLOSE_DELAY_MINUTES = 5;
+        const scheduledFor = new Date(
+          Date.now() + CLOSE_DELAY_MINUTES * 60 * 1000,
+        ).toISOString();
+
         yield* Effect.all([
-          Effect.tryPromise(() =>
-            rest.delete(Routes.threadMembers(threadId, ticketOpenerUserId)),
-          ),
+          // Schedule the opener removal in the DB so it survives restarts
+          db.insertInto("pending_ticket_closures").values({
+            id: crypto.randomUUID() as string,
+            thread_id: threadId,
+            opener_user_id: ticketOpenerUserId,
+            closed_by_user_id: interactionUserId,
+            guild_id: interaction.guild.id,
+            scheduled_for: scheduledFor,
+          }),
           Effect.tryPromise(() =>
             rest.post(Routes.channelMessages(modLog), {
               body: {
@@ -354,7 +366,7 @@ export const Command = [
             }),
           ),
           interactionReply(interaction, {
-            content: `The ticket was closed by <@${interactionUserId}>`,
+            content: `The ticket was closed by <@${interactionUserId}>. <@${ticketOpenerUserId}> will be removed from this thread in ${CLOSE_DELAY_MINUTES} minutes.`,
             allowedMentions: {},
           }),
         ]);
