@@ -1,0 +1,7 @@
+# Variable configuration for kustomize
+
+varReference:
+  - path: spec/template/spec/containers/image
+    kind: Deployment
+  - path: spec/template/spec/containers/image
+    kind: StatefulSet
