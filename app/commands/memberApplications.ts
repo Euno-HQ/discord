@@ -1,4 +1,11 @@
-import { ButtonStyle, Routes, TextInputStyle } from "discord-api-types/v10";
+import {
+  ButtonStyle,
+  OverwriteType,
+  PermissionFlagsBits,
+  Routes,
+  TextInputStyle,
+  type APIRole,
+} from "discord-api-types/v10";
 import {
   ActionRowBuilder,
   ChannelType,
@@ -12,7 +19,12 @@ import { Effect } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
 import { ssrDiscordSdk as rest } from "#~/discord/api";
-import { fetchChannel, interactionReply } from "#~/effects/discordSdk.ts";
+import {
+  fetchChannel,
+  interactionReply,
+  interactionUpdate,
+} from "#~/effects/discordSdk.ts";
+import { DiscordApiError } from "#~/effects/errors.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import {
   hasModRole,
@@ -20,6 +32,7 @@ import {
   type MessageComponentCommand,
   type ModalCommand,
 } from "#~/helpers/discord";
+import { activateMembershipGateEffect } from "#~/jobs/bulkRoleAssignment";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 import { getOrCreateUserThread } from "#~/models/userThreads";
 
@@ -799,6 +812,168 @@ export const Command = [
           }),
         ),
         Effect.withSpan("appRetract", {
+          attributes: {
+            guildId: interaction.guildId,
+            userId: interaction.user.id,
+          },
+        }),
+      ),
+  } satisfies MessageComponentCommand,
+
+  {
+    command: {
+      type: InteractionType.MessageComponent,
+      name: "activate-gate",
+    },
+    handler: (interaction) =>
+      Effect.gen(function* () {
+        const [, guildId] = interaction.customId.split("|");
+
+        if (!interaction.guild || !interaction.member) {
+          yield* interactionReply(interaction, {
+            content: "Something went wrong",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Verify the user has the moderator role
+        const { [SETTINGS.moderator]: modRoleId } = yield* fetchSettingsEffect(
+          guildId,
+          [SETTINGS.moderator],
+        );
+        if (!hasModRole(interaction, modRoleId)) {
+          yield* interactionReply(interaction, {
+            content: "Only moderators can activate the membership gate.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Load application_config to get role_id
+        const db = yield* DatabaseService;
+        const [config] = yield* db
+          .selectFrom("application_config")
+          .selectAll()
+          .where("guild_id", "=", guildId);
+
+        if (!config) {
+          yield* interactionReply(interaction, {
+            content:
+              "Application config not found. Re-run `/setup` to configure.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Fetch current role permissions from Discord API
+        const roles = (yield* Effect.tryPromise({
+          try: () => rest.get(Routes.guildRoles(guildId)),
+          catch: (error) =>
+            new DiscordApiError({ operation: "fetchGuildRoles", cause: error }),
+        })) as APIRole[];
+
+        const everyoneRole = roles.find((r) => r.id === guildId);
+        const memberRole = roles.find((r) => r.id === config.role_id);
+
+        if (!everyoneRole || !memberRole) {
+          yield* interactionReply(interaction, {
+            content:
+              "Could not find required roles. Re-run `/setup` to configure.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Idempotency check: if @everyone already has ViewChannel denied, gate is active
+        const everyonePerms = BigInt(everyoneRole.permissions);
+        if ((everyonePerms & PermissionFlagsBits.ViewChannel) === 0n) {
+          yield* interactionUpdate(interaction, {
+            flags: MessageFlags.IsComponentsV2,
+            components: [
+              {
+                type: ComponentType.Container,
+                accent_color: 0x57f287, // green
+                components: [
+                  {
+                    type: ComponentType.TextDisplay,
+                    content: `## Membership gate is active\n\nThe membership gate was already activated.`,
+                  },
+                ],
+              },
+            ],
+          });
+          return;
+        }
+
+        // Run the gate activation
+        yield* activateMembershipGateEffect({
+          guildId,
+          roleId: config.role_id,
+          everyonePermissions: everyoneRole.permissions,
+          memberPermissions: memberRole.permissions,
+        });
+
+        // Reveal #apply-here to @everyone now that the gate is active
+        yield* Effect.tryPromise({
+          try: () =>
+            rest.put(Routes.channelPermission(config.channel_id, guildId), {
+              body: {
+                type: OverwriteType.Role,
+                allow: String(
+                  PermissionFlagsBits.ViewChannel |
+                    PermissionFlagsBits.ReadMessageHistory,
+                ),
+                deny: String(
+                  PermissionFlagsBits.SendMessages |
+                    PermissionFlagsBits.CreatePublicThreads |
+                    PermissionFlagsBits.CreatePrivateThreads,
+                ),
+              },
+            }),
+          catch: (error) =>
+            new DiscordApiError({
+              operation: "revealApplyHere",
+              cause: error,
+            }),
+        });
+
+        // On success: replace the message with confirmation
+        yield* interactionUpdate(interaction, {
+          flags: MessageFlags.IsComponentsV2,
+          components: [
+            {
+              type: ComponentType.Container,
+              accent_color: 0x57f287, // green
+              components: [
+                {
+                  type: ComponentType.TextDisplay,
+                  content: `## Membership gate activated\n\nThe membership gate has been activated by <@${interaction.user.id}>. New members will only see the application channel until approved.`,
+                },
+              ],
+            },
+          ],
+        });
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            yield* logEffect(
+              "error",
+              "MembershipGate",
+              "Failed to activate gate",
+              {
+                guildId: interaction.guildId,
+                error: String(error),
+              },
+            );
+            yield* interactionReply(interaction, {
+              content:
+                "Gate activation failed. The button is still active — you can try again.",
+              flags: MessageFlags.Ephemeral,
+            }).pipe(Effect.catchAll(() => Effect.void));
+          }),
+        ),
+        Effect.withSpan("activateGate", {
           attributes: {
             guildId: interaction.guildId,
             userId: interaction.user.id,

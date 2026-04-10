@@ -136,6 +136,12 @@ export const Command = [
               "Error setting up tickets",
               { error },
             );
+
+            yield* interactionReply(interaction, {
+              content:
+                "Failed to set up tickets. Check bot permissions and try again.",
+              flags: MessageFlags.Ephemeral,
+            }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
         Effect.withSpan("ticketsChannelCommand", {
@@ -188,6 +194,19 @@ export const Command = [
           !interaction.guild ||
           !interaction.message
         ) {
+          yield* logEffect(
+            "error",
+            "TicketsModal",
+            "Guard failed in modal-open-ticket",
+            {
+              hasChannel: !!interaction.channel,
+              channelType: interaction.channel?.type,
+              hasGuild: !!interaction.guild,
+              hasMessage: !!interaction.message,
+              interactionId: interaction.id,
+              customId: interaction.customId,
+            },
+          );
           yield* interactionReply(interaction, {
             content: "Something went wrong while creating a ticket",
             flags: MessageFlags.Ephemeral,

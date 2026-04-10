@@ -565,10 +565,20 @@ export function buildSetupConfirmMessage(
   });
 }
 
-const EXPIRED_MESSAGE = {
-  content: "Setup session expired. Please run `/setup` again.",
-  components: [],
-};
+const EXPIRED_MESSAGE = v2Update({
+  flags: MessageFlags.IsComponentsV2,
+  components: [
+    {
+      type: ComponentType.Container,
+      components: [
+        {
+          type: ComponentType.TextDisplay,
+          content: "Setup session expired. Please run `/setup` again.",
+        },
+      ],
+    },
+  ],
+});
 
 const button = (name: string) => ({
   type: InteractionType.MessageComponent as const,
@@ -629,10 +639,8 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
-            const err =
-              error instanceof Error ? error : new Error(String(error));
             yield* logEffect("error", "Commands", "setup-sel handler failed", {
-              error: err,
+              error: String(error),
             });
           }),
         ),
@@ -687,18 +695,30 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
-            const err =
-              error instanceof Error ? error : new Error(String(error));
             yield* logEffect(
               "error",
               "Commands",
               "setup-continue handler failed",
-              { error: err },
+              { error },
             );
-            yield* interactionUpdate(interaction, {
-              content: `Setup failed: ${err.message}`,
-              components: [],
-            }).pipe(Effect.catchAll(() => Effect.void));
+            yield* interactionUpdate(
+              interaction,
+              v2Update({
+                flags: MessageFlags.IsComponentsV2,
+                components: [
+                  {
+                    type: ComponentType.Container,
+                    accent_color: 0xed4245,
+                    components: [
+                      {
+                        type: ComponentType.TextDisplay,
+                        content: `Setup failed. Please try again or contact an admin.`,
+                      },
+                    ],
+                  },
+                ],
+              }),
+            ).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
         Effect.withSpan("setupContinueHandler"),
@@ -730,10 +750,8 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
-            const err =
-              error instanceof Error ? error : new Error(String(error));
             yield* logEffect("error", "Commands", "setup-back handler failed", {
-              error: err,
+              error,
             });
           }),
         ),
@@ -816,6 +834,8 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
             : []),
         ];
 
+        const isAsyncSetup = !!result.applicationChannelId;
+
         yield* interactionEditReply(
           interaction,
           v2Update({
@@ -823,16 +843,24 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
             components: [
               {
                 type: ComponentType.Container,
-                accent_color: 0x00cc00,
+                accent_color: isAsyncSetup ? 0x5865f2 : 0x00cc00,
                 components: [
                   {
                     type: ComponentType.TextDisplay,
-                    content: "## Setup Complete ✓",
+                    content: isAsyncSetup
+                      ? "## Setup in Progress"
+                      : "## Setup Complete ✓",
                   },
                   {
                     type: ComponentType.TextDisplay,
-                    content:
-                      "All channels and features have been configured. Run `/check-requirements` to verify everything is working.",
+                    content: isAsyncSetup
+                      ? `Created channels and roles. The following will happen automatically:\n\n` +
+                        `1. The **Member** role is being assigned to all existing members. This can take several hours for large servers.\n` +
+                        `2. Progress updates will be posted to <#${result.modLogChannelId}> every 30 minutes.\n` +
+                        `3. When complete, a button will appear in <#${result.modLogChannelId}> to activate the membership gate.\n` +
+                        `4. The **#apply-here** channel is hidden until you activate the gate.\n\n` +
+                        `Until the gate is activated, the server will continue to work normally.`
+                      : "All channels and features have been configured. Run `/check-requirements` to verify everything is working.",
                   },
                   { type: ComponentType.Separator },
                   {
@@ -847,13 +875,10 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
-            const err =
-              error instanceof Error ? error : new Error(String(error));
-
             yield* logEffect("error", "Commands", "setup-exec handler failed", {
               guildId: interaction.guildId,
               userId: interaction.user.id,
-              error: err,
+              error,
             });
 
             yield* interactionEditReply(
@@ -867,7 +892,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
                     components: [
                       {
                         type: ComponentType.TextDisplay,
-                        content: `Setup failed. Run \`/check-requirements\` to see what was configured.\n\`\`\`\n${err.toString()}\n\`\`\``,
+                        content: `Setup failed. Run \`/check-requirements\` to see what was configured.`,
                       },
                     ],
                   },

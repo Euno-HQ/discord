@@ -19,10 +19,10 @@ import { DatabaseService } from "#~/Database";
 import type { DB } from "#~/db";
 
 import {
+  activateMembershipGateEffect,
   executeJobEffect,
   processBatchEffect,
   scanFinalCursorEffect,
-  updatePermissionsEffect,
 } from "./bulkRoleAssignment";
 import type { Job } from "./jobRunner";
 
@@ -50,17 +50,21 @@ vi.mock("#~/helpers/observability", () => ({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyEffectFn = (...args: any[]) => Effect.Effect<void>;
 const mockCheckpointJob = vi.fn<AnyEffectFn>(() => Effect.void);
-const mockAdvancePhase = vi.fn<AnyEffectFn>(() => Effect.void);
 const mockCompleteJob = vi.fn<AnyEffectFn>(() => Effect.void);
 const mockFailJob = vi.fn<AnyEffectFn>(() => Effect.void);
 const mockRecordJobError = vi.fn<AnyEffectFn>(() => Effect.void);
 
 vi.mock("./jobRunner", () => ({
   checkpointJobEffect: (...args: unknown[]) => mockCheckpointJob(...args),
-  advancePhaseEffect: (...args: unknown[]) => mockAdvancePhase(...args),
   completeJobEffect: (...args: unknown[]) => mockCompleteJob(...args),
   failJobEffect: (...args: unknown[]) => mockFailJob(...args),
   recordJobErrorEffect: (...args: unknown[]) => mockRecordJobError(...args),
+  registerJobHandler: () => {
+    /* noop for test */
+  },
+  registerNotificationBuilder: () => {
+    /* noop for test */
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -132,7 +136,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "9999999999999999999" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 3 },
         batchSize: 1000,
       }),
     );
@@ -157,7 +161,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "1099511627778" },
+        finalCursor: { lastMemberId: "1099511627778", memberCount: 2 },
         batchSize: 1000,
       }),
     );
@@ -178,7 +182,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "9999999999999999999" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 3 },
         batchSize: 1000,
       }),
     );
@@ -201,7 +205,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "9999999999999999999" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 3 },
         batchSize: 1000,
       }),
     );
@@ -222,7 +226,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "9999999999999999999" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 3 },
         batchSize: 1000,
       }),
     );
@@ -239,7 +243,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "9999999999999999999" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 3 },
         batchSize: 1000,
       }),
     );
@@ -263,6 +267,7 @@ describe("scanFinalCursorEffect", () => {
 
     const result = await Effect.runPromise(scanFinalCursorEffect("guild-1"));
     expect(result.lastMemberId).toBe("1099511628800");
+    expect(result.memberCount).toBe(1001);
     expect(mockGet).toHaveBeenCalledTimes(2);
   });
 
@@ -270,16 +275,17 @@ describe("scanFinalCursorEffect", () => {
     mockGet.mockResolvedValue([]);
     const result = await Effect.runPromise(scanFinalCursorEffect("guild-1"));
     expect(result.lastMemberId).toBe("0");
+    expect(result.memberCount).toBe(0);
   });
 });
 
-describe("updatePermissionsEffect", () => {
+describe("activateMembershipGateEffect", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("grants member role ViewChannel then denies @everyone", async () => {
     mockPatch.mockResolvedValue(undefined);
     await Effect.runPromise(
-      updatePermissionsEffect({
+      activateMembershipGateEffect({
         guildId: "guild-1",
         roleId: "role-1",
         everyonePermissions: String(
@@ -302,7 +308,7 @@ describe("updatePermissionsEffect", () => {
     mockPatch.mockRejectedValueOnce(new Error("role hierarchy"));
     await expect(
       Effect.runPromise(
-        updatePermissionsEffect({
+        activateMembershipGateEffect({
           guildId: "guild-1",
           roleId: "role-1",
           everyonePermissions: String(PermissionFlagsBits.ViewChannel),
@@ -321,7 +327,7 @@ describe("updatePermissionsEffect", () => {
 
     await expect(
       Effect.runPromise(
-        updatePermissionsEffect({
+        activateMembershipGateEffect({
           guildId: "guild-1",
           roleId: "role-1",
           everyonePermissions: String(PermissionFlagsBits.ViewChannel),
@@ -348,7 +354,7 @@ function makeJob(overrides: Partial<Record<string, unknown>> = {}) {
     cursor: null,
     final_cursor: null,
     phase: 1,
-    total_phases: 2,
+    total_phases: 1,
     progress_count: 0,
     error_count: 0,
     last_error: null,
@@ -379,7 +385,6 @@ describe("executeJobEffect", () => {
 
     expect(mockPut).toHaveBeenCalledTimes(2); // 2 members assigned
     expect(mockCheckpointJob).toHaveBeenCalled();
-    expect(mockAdvancePhase).toHaveBeenCalled();
     expect(mockCompleteJob).toHaveBeenCalled();
   });
 
@@ -398,7 +403,6 @@ describe("executeJobEffect", () => {
     await runTest(executeJobEffect(makeJob() as unknown as Job));
 
     expect(mockFailJob).toHaveBeenCalled();
-    expect(mockAdvancePhase).not.toHaveBeenCalled();
   });
 
   it("phase 1: resumes from existing cursor and final_cursor", async () => {
@@ -413,7 +417,10 @@ describe("executeJobEffect", () => {
       executeJobEffect(
         makeJob({
           cursor: JSON.stringify({ after: "1099511627777" }),
-          final_cursor: JSON.stringify({ lastMemberId: "1099511627778" }),
+          final_cursor: JSON.stringify({
+            lastMemberId: "1099511627778",
+            memberCount: 2,
+          }),
           progress_count: 500,
         }) as unknown as Job,
       ),
@@ -422,22 +429,5 @@ describe("executeJobEffect", () => {
     // Should NOT scan — final_cursor already set, so first GET is the batch
     expect(mockGet).toHaveBeenCalledTimes(1);
     expect(mockPut).toHaveBeenCalledTimes(1);
-  });
-
-  it("phase 2: calls updatePermissions and completes", async () => {
-    mockPatch.mockResolvedValue(undefined);
-
-    await runTest(executeJobEffect(makeJob({ phase: 2 }) as unknown as Job));
-
-    expect(mockPatch).toHaveBeenCalledTimes(2); // grant + deny
-    expect(mockCompleteJob).toHaveBeenCalled();
-  });
-
-  it("phase 2: fails job if updatePermissions throws", async () => {
-    mockPatch.mockRejectedValue(new Error("role hierarchy"));
-
-    await runTest(executeJobEffect(makeJob({ phase: 2 }) as unknown as Job));
-
-    expect(mockFailJob).toHaveBeenCalled();
   });
 });

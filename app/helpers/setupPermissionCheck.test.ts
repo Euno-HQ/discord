@@ -1,8 +1,21 @@
 import { PermissionFlagsBits, type Guild, type GuildMember } from "discord.js";
+import { vi } from "vitest";
 
 import { CREATE_SENTINEL } from "#~/helpers/setupAll.server";
 
 import { checkSetupPermissions } from "./setupPermissionCheck";
+
+// Mock the job runner to prevent side-effects from bulkRoleAssignment's
+// top-level registerNotificationBuilder call during import.
+vi.mock("#~/jobs/jobRunner", () => ({
+  registerJobHandler: () => {
+    /* noop for test */
+  },
+  registerNotificationBuilder: () => {
+    /* noop for test */
+  },
+  createJob: vi.fn(),
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers to build lightweight fakes
