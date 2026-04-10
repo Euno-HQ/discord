@@ -834,6 +834,8 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
             : []),
         ];
 
+        const isAsyncSetup = !!result.applicationChannelId;
+
         yield* interactionEditReply(
           interaction,
           v2Update({
@@ -841,16 +843,19 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
             components: [
               {
                 type: ComponentType.Container,
-                accent_color: 0x00cc00,
+                accent_color: isAsyncSetup ? 0x5865f2 : 0x00cc00,
                 components: [
                   {
                     type: ComponentType.TextDisplay,
-                    content: "## Setup Complete ✓",
+                    content: isAsyncSetup
+                      ? "## Setup in Progress"
+                      : "## Setup Complete ✓",
                   },
                   {
                     type: ComponentType.TextDisplay,
-                    content:
-                      "All channels and features have been configured. Run `/check-requirements` to verify everything is working.",
+                    content: isAsyncSetup
+                      ? `Created channels and roles. Now assigning the Member role to all existing members — this can take several hours for large servers.\n\nYou'll be notified in <#${result.modLogChannelId}> when the role assignment is complete. From there, you can activate the membership gate.`
+                      : "All channels and features have been configured. Run `/check-requirements` to verify everything is working.",
                   },
                   { type: ComponentType.Separator },
                   {
