@@ -1,5 +1,5 @@
 import { Routes } from "discord-api-types/v10";
-import { Effect, Fiber, FiberRef, Schedule } from "effect";
+import { Deferred, Effect, Fiber, FiberRef } from "effect";
 import type { Selectable } from "kysely";
 
 import { runEffect } from "#~/AppRuntime";
@@ -229,6 +229,8 @@ export const createJobEffect = (options: CreateJobOptions) =>
       guildId: options.guildId,
     });
 
+    yield* notifyJobAvailable;
+
     return job;
   }).pipe(
     Effect.withSpan("createJob", {
@@ -271,21 +273,49 @@ const handlers: Record<string, JobHandler> = {
   bulk_role_assignment: executeJobEffect,
 };
 
+// ---------------------------------------------------------------------------
+// Notification builders — per-job-type rich message support
+// ---------------------------------------------------------------------------
+
+export type JobNotificationBuilder = (
+  job: Job,
+) => Record<string, unknown> | null;
+
+const notificationBuilders: Record<string, JobNotificationBuilder> = {};
+
+export const registerNotificationBuilder = (
+  jobType: string,
+  builder: JobNotificationBuilder,
+) => {
+  notificationBuilders[jobType] = builder;
+};
+
 const notifyChannelEffect = (channelId: string, job: Job) =>
   Effect.gen(function* () {
-    const message =
-      job.status === "completed"
-        ? `Background job completed: **${job.job_type}** — ${job.progress_count} members processed.`
-        : job.status === "failed"
-          ? `Background job failed: **${job.job_type}** — ${job.last_error}`
-          : null;
+    let body: Record<string, unknown> | null = null;
 
-    if (!message) return;
+    const customBuilder = notificationBuilders[job.job_type];
+    if (customBuilder) {
+      body = customBuilder(job);
+    } else {
+      const message =
+        job.status === "completed"
+          ? `Background job completed: **${job.job_type}** — ${job.progress_count} members processed.`
+          : job.status === "failed"
+            ? `Background job failed: **${job.job_type}** — ${job.last_error}`
+            : null;
+
+      if (message) {
+        body = { content: message };
+      }
+    }
+
+    if (!body) return;
 
     yield* Effect.tryPromise({
       try: () =>
         ssrDiscordSdk.post(Routes.channelMessages(channelId), {
-          body: { content: message },
+          body,
         }),
       catch: (error) =>
         new DiscordApiError({ operation: "notifyChannel", cause: error }),
@@ -354,7 +384,33 @@ export const pollAndExecuteEffect = Effect.gen(function* () {
   Effect.withSpan("pollAndExecute"),
 );
 
-export const runJobPoller = pollAndExecuteEffect.pipe(
-  Effect.repeat(Schedule.fixed("30 seconds")),
-  Effect.catchAll(() => Effect.succeed(null)),
-);
+// ---------------------------------------------------------------------------
+// Signal-driven job runner — waits for a signal instead of polling
+// ---------------------------------------------------------------------------
+
+let jobSignal: Deferred.Deferred<void> | null = null;
+
+/** Signal the runner that a new job is available. */
+const notifyJobAvailable = Effect.gen(function* () {
+  if (jobSignal) {
+    yield* Deferred.succeed(jobSignal, void 0 as void);
+  }
+});
+
+/**
+ * Runs forever, waiting for `notifyJobAvailable` signals.
+ * On boot, runs once immediately to pick up any incomplete jobs from a prior crash.
+ */
+export const runJobRunner = Effect.gen(function* () {
+  // Resume any incomplete jobs left over from a prior crash
+  yield* pollAndExecuteEffect;
+
+  // Then wait for signals
+  while (true) {
+    const signal = yield* Deferred.make<void>();
+    jobSignal = signal;
+    yield* Deferred.await(signal);
+    jobSignal = null;
+    yield* pollAndExecuteEffect;
+  }
+}).pipe(Effect.catchAll(() => Effect.succeed(null)));
