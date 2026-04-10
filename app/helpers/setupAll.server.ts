@@ -185,14 +185,19 @@ export async function setupAll(
           {
             id: guildId,
             type: OverwriteType.Role,
+            deny: String(
+              PermissionFlagsBits.ViewChannel |
+                PermissionFlagsBits.SendMessages |
+                PermissionFlagsBits.CreatePublicThreads |
+                PermissionFlagsBits.CreatePrivateThreads,
+            ),
+          },
+          {
+            id: moderatorRoleId,
+            type: OverwriteType.Role,
             allow: String(
               PermissionFlagsBits.ViewChannel |
                 PermissionFlagsBits.ReadMessageHistory,
-            ),
-            deny: String(
-              PermissionFlagsBits.SendMessages |
-                PermissionFlagsBits.CreatePublicThreads |
-                PermissionFlagsBits.CreatePrivateThreads,
             ),
           },
           {

@@ -1,5 +1,7 @@
 import {
   ButtonStyle,
+  OverwriteType,
+  PermissionFlagsBits,
   Routes,
   TextInputStyle,
   type APIRole,
@@ -11,7 +13,6 @@ import {
   InteractionType,
   MessageFlags,
   ModalBuilder,
-  PermissionFlagsBits,
   TextInputBuilder,
 } from "discord.js";
 import { Effect } from "effect";
@@ -913,6 +914,30 @@ export const Command = [
           memberPermissions: memberRole.permissions,
         });
 
+        // Reveal #apply-here to @everyone now that the gate is active
+        yield* Effect.tryPromise({
+          try: () =>
+            rest.put(Routes.channelPermission(config.channel_id, guildId), {
+              body: {
+                type: OverwriteType.Role,
+                allow: String(
+                  PermissionFlagsBits.ViewChannel |
+                    PermissionFlagsBits.ReadMessageHistory,
+                ),
+                deny: String(
+                  PermissionFlagsBits.SendMessages |
+                    PermissionFlagsBits.CreatePublicThreads |
+                    PermissionFlagsBits.CreatePrivateThreads,
+                ),
+              },
+            }),
+          catch: (error) =>
+            new DiscordApiError({
+              operation: "revealApplyHere",
+              cause: error,
+            }),
+        });
+
         // On success: replace the message with confirmation
         yield* interactionUpdate(interaction, {
           flags: MessageFlags.IsComponentsV2,
@@ -942,7 +967,8 @@ export const Command = [
               },
             );
             yield* interactionReply(interaction, {
-              content: `Gate activation failed: ${String(error)}\n\nThe button is still active — you can try again.`,
+              content:
+                "Gate activation failed. The button is still active — you can try again.",
               flags: MessageFlags.Ephemeral,
             }).pipe(Effect.catchAll(() => Effect.void));
           }),
