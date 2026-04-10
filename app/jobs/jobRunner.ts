@@ -10,8 +10,6 @@ import { DiscordApiError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { jobMetaRef, type ActiveJobMeta } from "#~/effects/supervisor";
 
-import { executeJobEffect } from "./bulkRoleAssignment";
-
 export type Job = Selectable<DB["background_jobs"]>;
 
 // ---------------------------------------------------------------------------
@@ -269,8 +267,10 @@ type JobHandler = (
   job: Job,
 ) => Effect.Effect<void, DiscordApiError | SqlError, DatabaseService>;
 
-const handlers: Record<string, JobHandler> = {
-  bulk_role_assignment: executeJobEffect,
+const handlers: Record<string, JobHandler> = {};
+
+export const registerJobHandler = (jobType: string, handler: JobHandler) => {
+  handlers[jobType] = handler;
 };
 
 // ---------------------------------------------------------------------------
