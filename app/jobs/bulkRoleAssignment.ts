@@ -11,7 +11,6 @@ import { DiscordApiError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 
 import {
-  advancePhaseEffect,
   checkpointJobEffect,
   completeJobEffect,
   failJobEffect,
@@ -170,7 +169,9 @@ interface UpdatePermissionsOptions {
  * Order: grant ViewChannel on @member FIRST, then deny on @everyone.
  * Rolls back if the deny fails after grant succeeds.
  */
-export const updatePermissionsEffect = (options: UpdatePermissionsOptions) =>
+export const activateMembershipGateEffect = (
+  options: UpdatePermissionsOptions,
+) =>
   Effect.gen(function* () {
     const { guildId, roleId, everyonePermissions, memberPermissions } = options;
     const memberPerms = BigInt(memberPermissions);
@@ -268,8 +269,6 @@ export const executeJobEffect = (job: Job) =>
 
     if (job.phase === 1) {
       yield* executePhase1Effect(job, payload);
-    } else if (job.phase === 2) {
-      yield* executePhase2Effect(job, payload);
     }
   }).pipe(Effect.withSpan("executeJob", { attributes: { jobId: job.id } }));
 
@@ -352,37 +351,8 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
     yield* logEffect(
       "info",
       "BulkRoleAssignment",
-      "Phase 1 complete, advancing to phase 2",
+      "Phase 1 complete, role assignment finished",
       { jobId: job.id, assigned: totalAssigned },
     );
-    yield* advancePhaseEffect(job.id, 2);
-    yield* executePhase2Effect(job, payload);
+    yield* completeJobEffect(job.id);
   }).pipe(Effect.withSpan("executePhase1"));
-
-const executePhase2Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
-  Effect.gen(function* () {
-    const exit = yield* updatePermissionsEffect({
-      guildId: job.guild_id,
-      roleId: payload.roleId,
-      everyonePermissions: payload.everyonePermissions,
-      memberPermissions: payload.memberPermissions,
-    }).pipe(Effect.exit);
-
-    if (exit._tag === "Success") {
-      yield* completeJobEffect(job.id);
-      yield* logEffect(
-        "info",
-        "BulkRoleAssignment",
-        "Job completed successfully",
-        { jobId: job.id, guildId: job.guild_id },
-      );
-    } else {
-      const err = exit.cause;
-      yield* failJobEffect(
-        job.id,
-        `Permission update failed: ${String(err)}. ` +
-          `All members have the role but server permissions were not changed. ` +
-          `Re-run /setup or manually update @everyone permissions.`,
-      );
-    }
-  }).pipe(Effect.withSpan("executePhase2"));

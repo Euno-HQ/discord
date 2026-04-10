@@ -269,7 +269,7 @@ export async function setupAll(
         everyonePermissions: String(everyonePerms),
         memberPermissions: String(memberPerms),
       },
-      totalPhases: 2,
+      totalPhases: 1,
       notifyChannelId: modLogChannelId,
     });
 
