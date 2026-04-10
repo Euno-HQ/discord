@@ -3,6 +3,7 @@ import {
   Routes,
   type APIGuildMember,
 } from "discord-api-types/v10";
+import { ButtonStyle, ComponentType, MessageFlags } from "discord.js";
 import { Effect } from "effect";
 
 import { DatabaseService } from "#~/Database";
@@ -15,7 +16,9 @@ import {
   completeJobEffect,
   failJobEffect,
   recordJobErrorEffect,
+  registerNotificationBuilder,
   type Job,
+  type JobNotificationBuilder,
 } from "./jobRunner";
 
 export interface BulkRoleAssignmentCursor {
@@ -356,3 +359,72 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
     );
     yield* completeJobEffect(job.id);
   }).pipe(Effect.withSpan("executePhase1"));
+
+// ---------------------------------------------------------------------------
+// Notification builder — Components V2 message for mod-log
+// ---------------------------------------------------------------------------
+
+export const buildGateActivationNotification: JobNotificationBuilder = (
+  job,
+) => {
+  if (job.status === "completed") {
+    const payload = JSON.parse(job.payload) as BulkRoleAssignmentPayload;
+    return {
+      flags: MessageFlags.IsComponentsV2,
+      components: [
+        {
+          type: ComponentType.Container,
+          accent_color: 0x5865f2, // blurple
+          components: [
+            {
+              type: ComponentType.TextDisplay,
+              content: `## Member role assignment complete\n\nAssigned <@&${payload.roleId}> to **${job.progress_count}** existing members.`,
+            },
+            { type: ComponentType.Separator },
+            {
+              type: ComponentType.TextDisplay,
+              content:
+                "Click below when you're ready to activate the membership gate. This will:\n- Grant the member role permission to view channels\n- Deny @everyone permission to view channels (server-wide)\n\nNew members will only see the application channel until their application is approved.",
+            },
+            {
+              type: ComponentType.ActionRow,
+              components: [
+                {
+                  type: ComponentType.Button,
+                  label: "Activate Membership Gate",
+                  style: ButtonStyle.Primary,
+                  custom_id: `activate-gate|${job.guild_id}`,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  if (job.status === "failed") {
+    return {
+      flags: MessageFlags.IsComponentsV2,
+      components: [
+        {
+          type: ComponentType.Container,
+          accent_color: 0xed4245, // red
+          components: [
+            {
+              type: ComponentType.TextDisplay,
+              content: `## Member role assignment failed\n\n${job.last_error}\n\nThe membership gate has not been activated. Re-run \`/setup\` to retry.`,
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  return null;
+};
+
+registerNotificationBuilder(
+  "bulk_role_assignment",
+  buildGateActivationNotification,
+);
