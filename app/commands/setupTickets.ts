@@ -194,6 +194,19 @@ export const Command = [
           !interaction.guild ||
           !interaction.message
         ) {
+          yield* logEffect(
+            "error",
+            "TicketsModal",
+            "Guard failed in modal-open-ticket",
+            {
+              hasChannel: !!interaction.channel,
+              channelType: interaction.channel?.type,
+              hasGuild: !!interaction.guild,
+              hasMessage: !!interaction.message,
+              interactionId: interaction.id,
+              customId: interaction.customId,
+            },
+          );
           yield* interactionReply(interaction, {
             content: "Something went wrong while creating a ticket",
             flags: MessageFlags.Ephemeral,
