@@ -854,7 +854,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
                   {
                     type: ComponentType.TextDisplay,
                     content: isAsyncSetup
-                      ? `Created channels and roles. Now assigning the Member role to all existing members — this can take several hours for large servers.\n\nYou'll be notified in <#${result.modLogChannelId}> when the role assignment is complete. From there, you can activate the membership gate.`
+                      ? `Created channels and roles. The following will happen automatically:\n\n` +
+                        `1. The **Member** role is being assigned to all existing members. This can take several hours for large servers.\n` +
+                        `2. Progress updates will be posted to <#${result.modLogChannelId}> every 30 minutes.\n` +
+                        `3. When complete, a button will appear in <#${result.modLogChannelId}> to activate the membership gate.\n` +
+                        `4. The **#apply-here** channel is hidden until you activate the gate.\n\n` +
+                        `Until the gate is activated, the server will continue to work normally.`
                       : "All channels and features have been configured. Run `/check-requirements` to verify everything is working.",
                   },
                   { type: ComponentType.Separator },
