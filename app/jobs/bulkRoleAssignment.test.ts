@@ -59,6 +59,12 @@ vi.mock("./jobRunner", () => ({
   completeJobEffect: (...args: unknown[]) => mockCompleteJob(...args),
   failJobEffect: (...args: unknown[]) => mockFailJob(...args),
   recordJobErrorEffect: (...args: unknown[]) => mockRecordJobError(...args),
+  registerJobHandler: () => {
+    /* noop for test */
+  },
+  registerNotificationBuilder: () => {
+    /* noop for test */
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -130,7 +136,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "9999999999999999999" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 3 },
         batchSize: 1000,
       }),
     );
@@ -155,7 +161,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "1099511627778" },
+        finalCursor: { lastMemberId: "1099511627778", memberCount: 2 },
         batchSize: 1000,
       }),
     );
@@ -176,7 +182,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "9999999999999999999" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 3 },
         batchSize: 1000,
       }),
     );
@@ -199,7 +205,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "9999999999999999999" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 3 },
         batchSize: 1000,
       }),
     );
@@ -220,7 +226,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "9999999999999999999" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 3 },
         batchSize: 1000,
       }),
     );
@@ -237,7 +243,7 @@ describe("processBatchEffect", () => {
         guildId: "guild-1",
         roleId: "role-1",
         cursor: { after: "0" },
-        finalCursor: { lastMemberId: "9999999999999999999" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 3 },
         batchSize: 1000,
       }),
     );
@@ -261,6 +267,7 @@ describe("scanFinalCursorEffect", () => {
 
     const result = await Effect.runPromise(scanFinalCursorEffect("guild-1"));
     expect(result.lastMemberId).toBe("1099511628800");
+    expect(result.memberCount).toBe(1001);
     expect(mockGet).toHaveBeenCalledTimes(2);
   });
 
@@ -268,6 +275,7 @@ describe("scanFinalCursorEffect", () => {
     mockGet.mockResolvedValue([]);
     const result = await Effect.runPromise(scanFinalCursorEffect("guild-1"));
     expect(result.lastMemberId).toBe("0");
+    expect(result.memberCount).toBe(0);
   });
 });
 
@@ -409,7 +417,10 @@ describe("executeJobEffect", () => {
       executeJobEffect(
         makeJob({
           cursor: JSON.stringify({ after: "1099511627777" }),
-          final_cursor: JSON.stringify({ lastMemberId: "1099511627778" }),
+          final_cursor: JSON.stringify({
+            lastMemberId: "1099511627778",
+            memberCount: 2,
+          }),
           progress_count: 500,
         }) as unknown as Job,
       ),

@@ -1,9 +1,10 @@
 import {
+  ButtonStyle,
   PermissionFlagsBits,
   Routes,
   type APIGuildMember,
 } from "discord-api-types/v10";
-import { ButtonStyle, ComponentType, MessageFlags } from "discord.js";
+import { ComponentType, MessageFlags } from "discord.js";
 import { Effect } from "effect";
 
 import { DatabaseService } from "#~/Database";
@@ -16,6 +17,7 @@ import {
   completeJobEffect,
   failJobEffect,
   recordJobErrorEffect,
+  registerJobHandler,
   registerNotificationBuilder,
   type Job,
   type JobNotificationBuilder,
@@ -27,6 +29,7 @@ export interface BulkRoleAssignmentCursor {
 
 export interface BulkRoleAssignmentFinalCursor {
   lastMemberId: string;
+  memberCount: number;
 }
 
 export interface BulkRoleAssignmentPayload {
@@ -58,6 +61,7 @@ export const scanFinalCursorEffect = (guildId: string) =>
   Effect.gen(function* () {
     let lastMemberId = "0";
     let after = "0";
+    let memberCount = 0;
     while (true) {
       const page = (yield* Effect.tryPromise({
         try: () =>
@@ -68,6 +72,7 @@ export const scanFinalCursorEffect = (guildId: string) =>
           new DiscordApiError({ operation: "listGuildMembers", cause: error }),
       })) as APIGuildMember[];
       if (page.length === 0) break;
+      memberCount += page.length;
       const lastUser = page[page.length - 1].user;
       if (lastUser) {
         lastMemberId = lastUser.id;
@@ -75,7 +80,7 @@ export const scanFinalCursorEffect = (guildId: string) =>
       }
       if (page.length < 1000) break;
     }
-    return { lastMemberId } as BulkRoleAssignmentFinalCursor;
+    return { lastMemberId, memberCount } as BulkRoleAssignmentFinalCursor;
   }).pipe(Effect.withSpan("scanFinalCursor", { attributes: { guildId } }));
 
 /**
@@ -304,7 +309,37 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
       yield* logEffect("info", "BulkRoleAssignment", "Final cursor set", {
         jobId: job.id,
         lastMemberId: finalCursor.lastMemberId,
+        memberCount: finalCursor.memberCount,
       });
+
+      // Post initial mod-log message with estimated runtime
+      if (job.notify_channel_id) {
+        const estimatedSeconds = finalCursor.memberCount; // ~1 member/sec
+        const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
+        const estimatedHours = Math.floor(estimatedMinutes / 60);
+        const remainingMinutes = estimatedMinutes % 60;
+        const timeEstimate =
+          estimatedHours > 0
+            ? `~${estimatedHours}h ${remainingMinutes}m`
+            : `~${estimatedMinutes}m`;
+
+        yield* Effect.tryPromise({
+          try: () =>
+            ssrDiscordSdk.post(Routes.channelMessages(job.notify_channel_id!), {
+              body: {
+                content:
+                  `**Member role migration started**\n` +
+                  `Assigning <@&${payload.roleId}> to ~${finalCursor.memberCount.toLocaleString()} existing members.\n` +
+                  `Estimated time: ${timeEstimate}. Progress updates will be posted every 30 minutes.`,
+              },
+            }),
+          catch: (error) =>
+            new DiscordApiError({
+              operation: "notifyMigrationStart",
+              cause: error,
+            }),
+        }).pipe(Effect.catchAll(() => Effect.void));
+      }
     }
 
     const cursor = job.cursor
@@ -314,6 +349,11 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
     let currentCursor = cursor;
     let totalAssigned = job.progress_count;
     let totalErrors = job.error_count;
+
+    const startTime = Date.now();
+    const PROGRESS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+    let lastProgressUpdate = startTime;
+    const totalMembers = finalCursor.memberCount;
 
     while (true) {
       const result = yield* processBatchEffect({
@@ -329,6 +369,47 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
       currentCursor = result.cursor;
 
       yield* checkpointJobEffect(job.id, currentCursor, totalAssigned);
+
+      // Post progress update every 30 minutes
+      const now = Date.now();
+      if (
+        job.notify_channel_id &&
+        now - lastProgressUpdate >= PROGRESS_INTERVAL_MS
+      ) {
+        lastProgressUpdate = now;
+        const elapsed = now - startTime;
+        const rate = totalAssigned / (elapsed / 1000); // members per second
+        const remaining = totalMembers - totalAssigned;
+        const etaSeconds = rate > 0 ? Math.ceil(remaining / rate) : 0;
+        const etaMinutes = Math.ceil(etaSeconds / 60);
+        const etaHours = Math.floor(etaMinutes / 60);
+        const etaRemainingMin = etaMinutes % 60;
+        const eta =
+          etaHours > 0
+            ? `~${etaHours}h ${etaRemainingMin}m`
+            : `~${etaMinutes}m`;
+        const pct =
+          totalMembers > 0
+            ? Math.round((totalAssigned / totalMembers) * 100)
+            : 0;
+
+        yield* Effect.tryPromise({
+          try: () =>
+            ssrDiscordSdk.post(Routes.channelMessages(job.notify_channel_id!), {
+              body: {
+                content:
+                  `**Member role migration progress**\n` +
+                  `${totalAssigned.toLocaleString()} / ~${totalMembers.toLocaleString()} members (${pct}%)\n` +
+                  `Estimated time remaining: ${eta}`,
+              },
+            }),
+          catch: (error) =>
+            new DiscordApiError({
+              operation: "notifyProgress",
+              cause: error,
+            }),
+        }).pipe(Effect.catchAll(() => Effect.void));
+      }
 
       if (result.errors > 0) {
         yield* recordJobErrorEffect(
@@ -424,6 +505,7 @@ export const buildGateActivationNotification: JobNotificationBuilder = (
   return null;
 };
 
+registerJobHandler("bulk_role_assignment", executeJobEffect);
 registerNotificationBuilder(
   "bulk_role_assignment",
   buildGateActivationNotification,
