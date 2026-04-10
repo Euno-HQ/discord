@@ -172,6 +172,73 @@ export const banUser = (interaction: MessageComponentInteraction) =>
     }),
   );
 
+const DELETE_MESSAGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
+
+/**
+ * Ban a user from the guild and delete their recent messages (last 7 days).
+ * Requires moderator role.
+ */
+export const banUserAndDeleteMessages = (
+  interaction: MessageComponentInteraction,
+) =>
+  Effect.gen(function* () {
+    const reportedUserId = interaction.customId.split("|")[1];
+    const guildId = interaction.guildId!;
+
+    // Get settings and check permissions
+    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+      SETTINGS.moderator,
+    ]);
+
+    if (!hasModRole(interaction, modRoleId)) {
+      return yield* Effect.fail(
+        new NotAuthorizedError({
+          operation: "banUserAndDeleteMessages",
+          userId: interaction.user.id,
+          requiredRole: "moderator",
+        }),
+      );
+    }
+
+    // Fetch the reported member
+    const reportedMember = yield* fetchMember(
+      interaction.guild!,
+      reportedUserId,
+    );
+
+    // Execute ban with message deletion
+    yield* Effect.tryPromise({
+      try: () =>
+        ban(
+          reportedMember,
+          "single moderator decision",
+          DELETE_MESSAGE_SECONDS,
+        ),
+      catch: (error) => new DiscordApiError({ operation: "ban", cause: error }),
+    });
+
+    yield* logEffect(
+      "info",
+      "DirectActions",
+      "Banned user and deleted messages",
+      {
+        reportedUserId,
+        guildId,
+        actionBy: interaction.user.username,
+        deleteMessageSeconds: DELETE_MESSAGE_SECONDS,
+      },
+    );
+
+    return {
+      reportedUserId,
+      actionBy: interaction.user.username,
+    } satisfies ModActionResult;
+  }).pipe(
+    Effect.withSpan("banUserAndDeleteMessagesHandler", {
+      attributes: { userId: interaction.user.id, guildId: interaction.guildId },
+    }),
+  );
+
 /**
  * Apply restriction role to a user.
  * Requires moderator role.

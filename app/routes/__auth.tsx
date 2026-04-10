@@ -36,6 +36,10 @@ export async function loader({ request }: Route.LoaderArgs) {
 
     return { guilds, manageableGuilds };
   } catch (error) {
+    // Re-throw redirects (e.g., token expired → redirect to /login) so React
+    // Router can handle them instead of silently swallowing them.
+    if (error instanceof Response) throw error;
+
     log("error", "auth", "Failed to fetch guilds", { userId: user.id, error });
     return {
       guilds: [] as CachedGuild[],

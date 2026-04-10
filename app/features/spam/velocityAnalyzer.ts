@@ -150,3 +150,29 @@ export function analyzeVelocity(
 
   return signals;
 }
+
+/**
+ * Collect prior messages in the tracker that have the same content hash as the
+ * current message, excluding the current message itself.
+ *
+ * These are the messages that were sent *before* the duplicate signal fired —
+ * they were processed when no duplicate was yet detected (verdict: 'none') and
+ * so were never recorded in reported_messages. The response handler uses this
+ * list to back-fill them so they are tracked and cleaned up on kick.
+ *
+ * Pure function — no side effects.
+ */
+export function getPriorDuplicates(
+  recentMessages: RecentMessage[],
+  currentMessageId: string,
+  contentHash: string,
+  windowMs: number = FIVE_MINUTES_MS,
+): RecentMessage[] {
+  const cutoff = Date.now() - windowMs;
+  return recentMessages.filter(
+    (m) =>
+      m.contentHash === contentHash &&
+      m.messageId !== currentMessageId &&
+      m.timestamp > cutoff,
+  );
+}

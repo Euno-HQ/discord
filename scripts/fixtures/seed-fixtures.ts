@@ -50,7 +50,7 @@ export async function seedFixtures(): Promise<void> {
       .insertInto("guilds")
       .values({
         id: guild.id,
-        settings: null,
+        settings: JSON.stringify({}),
       })
       .onConflict((oc) => oc.doNothing())
       .execute();

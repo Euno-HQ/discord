@@ -11,6 +11,7 @@ import { createRequestHandler } from "@react-router/express";
 import { Command as checkRequirements } from "#~/commands/checkRequirements";
 import { EscalationCommands } from "#~/commands/escalationControls";
 import { Command as forceBan } from "#~/commands/force-ban";
+import { Command as memberApplications } from "#~/commands/memberApplications";
 import { Command as modreport } from "#~/commands/modreport";
 import { Command as report } from "#~/commands/report";
 import modActionLogger from "#~/commands/report/modActionLogger";
@@ -33,12 +34,21 @@ import onboardGuild from "#~/discord/onboardGuild";
 import { startReactjiChanneler } from "#~/discord/reactjiChanneler";
 import { applicationKey } from "#~/helpers/env.server";
 
+// Side-effect import: registers job handler and notification builder
+import "#~/jobs/bulkRoleAssignment";
+
+import { runJobRunner } from "#~/jobs/jobRunner";
+
 import { runtime } from "./AppRuntime";
 import { checkpointWal, runIntegrityCheck } from "./Database";
 import { DiscordApiError } from "./effects/errors";
 import { logEffect } from "./effects/observability";
 import { initializeGroups } from "./effects/posthog";
 import { botStats } from "./helpers/metrics";
+
+declare global {
+  var __shutdownHandlersRegistered: boolean | undefined;
+}
 
 export const app = express();
 
@@ -93,6 +103,7 @@ const startup = Effect.gen(function* () {
     registerCommand(SetupComponentCommands),
     registerCommand(checkRequirements),
     registerCommand(modreport),
+    registerCommand(memberApplications),
   ]);
 
   yield* logEffect("debug", "Server", "initializing Discord bot");
@@ -114,6 +125,7 @@ const startup = Effect.gen(function* () {
 
   // Start escalation resolver scheduler (must be after client is ready)
   startEscalationResolver(discordClient);
+  runtime.runFork(runJobRunner);
 
   yield* logEffect("info", "Gateway", "Gateway initialization completed", {
     guildCount: discordClient.guilds.cache.size,
@@ -146,9 +158,14 @@ const startup = Effect.gen(function* () {
       )
       .then(() => runtime.dispose().then(() => console.log("ok")));
 
-  yield* logEffect("debug", "Server", "setting signal handlers");
-  process.on("SIGTERM", () => void handleShutdown("SIGTERM"));
-  process.on("SIGINT", () => void handleShutdown("SIGINT"));
+  // Only register signal handlers once — HMR re-runs startup, which would
+  // otherwise stack listeners and trigger MaxListenersExceededWarning.
+  if (!globalThis.__shutdownHandlersRegistered) {
+    globalThis.__shutdownHandlersRegistered = true;
+    yield* logEffect("debug", "Server", "setting signal handlers");
+    process.on("SIGTERM", () => void handleShutdown("SIGTERM"));
+    process.on("SIGINT", () => void handleShutdown("SIGINT"));
+  }
 });
 
 console.log("running program");

@@ -8,6 +8,7 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
+import { db, runTakeFirst } from "#~/AppRuntime";
 import {
   interactionDeferUpdate,
   interactionEditReply,
@@ -17,16 +18,23 @@ import { logEffect } from "#~/effects/observability";
 import type { MessageComponentCommand } from "#~/helpers/discord";
 import { commandStats } from "#~/helpers/metrics";
 import { CREATE_SENTINEL, setupAll } from "#~/helpers/setupAll.server.ts";
+import {
+  checkSetupPermissions,
+  type SetupPermissionCheckResult,
+} from "#~/helpers/setupPermissionCheck";
+import { fetchGuild } from "#~/models/guilds.server";
 
 // --- State management ---
 
-interface PendingSetup {
+export interface PendingSetup {
   modRoleId?: string; // undefined until selected (required)
   modLogChannel: string; // channel ID or CREATE_SENTINEL
   deletionLogChannel: string | null; // channel ID, CREATE_SENTINEL, or null (disabled)
   honeypotChannel: string | null; // channel ID, CREATE_SENTINEL, or null (disabled)
   ticketChannel: string | null; // channel ID, CREATE_SENTINEL, or null (disabled)
+  applicationChannel: string | null; // channel ID, CREATE_SENTINEL, or null (disabled)
   restrictedRoleId?: string; // undefined = skip
+  memberRoleId?: string; // role ID or undefined
   createdAt: number;
 }
 
@@ -46,14 +54,16 @@ function cleanupStaleSetups() {
   }
 }
 
-function defaultSetup(): Omit<PendingSetup, "createdAt"> {
+export function defaultSetup(): Omit<PendingSetup, "createdAt"> {
   return {
     modRoleId: undefined,
     modLogChannel: CREATE_SENTINEL,
     deletionLogChannel: CREATE_SENTINEL,
     honeypotChannel: CREATE_SENTINEL,
     ticketChannel: CREATE_SENTINEL,
+    applicationChannel: null, // disabled by default
     restrictedRoleId: undefined,
+    memberRoleId: undefined,
   };
 }
 
@@ -63,14 +73,19 @@ const FIELD_MAP = {
   deletionLog: "deletionLogChannel",
   honeypot: "honeypotChannel",
   tickets: "ticketChannel",
+  applications: "applicationChannel",
   restrictedRole: "restrictedRoleId",
+  memberRole: "memberRoleId",
 } as const;
 
 type FieldKey = keyof typeof FIELD_MAP;
 
 // --- Helper functions ---
 
-function channelValue(value: string | null, createLabel: string): string {
+export function channelValue(
+  value: string | null,
+  createLabel: string,
+): string {
   if (value === null) return "Disabled";
   if (value === CREATE_SENTINEL) return `Create new #${createLabel}`;
   return `<#${value}>`;
@@ -80,9 +95,10 @@ const OPTIONAL_CHANNELS = [
   { field: "deletionLog", label: "Deletion Log" },
   { field: "honeypot", label: "Honeypot" },
   { field: "tickets", label: "Tickets" },
+  { field: "applications", label: "Member Applications" },
 ] as const;
 
-function buildFeatureToggleRow(guildId: string, state: PendingSetup) {
+export function buildFeatureToggleRow(guildId: string, state: PendingSetup) {
   return {
     type: ComponentType.ActionRow,
     components: OPTIONAL_CHANNELS.map(({ field, label }) => {
@@ -109,9 +125,60 @@ const v2Update = v2Payload;
 
 // --- Public: initialize state and return the form payload for slash command use ---
 
-export function initSetupForm(guildId: string, userId: string): object {
+export async function initSetupForm(
+  guildId: string,
+  userId: string,
+  guildChannelIds?: Set<string>,
+): Promise<object> {
   cleanupStaleSetups();
-  const state: PendingSetup = { ...defaultSetup(), createdAt: Date.now() };
+
+  // Try to populate from existing guild settings
+  const defaults = defaultSetup();
+  const guild = await fetchGuild(guildId);
+  if (guild?.settings) {
+    const settings = JSON.parse(guild.settings) as Record<string, string>;
+
+    if (settings.moderator) defaults.modRoleId = settings.moderator;
+    if (settings.modLog) defaults.modLogChannel = settings.modLog;
+    // If guild is configured but deletionLog is absent, treat as disabled
+    defaults.deletionLogChannel = settings.deletionLog ?? null;
+    if (settings.restricted) defaults.restrictedRoleId = settings.restricted;
+
+    // Check for existing honeypot channel
+    const honeypot = await runTakeFirst(
+      db
+        .selectFrom("honeypot_config")
+        .select("channel_id")
+        .where("guild_id", "=", guildId),
+    );
+    if (honeypot) {
+      defaults.honeypotChannel = honeypot.channel_id;
+    } else {
+      defaults.honeypotChannel = null;
+    }
+
+    // tickets_config has no guild_id, so match by channel ownership
+    if (guildChannelIds) {
+      const ticketRows = await runTakeFirst(
+        db
+          .selectFrom("tickets_config")
+          .select("channel_id")
+          .where("channel_id", "is not", null),
+      );
+      if (
+        ticketRows?.channel_id &&
+        guildChannelIds.has(ticketRows.channel_id)
+      ) {
+        defaults.ticketChannel = ticketRows.channel_id;
+      } else {
+        defaults.ticketChannel = null;
+      }
+    } else {
+      defaults.ticketChannel = null;
+    }
+  }
+
+  const state: PendingSetup = { ...defaults, createdAt: Date.now() };
   pendingSetups.set(setupKey(guildId, userId), state);
   return buildSetupFormMessage(guildId, state);
 }
@@ -146,18 +213,11 @@ function buildSetupFormMessage(
             content:
               "Select your channels and roles below. Channels left on 'Create new' will be auto-created with sensible defaults.",
           },
-          ...(errorText
-            ? [
-                {
-                  type: ComponentType.TextDisplay,
-                  content: `⚠ ${errorText}`,
-                },
-              ]
-            : []),
           { type: ComponentType.Separator, spacing: 2 },
           {
             type: ComponentType.TextDisplay,
-            content: "**Moderator Role** *(required)*",
+            content:
+              "**Moderator Role** *(required)*\n**Mod Log** — Moderation actions and reports, visible only to mods",
           },
           {
             type: ComponentType.ActionRow,
@@ -171,12 +231,6 @@ function buildSetupFormMessage(
                   : {}),
               },
             ],
-          },
-          { type: ComponentType.Separator },
-          {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Mod Log** — Moderation actions and reports. Visible only to moderators.",
           },
           {
             type: ComponentType.ActionRow,
@@ -194,10 +248,11 @@ function buildSetupFormMessage(
               },
             ],
           },
+          { type: ComponentType.Separator },
           {
             type: ComponentType.TextDisplay,
             content:
-              "**Deletion Log** — Captures deleted messages. Visible only to moderators.",
+              "**Deletion Log** — Captures deleted messages\n**Honeypot** — Trap channel; bots that post here are auto-banned\n**Ticket Channel** — Where members open private tickets\n**Restricted Role** *(optional)* — Assigned to muted/restricted members",
           },
           {
             type: ComponentType.ActionRow,
@@ -222,11 +277,6 @@ function buildSetupFormMessage(
             ],
           },
           {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Honeypot** — Trap channel placed at top of channel list. Bots that post here are auto-banned.",
-          },
-          {
             type: ComponentType.ActionRow,
             components: [
               {
@@ -249,11 +299,6 @@ function buildSetupFormMessage(
             ],
           },
           {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Ticket Channel** — Where members open private tickets with moderators.",
-          },
-          {
             type: ComponentType.ActionRow,
             components: [
               {
@@ -272,12 +317,6 @@ function buildSetupFormMessage(
                   : {}),
               },
             ],
-          },
-          { type: ComponentType.Separator },
-          {
-            type: ComponentType.TextDisplay,
-            content:
-              "**Restricted Role** *(optional)* — Role assigned to muted or restricted members.",
           },
           {
             type: ComponentType.ActionRow,
@@ -300,7 +339,59 @@ function buildSetupFormMessage(
             content: "**Enabled features**",
           },
           buildFeatureToggleRow(guildId, state),
+          ...(state.applicationChannel !== null
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content:
+                    "**Application Channel** — Where members submit applications\n**Member Role** — Granted to approved applicants; all current members will receive this role",
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.ChannelSelect,
+                      custom_id: `setup-sel|${guildId}|applications`,
+                      placeholder: "Create new #apply-here (default)",
+                      channel_types: [ChannelType.GuildText],
+                      ...(channelDefaultValues(state.applicationChannel)
+                        ? {
+                            default_values: channelDefaultValues(
+                              state.applicationChannel,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.RoleSelect,
+                      custom_id: `setup-sel|${guildId}|memberRole`,
+                      placeholder: "Create new @Member role (default)",
+                      ...(state.memberRoleId
+                        ? {
+                            default_values: roleDefaultValues(
+                              state.memberRoleId,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
+                },
+              ]
+            : []),
           { type: ComponentType.Separator },
+          ...(errorText
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content: `⛔ ${errorText}`,
+                },
+              ]
+            : []),
           {
             type: ComponentType.ActionRow,
             components: [
@@ -318,15 +409,106 @@ function buildSetupFormMessage(
   });
 }
 
-function buildSetupConfirmMessage(guildId: string, state: PendingSetup) {
-  const summaryLines = [
-    `**Moderator Role:** <@&${state.modRoleId}>`,
-    `**Mod Log:** ${channelValue(state.modLogChannel, "mod-log")}`,
-    `**Deletion Log:** ${channelValue(state.deletionLogChannel, "deletion-log")}`,
-    `**Honeypot:** ${channelValue(state.honeypotChannel, "honeypot")}`,
-    `**Ticket Channel:** ${channelValue(state.ticketChannel, "contact-mods")}`,
-    `**Restricted Role:** ${state.restrictedRoleId ? `<@&${state.restrictedRoleId}>` : "None"}`,
+function roleValue(roleId: string | undefined): string {
+  return roleId ? `<@&${roleId}>` : "None";
+}
+
+export function buildPermWarnings(permCheck?: SetupPermissionCheckResult) {
+  if (!permCheck) return [];
+
+  const lines: string[] = [];
+
+  if (permCheck.missingGuildPerms.length > 0) {
+    lines.push(
+      `**Missing server permissions:** ${permCheck.missingGuildPerms.join(", ")}`,
+    );
+  }
+
+  for (const issue of permCheck.channelIssues) {
+    lines.push(`**${issue.label}:** missing ${issue.missing.join(", ")}`);
+  }
+
+  if (lines.length === 0) return [];
+
+  const icon = permCheck.hasHardBlock ? "⛔" : "⚠️";
+  const heading = permCheck.hasHardBlock
+    ? `### ${icon} Permission Issues (must fix before confirming)`
+    : `### ${icon} Permission Warnings`;
+
+  return [
+    { type: ComponentType.Separator },
+    {
+      type: ComponentType.TextDisplay,
+      content: `${heading}\n${lines.map((l) => `- ${l}`).join("\n")}`,
+    },
   ];
+}
+
+export function buildSetupConfirmMessage(
+  guildId: string,
+  state: PendingSetup,
+  permCheck?: SetupPermissionCheckResult,
+) {
+  // --- Configuration summary table ---
+  const configRows = [
+    ["Moderator Role", roleValue(state.modRoleId)],
+    ["Mod Log", channelValue(state.modLogChannel, "mod-log")],
+    ["Deletion Log", channelValue(state.deletionLogChannel, "deletion-log")],
+    ["Honeypot", channelValue(state.honeypotChannel, "honeypot")],
+    ["Tickets", channelValue(state.ticketChannel, "contact-mods")],
+    [
+      "Member Applications",
+      state.applicationChannel !== null
+        ? channelValue(state.applicationChannel, "apply-here")
+        : "Disabled",
+    ],
+    ...(state.applicationChannel !== null
+      ? [
+          [
+            "Member Role",
+            state.memberRoleId
+              ? roleValue(state.memberRoleId)
+              : "Create new @Member",
+          ],
+        ]
+      : []),
+    ["Restricted Role", roleValue(state.restrictedRoleId)],
+  ];
+
+  const configList = configRows.map(([k, v]) => `- ${k}: ${v}`).join("\n");
+
+  // --- Delta: what Euno will change on the server ---
+  const adds: string[] = [];
+  const modifies: string[] = [];
+
+  if (state.modLogChannel === CREATE_SENTINEL) adds.push("#mod-log channel");
+  if (state.deletionLogChannel === CREATE_SENTINEL)
+    adds.push("#deletion-log channel");
+  if (state.honeypotChannel === CREATE_SENTINEL) adds.push("#honeypot channel");
+  if (state.ticketChannel === CREATE_SENTINEL)
+    adds.push("#contact-mods channel");
+  if (
+    state.modLogChannel === CREATE_SENTINEL ||
+    state.deletionLogChannel === CREATE_SENTINEL
+  )
+    adds.push("Euno Logs category");
+
+  if (state.applicationChannel !== null) {
+    if (state.applicationChannel === CREATE_SENTINEL)
+      adds.push("#apply-here channel");
+    if (!state.memberRoleId) adds.push("@Member role");
+    modifies.push("@everyone — deny View Channels (server-wide)");
+    modifies.push(
+      `${state.memberRoleId ? roleValue(state.memberRoleId) : "@Member"} — grant View Channels`,
+    );
+    modifies.push("All current members — grant Member role");
+  }
+
+  const deltaLines: string[] = [];
+  if (adds.length > 0)
+    deltaLines.push(`Create:\n${adds.map((a) => `+ ${a}`).join("\n")}`);
+  if (modifies.length > 0)
+    deltaLines.push(`Modify:\n${modifies.map((m) => `~ ${m}`).join("\n")}`);
 
   return v2Update({
     flags: MessageFlags.IsComponentsV2,
@@ -341,13 +523,23 @@ function buildSetupConfirmMessage(guildId: string, state: PendingSetup) {
           {
             type: ComponentType.TextDisplay,
             content:
-              "Review your configuration. Click **Confirm** to apply, or go back to make changes.",
+              "Review your configuration. Click Confirm to apply, or go back to make changes.",
           },
           { type: ComponentType.Separator, spacing: 2 },
           {
             type: ComponentType.TextDisplay,
-            content: summaryLines.join("\n"),
+            content: configList,
           },
+          ...(deltaLines.length > 0
+            ? [
+                { type: ComponentType.Separator },
+                {
+                  type: ComponentType.TextDisplay,
+                  content: `### Changes Euno will make\n${deltaLines.join("\n\n")}`,
+                },
+              ]
+            : []),
+          ...buildPermWarnings(permCheck),
           { type: ComponentType.Separator },
           {
             type: ComponentType.ActionRow,
@@ -363,6 +555,7 @@ function buildSetupConfirmMessage(guildId: string, state: PendingSetup) {
                 custom_id: `setup-exec|${guildId}`,
                 label: "Confirm ✓",
                 style: ButtonStyle.Primary,
+                ...(permCheck?.hasHardBlock ? { disabled: true } : {}),
               },
             ],
           },
@@ -372,10 +565,20 @@ function buildSetupConfirmMessage(guildId: string, state: PendingSetup) {
   });
 }
 
-const EXPIRED_MESSAGE = {
-  content: "Setup session expired. Please run `/setup` again.",
-  components: [],
-};
+const EXPIRED_MESSAGE = v2Update({
+  flags: MessageFlags.IsComponentsV2,
+  components: [
+    {
+      type: ComponentType.Container,
+      components: [
+        {
+          type: ComponentType.TextDisplay,
+          content: "Setup session expired. Please run `/setup` again.",
+        },
+      ],
+    },
+  ],
+});
 
 const button = (name: string) => ({
   type: InteractionType.MessageComponent as const,
@@ -436,10 +639,8 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
-            const err =
-              error instanceof Error ? error : new Error(String(error));
             yield* logEffect("error", "Commands", "setup-sel handler failed", {
-              error: err,
+              error: String(error),
             });
           }),
         ),
@@ -477,25 +678,47 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           return;
         }
 
+        const guild = interaction.guild;
+        const botMember = guild?.members.me;
+        let permCheck: SetupPermissionCheckResult | undefined;
+
+        if (guild && botMember) {
+          permCheck = yield* Effect.tryPromise(() =>
+            checkSetupPermissions(guild, botMember, state),
+          );
+        }
+
         yield* interactionUpdate(
           interaction,
-          buildSetupConfirmMessage(guildId, state),
+          buildSetupConfirmMessage(guildId, state, permCheck),
         );
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
-            const err =
-              error instanceof Error ? error : new Error(String(error));
             yield* logEffect(
               "error",
               "Commands",
               "setup-continue handler failed",
-              { error: err },
+              { error },
             );
-            yield* interactionUpdate(interaction, {
-              content: `Setup failed: ${err.message}`,
-              components: [],
-            }).pipe(Effect.catchAll(() => Effect.void));
+            yield* interactionUpdate(
+              interaction,
+              v2Update({
+                flags: MessageFlags.IsComponentsV2,
+                components: [
+                  {
+                    type: ComponentType.Container,
+                    accent_color: 0xed4245,
+                    components: [
+                      {
+                        type: ComponentType.TextDisplay,
+                        content: `Setup failed. Please try again or contact an admin.`,
+                      },
+                    ],
+                  },
+                ],
+              }),
+            ).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
         Effect.withSpan("setupContinueHandler"),
@@ -527,10 +750,8 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
-            const err =
-              error instanceof Error ? error : new Error(String(error));
             yield* logEffect("error", "Commands", "setup-back handler failed", {
-              error: err,
+              error,
             });
           }),
         ),
@@ -556,6 +777,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           return;
         }
 
+        pendingSetups.delete(key);
         yield* interactionDeferUpdate(interaction);
 
         const result = yield* Effect.tryPromise(() =>
@@ -567,11 +789,13 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
             deletionLogChannel: state.deletionLogChannel ?? undefined,
             honeypotChannel: state.honeypotChannel ?? undefined,
             ticketChannel: state.ticketChannel ?? undefined,
+            applicationChannel: state.applicationChannel ?? undefined,
+            memberRoleId:
+              state.applicationChannel !== null && !state.memberRoleId
+                ? CREATE_SENTINEL
+                : state.memberRoleId,
           }),
         );
-
-        // Clean up state
-        pendingSetups.delete(key);
 
         yield* logEffect(
           "info",
@@ -602,10 +826,15 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           result.ticketChannelId
             ? `**Tickets:** <#${result.ticketChannelId}>${result.created.includes("contact-mods") ? " (created)" : ""}`
             : "**Tickets:** Disabled",
+          result.applicationChannelId
+            ? `**Applications:** <#${result.applicationChannelId}>${result.created.includes("apply-here") ? " (created)" : ""}`
+            : "**Applications:** Disabled",
           ...(state.restrictedRoleId
             ? [`**Restricted Role:** <@&${state.restrictedRoleId}>`]
             : []),
         ];
+
+        const isAsyncSetup = !!result.applicationChannelId;
 
         yield* interactionEditReply(
           interaction,
@@ -614,16 +843,24 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
             components: [
               {
                 type: ComponentType.Container,
-                accent_color: 0x00cc00,
+                accent_color: isAsyncSetup ? 0x5865f2 : 0x00cc00,
                 components: [
                   {
                     type: ComponentType.TextDisplay,
-                    content: "## Setup Complete ✓",
+                    content: isAsyncSetup
+                      ? "## Setup in Progress"
+                      : "## Setup Complete ✓",
                   },
                   {
                     type: ComponentType.TextDisplay,
-                    content:
-                      "All channels and features have been configured. Run `/check-requirements` to verify everything is working.",
+                    content: isAsyncSetup
+                      ? `Created channels and roles. The following will happen automatically:\n\n` +
+                        `1. The **Member** role is being assigned to all existing members. This can take several hours for large servers.\n` +
+                        `2. Progress updates will be posted to <#${result.modLogChannelId}> every 30 minutes.\n` +
+                        `3. When complete, a button will appear in <#${result.modLogChannelId}> to activate the membership gate.\n` +
+                        `4. The **#apply-here** channel is hidden until you activate the gate.\n\n` +
+                        `Until the gate is activated, the server will continue to work normally.`
+                      : "All channels and features have been configured. Run `/check-requirements` to verify everything is working.",
                   },
                   { type: ComponentType.Separator },
                   {
@@ -638,13 +875,10 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
-            const err =
-              error instanceof Error ? error : new Error(String(error));
-
             yield* logEffect("error", "Commands", "setup-exec handler failed", {
               guildId: interaction.guildId,
               userId: interaction.user.id,
-              error: err,
+              error,
             });
 
             yield* interactionEditReply(
@@ -658,7 +892,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
                     components: [
                       {
                         type: ComponentType.TextDisplay,
-                        content: `Setup failed. Run \`/check-requirements\` to see what was configured.\n\`\`\`\n${err.toString()}\n\`\`\``,
+                        content: `Setup failed. Run \`/check-requirements\` to see what was configured.`,
                       },
                     ],
                   },
