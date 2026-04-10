@@ -11,7 +11,7 @@ import {
   type RESTPostAPIGuildChannelJSONBody,
 } from "discord-api-types/v10";
 
-import { db, run } from "#~/AppRuntime";
+import { db, run, runTakeFirst } from "#~/AppRuntime";
 import { DEFAULT_MESSAGE_TEXT } from "#~/commands/setupHoneypot";
 import { DEFAULT_BUTTON_TEXT } from "#~/commands/setupTickets";
 import { ssrDiscordSdk } from "#~/discord/api";
@@ -106,6 +106,23 @@ export async function setupAll(
   // Register guild (idempotent)
   await registerGuild(guildId);
 
+  // --- Load existing config to skip unchanged values ---
+  const existingAppConfig = await runTakeFirst(
+    db
+      .selectFrom("application_config")
+      .select(["channel_id", "role_id"])
+      .where("guild_id", "=", guildId),
+  );
+  const existingHoneypot = await runTakeFirst(
+    db
+      .selectFrom("honeypot_config")
+      .select("channel_id")
+      .where("guild_id", "=", guildId),
+  );
+  const existingTicket = await runTakeFirst(
+    db.selectFrom("tickets_config").select("channel_id"),
+  );
+
   // --- Logs category (created if mod-log or deletion-log needs creation) ---
   let logsCategoryId: string | undefined;
   const needsLogsCategory =
@@ -152,7 +169,26 @@ export async function setupAll(
   let applicationChannelId: string | undefined;
   let resolvedMemberRoleId: string | undefined;
 
-  if (applicationChannel !== undefined && memberRoleId !== undefined) {
+  // Check if application config is unchanged (skip re-sending message + bulk job)
+  const appChannelUnchanged =
+    applicationChannel !== undefined &&
+    applicationChannel !== CREATE_SENTINEL &&
+    memberRoleId !== undefined &&
+    memberRoleId !== CREATE_SENTINEL &&
+    existingAppConfig?.channel_id === applicationChannel &&
+    existingAppConfig?.role_id === memberRoleId;
+
+  if (appChannelUnchanged) {
+    // Application config unchanged — just set IDs for settings save, skip all API calls
+    applicationChannelId = applicationChannel;
+    resolvedMemberRoleId = memberRoleId;
+    log(
+      "info",
+      "setupAll",
+      "Application config unchanged, skipping message + bulk job",
+      { guildId, applicationChannelId, resolvedMemberRoleId },
+    );
+  } else if (applicationChannel !== undefined && memberRoleId !== undefined) {
     // Step 1: Resolve @member role
     if (memberRoleId === CREATE_SENTINEL) {
       const role = (await ssrDiscordSdk.post(Routes.guildRoles(guildId), {
@@ -347,7 +383,12 @@ export async function setupAll(
     ticketChannelId = ticketChannel;
   }
 
-  if (ticketChannelId !== undefined) {
+  const ticketUnchanged =
+    ticketChannelId !== undefined &&
+    ticketChannel !== CREATE_SENTINEL &&
+    existingTicket?.channel_id === ticketChannelId;
+
+  if (ticketChannelId !== undefined && !ticketUnchanged) {
     const ticketMessage = await sendChannelMessage(ticketChannelId, {
       components: [
         {
