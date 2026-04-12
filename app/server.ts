@@ -44,7 +44,7 @@ import { checkpointWal, runIntegrityCheck } from "./Database";
 import { DiscordApiError } from "./effects/errors";
 import { logEffect } from "./effects/observability";
 import { initializeGroups } from "./effects/posthog";
-import { botStats } from "./helpers/metrics";
+import { botStats, initPostHogMetrics } from "./helpers/metrics";
 
 declare global {
   var __shutdownHandlersRegistered: boolean | undefined;
@@ -108,6 +108,12 @@ const startup = Effect.gen(function* () {
 
   yield* logEffect("debug", "Server", "initializing Discord bot");
   const discordClient = yield* initDiscordBot;
+
+  // Initialize PostHog metrics client for fire-and-forget analytics
+  yield* Effect.tryPromise({
+    try: () => initPostHogMetrics(),
+    catch: (e) => new DiscordApiError({ operation: "initPostHogMetrics", cause: e }),
+  });
 
   yield* Effect.tryPromise({
     try: () =>

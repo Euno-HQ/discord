@@ -1,7 +1,11 @@
-import BetterSqlite3 from "better-sqlite3";
-import { Kysely, SqliteDialect } from "kysely";
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "@effect/sql";
+import * as Reactivity from "@effect/experimental/Reactivity";
+import * as Sqlite from "@effect/sql-kysely/Sqlite";
+import { SqliteClient } from "@effect/sql-sqlite-node";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { DatabaseService } from "#~/Database";
 import type { DB } from "#~/db";
 
 // The global setup mock only stubs `log`; guilds.server also uses trackPerformance
@@ -12,51 +16,41 @@ vi.mock("#~/helpers/observability", () => ({
   trackPerformance: (_op: string, fn: () => unknown) => fn(),
 }));
 
-// We build a real in-memory Kysely instance and wire it into the mocked
-// AppRuntime so that `guilds.server.ts` runs its queries against our test db.
-// The real AppRuntime uses @effect/sql-kysely which patches query builders to
-// also be Effect instances; the `run` helpers call Effect.runPromise on them.
-// In tests we skip the Effect layer and call `.execute()` directly.
-let testDb: Kysely<DB>;
-let rawDb: InstanceType<typeof BetterSqlite3>;
+let testRuntime: ManagedRuntime.ManagedRuntime<any, never>;
 
-vi.mock("#~/AppRuntime", () => {
-  return {
-    get db() {
-      return testDb;
-    },
-    // The real `run` calls Effect.runPromise on an EffectKysely query builder.
-    // A plain Kysely query builder is a thenable that resolves via .execute(),
-    // so we just await it.
-    run: async (qb: { execute: () => Promise<unknown> }) => qb.execute(),
-    runTakeFirst: async (qb: { execute: () => Promise<unknown[]> }) => {
-      const rows = await qb.execute();
-      return rows[0];
-    },
-    runTakeFirstOrThrow: async (qb: { execute: () => Promise<unknown[]> }) => {
-      const rows = await qb.execute();
-      if (rows[0] === undefined) throw new Error("No rows returned");
-      return rows[0];
-    },
-  };
-});
+vi.mock("#~/AppRuntime", () => ({
+  get runEffect() {
+    return <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
+      testRuntime.runPromise(effect);
+  },
+}));
 
-beforeEach(() => {
-  rawDb = new BetterSqlite3(":memory:");
-  rawDb.exec(`
-    CREATE TABLE guilds (
-      id TEXT PRIMARY KEY,
-      settings TEXT
-    )
-  `);
+beforeEach(async () => {
+  const SqliteLive = Layer.scoped(
+    SqlClient.SqlClient,
+    SqliteClient.make({ filename: ":memory:" }),
+  ).pipe(Layer.provide(Reactivity.layer));
 
-  testDb = new Kysely<DB>({
-    dialect: new SqliteDialect({ database: rawDb }),
-  });
+  const KyselyLive = Layer.effect(DatabaseService, Sqlite.make<DB>()).pipe(
+    Layer.provide(SqliteLive),
+  );
+
+  const TestLayer = Layer.mergeAll(SqliteLive, KyselyLive);
+  testRuntime = ManagedRuntime.make(TestLayer);
+
+  // Create the guilds table
+  await testRuntime.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql.unsafe(
+        "CREATE TABLE guilds (id TEXT PRIMARY KEY, settings TEXT)",
+      );
+    }),
+  );
 });
 
 afterEach(async () => {
-  await testDb.destroy();
+  await testRuntime.dispose();
 });
 
 // Dynamic import so that the mock is in place before the module loads.
@@ -65,7 +59,14 @@ const loadModule = () => import("#~/models/guilds.server");
 describe("setSettings coalesce fix", () => {
   test("persists settings when existing settings column is NULL", async () => {
     // Simulate a guild row where settings is NULL (the bug scenario from #335)
-    rawDb.exec(`INSERT INTO guilds (id, settings) VALUES ('guild-null', NULL)`);
+    await testRuntime.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql.unsafe(
+          "INSERT INTO guilds (id, settings) VALUES ('guild-null', NULL)",
+        );
+      }),
+    );
 
     const { setSettings, fetchGuild } = await loadModule();
 
@@ -130,9 +131,15 @@ describe("registerGuild", () => {
 
     await registerGuild("guild-new");
 
-    const row = rawDb
-      .prepare("SELECT id, settings FROM guilds WHERE id = ?")
-      .get("guild-new") as { id: string; settings: string };
+    const row = await testRuntime.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sql.unsafe<{ id: string; settings: string }>(
+          "SELECT id, settings FROM guilds WHERE id = 'guild-new'",
+        );
+        return rows[0];
+      }),
+    );
     expect(row).toBeDefined();
     expect(row.id).toBe("guild-new");
     expect(row.settings).toBe("{}");

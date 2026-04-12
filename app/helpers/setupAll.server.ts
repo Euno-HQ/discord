@@ -11,7 +11,9 @@ import {
   type RESTPostAPIGuildChannelJSONBody,
 } from "discord-api-types/v10";
 
-import { db, run, runTakeFirst } from "#~/AppRuntime";
+import { runEffect } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
+import { Effect } from "effect";
 import { DEFAULT_MESSAGE_TEXT } from "#~/commands/setupHoneypot";
 import { DEFAULT_BUTTON_TEXT } from "#~/commands/setupTickets";
 import { ssrDiscordSdk } from "#~/discord/api";
@@ -107,20 +109,34 @@ export async function setupAll(
   await registerGuild(guildId);
 
   // --- Load existing config to skip unchanged values ---
-  const existingAppConfig = await runTakeFirst(
-    db
-      .selectFrom("application_config")
-      .select(["channel_id", "role_id"])
-      .where("guild_id", "=", guildId),
+  const existingAppConfig = await runEffect(
+    Effect.gen(function* () {
+      const db = yield* DatabaseService;
+      const rows = yield* db
+        .selectFrom("application_config")
+        .select(["channel_id", "role_id"])
+        .where("guild_id", "=", guildId);
+      return rows[0];
+    }),
   );
-  const existingHoneypot = await runTakeFirst(
-    db
-      .selectFrom("honeypot_config")
-      .select("channel_id")
-      .where("guild_id", "=", guildId),
+  const existingHoneypot = await runEffect(
+    Effect.gen(function* () {
+      const db = yield* DatabaseService;
+      const rows = yield* db
+        .selectFrom("honeypot_config")
+        .select("channel_id")
+        .where("guild_id", "=", guildId);
+      return rows[0];
+    }),
   );
-  const existingTicket = await runTakeFirst(
-    db.selectFrom("tickets_config").select("channel_id"),
+  const existingTicket = await runEffect(
+    Effect.gen(function* () {
+      const db = yield* DatabaseService;
+      const rows = yield* db
+        .selectFrom("tickets_config")
+        .select("channel_id");
+      return rows[0];
+    }),
   );
 
   // --- Logs category (created if mod-log or deletion-log needs creation) ---
@@ -279,22 +295,25 @@ export async function setupAll(
     });
 
     // Step 6: Insert into application_config (upsert on re-setup)
-    await run(
-      db
-        .insertInto("application_config")
-        .values({
-          guild_id: guildId,
-          channel_id: applicationChannelId,
-          role_id: resolvedMemberRoleId,
-          message_id: appMessage.id,
-        })
-        .onConflict((c) =>
-          c.column("guild_id").doUpdateSet({
-            channel_id: applicationChannelId,
-            role_id: resolvedMemberRoleId,
+    await runEffect(
+      Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        yield* db
+          .insertInto("application_config")
+          .values({
+            guild_id: guildId,
+            channel_id: applicationChannelId!,
+            role_id: resolvedMemberRoleId!,
             message_id: appMessage.id,
-          }),
-        ),
+          })
+          .onConflict((c) =>
+            c.column("guild_id").doUpdateSet({
+              channel_id: applicationChannelId!,
+              role_id: resolvedMemberRoleId!,
+              message_id: appMessage.id,
+            }),
+          );
+      }),
     );
 
     // Create a persistent background job for bulk role assignment.
@@ -359,14 +378,17 @@ export async function setupAll(
   }
 
   if (honeypotChannelId !== undefined) {
-    await run(
-      db
-        .insertInto("honeypot_config")
-        .values({
-          guild_id: guildId,
-          channel_id: honeypotChannelId,
-        })
-        .onConflict((c) => c.doNothing()),
+    await runEffect(
+      Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        yield* db
+          .insertInto("honeypot_config")
+          .values({
+            guild_id: guildId,
+            channel_id: honeypotChannelId,
+          })
+          .onConflict((c) => c.doNothing());
+      }),
     );
   }
 
@@ -405,11 +427,14 @@ export async function setupAll(
       ],
     });
 
-    await run(
-      db.insertInto("tickets_config").values({
-        message_id: ticketMessage.id,
-        channel_id: ticketChannelId,
-        role_id: moderatorRoleId,
+    await runEffect(
+      Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        yield* db.insertInto("tickets_config").values({
+          message_id: ticketMessage.id,
+          channel_id: ticketChannelId,
+          role_id: moderatorRoleId,
+        });
       }),
     );
   }

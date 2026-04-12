@@ -1,6 +1,9 @@
 import { data } from "react-router";
 
-import { posthogClient } from "#~/AppRuntime";
+import { Effect } from "effect";
+
+import { runEffect } from "#~/AppRuntime";
+import { PostHogService } from "#~/effects/posthog";
 import { requireUser } from "#~/models/session.server";
 import { StripeService } from "#~/models/stripe.server";
 
@@ -13,10 +16,19 @@ export async function requireAdmin(request: Request) {
 }
 
 export async function fetchFeatureFlags(guildId: string) {
-  if (!posthogClient) return null;
-  return (await posthogClient.getAllFlags(guildId, {
-    groups: { guild: guildId },
-  })) as Record<string, string | boolean>;
+  return runEffect(
+    Effect.gen(function* () {
+      const posthog = yield* PostHogService;
+      if (!posthog) return null;
+      return yield* Effect.tryPromise({
+        try: () =>
+          posthog.getAllFlags(guildId, {
+            groups: { guild: guildId },
+          }) as Promise<Record<string, string | boolean>>,
+        catch: () => null,
+      });
+    }).pipe(Effect.catchAll(() => Effect.succeed(null))),
+  );
 }
 
 export async function fetchStripeDetails(stripeCustomerId: string) {

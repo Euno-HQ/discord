@@ -8,7 +8,8 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { db, runTakeFirst } from "#~/AppRuntime";
+import { runEffect } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
 import {
   interactionDeferUpdate,
   interactionEditReply,
@@ -145,11 +146,15 @@ export async function initSetupForm(
     if (settings.restricted) defaults.restrictedRoleId = settings.restricted;
 
     // Check for existing honeypot channel
-    const honeypot = await runTakeFirst(
-      db
-        .selectFrom("honeypot_config")
-        .select("channel_id")
-        .where("guild_id", "=", guildId),
+    const honeypot = await runEffect(
+      Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        const rows = yield* db
+          .selectFrom("honeypot_config")
+          .select("channel_id")
+          .where("guild_id", "=", guildId);
+        return rows[0];
+      }),
     );
     if (honeypot) {
       defaults.honeypotChannel = honeypot.channel_id;
@@ -159,11 +164,15 @@ export async function initSetupForm(
 
     // tickets_config has no guild_id, so match by channel ownership
     if (guildChannelIds) {
-      const ticketRows = await runTakeFirst(
-        db
-          .selectFrom("tickets_config")
-          .select("channel_id")
-          .where("channel_id", "is not", null),
+      const ticketRows = await runEffect(
+        Effect.gen(function* () {
+          const db = yield* DatabaseService;
+          const rows = yield* db
+            .selectFrom("tickets_config")
+            .select("channel_id")
+            .where("channel_id", "is not", null);
+          return rows[0];
+        }),
       );
       if (
         ticketRows?.channel_id &&

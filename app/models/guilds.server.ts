@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 
-import { db, run, runTakeFirst, runTakeFirstOrThrow } from "#~/AppRuntime";
+import { runEffect } from "#~/AppRuntime";
 import { DatabaseService, type DB } from "#~/Database";
 import { NotFoundError } from "#~/effects/errors.ts";
 import { log, trackPerformance } from "#~/helpers/observability";
@@ -37,8 +37,15 @@ export const fetchGuild = async (guildId: string) => {
     async () => {
       log("debug", "Guild", "Fetching guild", { guildId });
 
-      const guild = await runTakeFirst(
-        db.selectFrom("guilds").selectAll().where("id", "=", guildId),
+      const guild = await runEffect(
+        Effect.gen(function* () {
+          const db = yield* DatabaseService;
+          const rows = yield* db
+            .selectFrom("guilds")
+            .selectAll()
+            .where("id", "=", guildId);
+          return rows[0];
+        }),
       );
 
       log("debug", "Guild", guild ? "Guild found" : "Guild not found", {
@@ -59,14 +66,17 @@ export const registerGuild = async (guildId: string) => {
     async () => {
       log("info", "Guild", "Registering guild", { guildId });
 
-      await run(
-        db
-          .insertInto("guilds")
-          .values({
-            id: guildId,
-            settings: JSON.stringify({}),
-          })
-          .onConflict((oc) => oc.column("id").doNothing()),
+      await runEffect(
+        Effect.gen(function* () {
+          const db = yield* DatabaseService;
+          yield* db
+            .insertInto("guilds")
+            .values({
+              id: guildId,
+              settings: JSON.stringify({}),
+            })
+            .onConflict((oc) => oc.column("id").doNothing());
+        }),
       );
 
       log("info", "Guild", "Guild registered successfully", { guildId });
@@ -79,16 +89,19 @@ export const setSettings = async (
   guildId: string,
   settings: SettingsRecord,
 ) => {
-  await run(
-    db
-      .updateTable("guilds")
-      .set("settings", (eb) =>
-        eb.fn("json_patch", [
-          eb.fn("coalesce", ["settings", eb.val("{}")]),
-          eb.val(JSON.stringify(settings)),
-        ]),
-      )
-      .where("id", "=", guildId),
+  await runEffect(
+    Effect.gen(function* () {
+      const db = yield* DatabaseService;
+      yield* db
+        .updateTable("guilds")
+        .set("settings", (eb) =>
+          eb.fn("json_patch", [
+            eb.fn("coalesce", ["settings", eb.val("{}")]),
+            eb.val(JSON.stringify(settings)),
+          ]),
+        )
+        .where("id", "=", guildId);
+    }),
   );
 };
 
@@ -97,17 +110,24 @@ export const fetchSettings = async <T extends keyof typeof SETTINGS>(
   keys: T[],
 ) => {
   const result = Object.entries(
-    await runTakeFirstOrThrow(
-      db
-        .selectFrom("guilds")
-        // @ts-expect-error This is broken because of a migration from knex and
-        // old/bad use of jsonb for storing settings. The type is guaranteed here
-        // not by the codegen
-        .select<DB, "guilds", SettingsRecord>((eb) =>
-          keys.map((k) => eb.ref("settings", "->>").key(k).as(k)),
-        )
-        .where("id", "=", guildId),
-      // This cast is also evidence of the pattern being broken
+    await runEffect(
+      Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        const rows = yield* db
+          .selectFrom("guilds")
+          // @ts-expect-error This is broken because of a migration from knex and
+          // old/bad use of jsonb for storing settings. The type is guaranteed here
+          // not by the codegen
+          .select<DB, "guilds", SettingsRecord>((eb) =>
+            keys.map((k) => eb.ref("settings", "->>").key(k).as(k)),
+          )
+          .where("id", "=", guildId);
+        if (rows[0] === undefined)
+          return yield* Effect.fail(
+            new NotFoundError({ resource: "db record", id: "" }),
+          );
+        return rows[0];
+      }),
     ),
   ) as [T, string][];
   return Object.fromEntries(result) as Pick<SettingsRecord, T>;

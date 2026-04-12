@@ -8,8 +8,18 @@ import type {
   UserContextMenuCommandInteraction,
 } from "discord.js";
 
-import { posthogClient } from "#~/AppRuntime.ts";
+import type { PostHog } from "posthog-node";
+
+import { runtime } from "#~/AppRuntime";
+import { PostHogService } from "#~/effects/posthog";
 import { log } from "#~/helpers/observability";
+
+let _posthog: PostHog | null | undefined;
+
+/** Must be called once at startup before event handlers fire. */
+export async function initPostHogMetrics(): Promise<void> {
+  _posthog = await runtime.runPromise(PostHogService);
+}
 
 type EventValue = string | number | boolean;
 type EmitEventData = Record<string, EventValue | EventValue[]>;
@@ -316,10 +326,10 @@ const emitEvent = (
     user_id: userId,
     event_type: eventName,
     event_properties: data,
-    client: Boolean(posthogClient),
+    client: Boolean(_posthog),
   });
 
-  posthogClient?.capture({
+  _posthog?.capture({
     distinctId: userId ?? "system",
     event: eventName,
     properties: {

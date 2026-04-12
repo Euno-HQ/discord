@@ -1,6 +1,8 @@
 import { Events, type Client } from "discord.js";
 
-import { db, runTakeFirst } from "#~/AppRuntime";
+import { runEffect } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
+import { Effect } from "effect";
 import { featureStats } from "#~/helpers/metrics";
 import { log } from "#~/helpers/observability";
 
@@ -40,12 +42,16 @@ export async function startReactjiChanneler(client: Client) {
       }
 
       // Look up config for this guild + emoji combination
-      const config = await runTakeFirst(
-        db
-          .selectFrom("reactji_channeler_config")
-          .selectAll()
-          .where("guild_id", "=", guildId)
-          .where("emoji", "=", emoji),
+      const config = await runEffect(
+        Effect.gen(function* () {
+          const db = yield* DatabaseService;
+          const rows = yield* db
+            .selectFrom("reactji_channeler_config")
+            .selectAll()
+            .where("guild_id", "=", guildId)
+            .where("emoji", "=", emoji);
+          return rows[0] ?? null;
+        }),
       );
 
       if (!config) {

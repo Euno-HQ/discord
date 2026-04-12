@@ -1,8 +1,11 @@
 import { useLoaderData } from "react-router";
 
-import { db, run } from "#~/AppRuntime";
+import { Effect } from "effect";
+
+import { runEffect } from "#~/AppRuntime";
 import { AddEunoCard } from "#~/components/AddEunoCard";
 import { ServerCard } from "#~/components/ServerCard";
+import { DatabaseService } from "#~/Database";
 import { ssrDiscordSdk, userDiscordSdkFromRequest } from "#~/discord/api";
 import { botInviteUrl } from "#~/helpers/botPermissions";
 import { getCachedGuilds } from "#~/helpers/guildCache.server";
@@ -55,49 +58,50 @@ export async function loader({ request }: Route.LoaderArgs) {
     Date.now() - 30 * 24 * 60 * 60 * 1000,
   ).toISOString();
 
-  const [dailyReportRows, modActionRows, escalationRows, allSubscriptions] =
-    await Promise.all([
-      // 1. Daily report counts for sparklines
-      run(
-        db
-          .selectFrom("reported_messages")
-          .select((eb) => [
-            "guild_id",
-            eb
-              .fn("strftime", [eb.val("%Y-%m-%d"), eb.ref("created_at")])
-              .as("day"),
-            eb.fn.countAll<number>().as("count"),
-          ])
-          .where("guild_id", "in", guildIds)
-          .where("created_at", ">=", thirtyDaysAgo)
-          .groupBy(["guild_id", "day"])
-          .orderBy("guild_id")
-          .orderBy("day"),
-      ),
+  const [dbResults, allSubscriptions] = await Promise.all([
+    runEffect(
+      Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        return yield* Effect.all([
+          // 1. Daily report counts for sparklines
+          db
+            .selectFrom("reported_messages")
+            .select((eb) => [
+              "guild_id",
+              eb
+                .fn("strftime", [eb.val("%Y-%m-%d"), eb.ref("created_at")])
+                .as("day"),
+              eb.fn.countAll<number>().as("count"),
+            ])
+            .where("guild_id", "in", guildIds)
+            .where("created_at", ">=", thirtyDaysAgo)
+            .groupBy(["guild_id", "day"])
+            .orderBy("guild_id")
+            .orderBy("day"),
 
-      // 2. Mod action counts (30 days)
-      run(
-        db
-          .selectFrom("mod_actions")
-          .select((eb) => ["guild_id", eb.fn.countAll<number>().as("count")])
-          .where("guild_id", "in", guildIds)
-          .where("created_at", ">=", thirtyDaysAgo)
-          .groupBy("guild_id"),
-      ),
+          // 2. Mod action counts (30 days)
+          db
+            .selectFrom("mod_actions")
+            .select((eb) => ["guild_id", eb.fn.countAll<number>().as("count")])
+            .where("guild_id", "in", guildIds)
+            .where("created_at", ">=", thirtyDaysAgo)
+            .groupBy("guild_id"),
 
-      // 3. Open escalation counts
-      run(
-        db
-          .selectFrom("escalations")
-          .select((eb) => ["guild_id", eb.fn.countAll<number>().as("count")])
-          .where("guild_id", "in", guildIds)
-          .where("resolution", "is", null)
-          .groupBy("guild_id"),
-      ),
+          // 3. Open escalation counts
+          db
+            .selectFrom("escalations")
+            .select((eb) => ["guild_id", eb.fn.countAll<number>().as("count")])
+            .where("guild_id", "in", guildIds)
+            .where("resolution", "is", null)
+            .groupBy("guild_id"),
+        ]).pipe(Effect.withConcurrency("unbounded"));
+      }),
+    ),
 
-      // 4. All subscriptions
-      SubscriptionService.getAllSubscriptions(),
-    ]);
+    // 4. All subscriptions
+    SubscriptionService.getAllSubscriptions(),
+  ]);
+  const [dailyReportRows, modActionRows, escalationRows] = dbResults;
 
   // Build sparkline arrays (30 days, zero-filled)
   const sparklines = new Map<string, number[]>();

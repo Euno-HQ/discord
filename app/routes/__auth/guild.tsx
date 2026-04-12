@@ -1,7 +1,10 @@
 import { data, Link, useLoaderData } from "react-router";
 
-import { db, run } from "#~/AppRuntime";
+import { Effect } from "effect";
+
+import { runEffect } from "#~/AppRuntime";
 import { Sparkline } from "#~/components/Sparkline";
+import { DatabaseService } from "#~/Database";
 import { ssrDiscordSdk, userDiscordSdkFromRequest } from "#~/discord/api";
 import { getCachedGuilds } from "#~/helpers/guildCache.server";
 import { requireUser } from "#~/models/session.server";
@@ -44,70 +47,69 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     Date.now() - 30 * 24 * 60 * 60 * 1000,
   ).toISOString();
 
-  const [
-    dailyReportRows,
-    modActionsByType,
-    reportsByReason,
-    openEscalations,
-    tier,
-  ] = await Promise.all([
-    // Daily report counts for sparkline (30 days)
-    run(
-      db
-        .selectFrom("reported_messages")
-        .select((eb) => [
-          eb
-            .fn("strftime", [eb.val("%Y-%m-%d"), eb.ref("created_at")])
-            .as("day"),
-          eb.fn.countAll<number>().as("count"),
-        ])
-        .where("guild_id", "=", guildId)
-        .where("created_at", ">=", thirtyDaysAgo)
-        .groupBy("day")
-        .orderBy("day"),
-    ),
+  const [dbResults, tier] = await Promise.all([
+    runEffect(
+      Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        return yield* Effect.all([
+          // Daily report counts for sparkline (30 days)
+          db
+            .selectFrom("reported_messages")
+            .select((eb) => [
+              eb
+                .fn("strftime", [eb.val("%Y-%m-%d"), eb.ref("created_at")])
+                .as("day"),
+              eb.fn.countAll<number>().as("count"),
+            ])
+            .where("guild_id", "=", guildId)
+            .where("created_at", ">=", thirtyDaysAgo)
+            .groupBy("day")
+            .orderBy("day"),
 
-    // Mod action counts grouped by action_type
-    run(
-      db
-        .selectFrom("mod_actions")
-        .select((eb) => ["action_type", eb.fn.countAll<number>().as("count")])
-        .where("guild_id", "=", guildId)
-        .where("created_at", ">=", thirtyDaysAgo)
-        .groupBy("action_type"),
-    ),
+          // Mod action counts grouped by action_type
+          db
+            .selectFrom("mod_actions")
+            .select((eb) => [
+              "action_type",
+              eb.fn.countAll<number>().as("count"),
+            ])
+            .where("guild_id", "=", guildId)
+            .where("created_at", ">=", thirtyDaysAgo)
+            .groupBy("action_type"),
 
-    // Report counts grouped by reason
-    run(
-      db
-        .selectFrom("reported_messages")
-        .select((eb) => ["reason", eb.fn.countAll<number>().as("count")])
-        .where("guild_id", "=", guildId)
-        .where("created_at", ">=", thirtyDaysAgo)
-        .groupBy("reason")
-        .orderBy("count", "desc"),
-    ),
+          // Report counts grouped by reason
+          db
+            .selectFrom("reported_messages")
+            .select((eb) => ["reason", eb.fn.countAll<number>().as("count")])
+            .where("guild_id", "=", guildId)
+            .where("created_at", ">=", thirtyDaysAgo)
+            .groupBy("reason")
+            .orderBy("count", "desc"),
 
-    // Open escalations (full rows, limited to 10)
-    run(
-      db
-        .selectFrom("escalations")
-        .select([
-          "id",
-          "reported_user_id",
-          "initiator_id",
-          "created_at",
-          "thread_id",
-        ])
-        .where("guild_id", "=", guildId)
-        .where("resolution", "is", null)
-        .orderBy("created_at", "desc")
-        .limit(10),
+          // Open escalations (full rows, limited to 10)
+          db
+            .selectFrom("escalations")
+            .select([
+              "id",
+              "reported_user_id",
+              "initiator_id",
+              "created_at",
+              "thread_id",
+            ])
+            .where("guild_id", "=", guildId)
+            .where("resolution", "is", null)
+            .orderBy("created_at", "desc")
+            .limit(10),
+        ]).pipe(Effect.withConcurrency("unbounded"));
+      }),
     ),
 
     // Subscription tier
     SubscriptionService.getProductTier(guildId),
   ]);
+
+  const [dailyReportRows, modActionsByType, reportsByReason, openEscalations] =
+    dbResults;
 
   // Build sparkline array (30 days, zero-filled)
   const sparkline = new Array(30).fill(0);

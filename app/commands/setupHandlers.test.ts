@@ -15,8 +15,10 @@ import {
 
 // Mock modules with side effects before importing the module under test
 vi.mock("#~/AppRuntime", () => ({
-  db: {},
-  runTakeFirst: vi.fn(),
+  runEffect: vi.fn(),
+}));
+vi.mock("#~/Database", () => ({
+  DatabaseService: {},
 }));
 vi.mock("#~/effects/discordSdk", () => ({}));
 vi.mock("#~/effects/observability", () => ({

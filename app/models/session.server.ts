@@ -7,8 +7,11 @@ import {
 } from "react-router";
 import { AuthorizationCode } from "simple-oauth2";
 
-import { db, run, runTakeFirst, runTakeFirstOrThrow } from "#~/AppRuntime";
-import { type DB } from "#~/Database";
+import { Effect } from "effect";
+
+import { runEffect } from "#~/AppRuntime";
+import { DatabaseService, type DB } from "#~/Database";
+import { NotFoundError } from "#~/effects/errors";
 import {
   applicationId,
   discordSecret,
@@ -71,15 +74,23 @@ const {
     sameSite: "lax",
   },
   async createData(data, expires) {
-    const result = await runTakeFirstOrThrow(
-      db
-        .insertInto("sessions")
-        .values({
-          id: randomUUID(),
-          data: JSON.stringify(data),
-          expires: expires?.toString(),
-        })
-        .returning("id"),
+    const result = await runEffect(
+      Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        const rows = yield* db
+          .insertInto("sessions")
+          .values({
+            id: randomUUID(),
+            data: JSON.stringify(data),
+            expires: expires?.toString(),
+          })
+          .returning("id");
+        if (rows[0] === undefined)
+          return yield* Effect.fail(
+            new NotFoundError({ resource: "db record", id: "" }),
+          );
+        return rows[0];
+      }),
     );
     if (!result.id) {
       console.error({ result, data, expires });
@@ -88,8 +99,15 @@ const {
     return result.id;
   },
   async readData(id) {
-    const result = await runTakeFirst(
-      db.selectFrom("sessions").where("id", "=", id).selectAll(),
+    const result = await runEffect(
+      Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        const rows = yield* db
+          .selectFrom("sessions")
+          .where("id", "=", id)
+          .selectAll();
+        return rows[0];
+      }),
     );
 
     if (!result?.data) return null;
@@ -101,16 +119,24 @@ const {
       : result.data;
   },
   async updateData(id, data, expires) {
-    await run(
-      db
-        .updateTable("sessions")
-        .set("data", JSON.stringify(data))
-        .set("expires", expires?.toString() ?? null)
-        .where("id", "=", id),
+    await runEffect(
+      Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        yield* db
+          .updateTable("sessions")
+          .set("data", JSON.stringify(data))
+          .set("expires", expires?.toString() ?? null)
+          .where("id", "=", id);
+      }),
     );
   },
   async deleteData(id) {
-    await run(db.deleteFrom("sessions").where("id", "=", id));
+    await runEffect(
+      Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        yield* db.deleteFrom("sessions").where("id", "=", id);
+      }),
+    );
   },
 });
 export type DbSession = Awaited<ReturnType<typeof getDbSession>>;

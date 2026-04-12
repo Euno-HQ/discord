@@ -1,5 +1,9 @@
 // learn more: https://fly.io/docs/reference/configuration/#services-http_checks
-import { db, run } from "#~/AppRuntime";
+import { Effect } from "effect";
+
+import { SqlClient } from "@effect/sql";
+
+import { runEffect } from "#~/AppRuntime";
 
 import type { Route } from "./+types/healthcheck";
 
@@ -12,13 +16,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     // if we can connect to the database and make a simple query
     // and make a HEAD request to ourselves, then we're good.
     await Promise.all([
-      run(
-        db
-          // @ts-expect-error because kysely doesn't generate types for sqlite_master
-          .selectFrom("sqlite_master")
-          // @ts-expect-error because kysely doesn't generate types for sqlite_master
-          .select("name")
-          .where("type", "=", "table"),
+      runEffect(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql.unsafe(
+            "SELECT name FROM sqlite_master WHERE type = 'table'",
+          );
+        }),
       ),
       fetch(url.toString(), { method: "HEAD" }).then((r) => {
         if (!r.ok) {

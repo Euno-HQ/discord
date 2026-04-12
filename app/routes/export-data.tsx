@@ -1,4 +1,7 @@
-import { db, run, runTakeFirst } from "#~/AppRuntime";
+import { Effect } from "effect";
+
+import { runEffect } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
 import { log, trackPerformance } from "#~/helpers/observability";
 import { requireUser } from "#~/models/session.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
@@ -62,8 +65,15 @@ export async function loader({ request }: Route.LoaderArgs) {
         });
 
         // Get guild settings
-        const guild = await runTakeFirst(
-          db.selectFrom("guilds").selectAll().where("id", "=", guildId),
+        const guild = await runEffect(
+          Effect.gen(function* () {
+            const db = yield* DatabaseService;
+            const rows = yield* db
+              .selectFrom("guilds")
+              .selectAll()
+              .where("id", "=", guildId);
+            return rows[0];
+          }),
         );
 
         if (guild) {
@@ -87,12 +97,15 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
 
         // Get message statistics (aggregated, no actual message content)
-        const messageStats = await run(
-          db
-            .selectFrom("message_stats")
-            .selectAll()
-            .where("guild_id", "=", guildId)
-            .limit(1000), // Limit to prevent huge exports
+        const messageStats = await runEffect(
+          Effect.gen(function* () {
+            const db = yield* DatabaseService;
+            return yield* db
+              .selectFrom("message_stats")
+              .selectAll()
+              .where("guild_id", "=", guildId)
+              .limit(1000); // Limit to prevent huge exports
+          }),
         );
 
         if (messageStats.length > 0) {
@@ -108,13 +121,16 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
 
         // Get reported messages (sanitized)
-        const reportedMessages = await run(
-          db
-            .selectFrom("reported_messages")
-            .selectAll()
-            .where("guild_id", "=", guildId)
-            .where("deleted_at", "is", null)
-            .limit(100),
+        const reportedMessages = await runEffect(
+          Effect.gen(function* () {
+            const db = yield* DatabaseService;
+            return yield* db
+              .selectFrom("reported_messages")
+              .selectAll()
+              .where("guild_id", "=", guildId)
+              .where("deleted_at", "is", null)
+              .limit(100);
+          }),
         );
 
         if (reportedMessages.length > 0) {
@@ -188,23 +204,25 @@ export async function action({ request }: Route.ActionArgs) {
       }
 
       // Soft delete reported messages for this guild
-      await run(
-        db
-          .updateTable("reported_messages")
-          .set({ deleted_at: new Date().toISOString() })
-          .where("guild_id", "=", guildId),
+      await runEffect(
+        Effect.gen(function* () {
+          const db = yield* DatabaseService;
+          yield* db
+            .updateTable("reported_messages")
+            .set({ deleted_at: new Date().toISOString() })
+            .where("guild_id", "=", guildId);
+
+          yield* db
+            .deleteFrom("message_stats")
+            .where("guild_id", "=", guildId);
+
+          yield* db
+            .deleteFrom("guild_subscriptions")
+            .where("guild_id", "=", guildId);
+
+          yield* db.deleteFrom("guilds").where("id", "=", guildId);
+        }),
       );
-
-      // Delete message stats
-      await run(db.deleteFrom("message_stats").where("guild_id", "=", guildId));
-
-      // Delete subscription data
-      await run(
-        db.deleteFrom("guild_subscriptions").where("guild_id", "=", guildId),
-      );
-
-      // Delete guild settings
-      await run(db.deleteFrom("guilds").where("id", "=", guildId));
 
       log("info", "DataDelete", "Guild data deleted successfully", {
         userId: user.id,

@@ -1,7 +1,8 @@
 import { ChannelType, Events, type Client } from "discord.js";
 import { Effect } from "effect";
 
-import { db, runGatedFeature } from "#~/AppRuntime";
+import { runGatedFeature } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
 import { logEffect } from "#~/effects/observability";
 import { getMessageStats } from "#~/helpers/discord.js";
 import { threadStats } from "#~/helpers/metrics";
@@ -40,8 +41,9 @@ export async function startActivityTracking(client: Client) {
       "analytics",
       msg.guildId,
       Effect.gen(function* () {
+        const db = yield* DatabaseService;
         const info = yield* getMessageStats(msg);
-        const channelInfo = yield* Effect.promise(() => getOrFetchChannel(msg));
+        const channelInfo = yield* getOrFetchChannel(msg);
 
         yield* db.insertInto("message_stats").values({
           ...info,
@@ -89,6 +91,7 @@ export async function startActivityTracking(client: Client) {
       "analytics",
       msg.guildId,
       Effect.gen(function* () {
+        const db = yield* DatabaseService;
         const info = yield* getMessageStats(msg);
 
         yield* db
@@ -131,6 +134,7 @@ export async function startActivityTracking(client: Client) {
       "analytics",
       msg.guildId,
       Effect.gen(function* () {
+        const db = yield* DatabaseService;
         yield* db.deleteFrom("message_stats").where("message_id", "=", msg.id);
 
         yield* logEffect("debug", "ActivityTracker", "Message stats deleted", {
@@ -163,6 +167,7 @@ export async function startActivityTracking(client: Client) {
       "analytics",
       guildId,
       Effect.gen(function* () {
+        const db = yield* DatabaseService;
         yield* db
           .updateTable("message_stats")
           .where("message_id", "=", reaction.message.id)
@@ -194,6 +199,7 @@ export async function startActivityTracking(client: Client) {
       "analytics",
       guildId,
       Effect.gen(function* () {
+        const db = yield* DatabaseService;
         yield* db
           .updateTable("message_stats")
           .where("message_id", "=", reaction.message.id)

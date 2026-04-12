@@ -1,7 +1,9 @@
+import { Effect } from "effect";
 import { sql } from "kysely";
 import { partition } from "lodash-es";
 
-import { run } from "#~/AppRuntime";
+import { runEffect } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
 import type { CodeStats } from "#~/helpers/discord";
 import { descriptiveStats, percentile } from "#~/helpers/statistics";
 import { createMessageStatsQuery } from "#~/models/activity.server";
@@ -265,78 +267,92 @@ export async function getCohortMetrics(
   end: string,
   minMessageThreshold = 10,
 ): Promise<UserCohortMetrics[]> {
-  // Get aggregated user data
-  const userStatsQuery = createMessageStatsQuery(guildId, start, end)
-    .select((eb) => [
-      "author_id",
-      eb.fn.count<number>("author_id").as("message_count"),
-      eb.fn.sum<number>("word_count").as("word_count"),
-      eb.fn.sum<number>("react_count").as("reaction_count"),
-      eb.fn("group_concat", ["code_stats"]).as("code_stats_json"),
-      eb
-        .fn("date", [eb("sent_at", "/", eb.lit(1000)), sql.lit("unixepoch")])
-        .as("date"),
-    ])
-    .groupBy("author_id")
-    .having((eb) =>
-      eb(eb.fn.count<number>("author_id"), ">=", minMessageThreshold),
-    );
+  return runEffect(
+    Effect.gen(function* () {
+      const db = yield* DatabaseService;
 
-  const userStats = await run(userStatsQuery);
+      // Get aggregated user data
+      const userStatsQuery = createMessageStatsQuery(db, guildId, start, end)
+        .select((eb) => [
+          "author_id",
+          eb.fn.count<number>("author_id").as("message_count"),
+          eb.fn.sum<number>("word_count").as("word_count"),
+          eb.fn.sum<number>("react_count").as("reaction_count"),
+          eb.fn("group_concat", ["code_stats"]).as("code_stats_json"),
+          eb
+            .fn("date", [
+              eb("sent_at", "/", eb.lit(1000)),
+              sql.lit("unixepoch"),
+            ])
+            .as("date"),
+        ])
+        .groupBy("author_id")
+        .having((eb) =>
+          eb(eb.fn.count<number>("author_id"), ">=", minMessageThreshold),
+        );
 
-  // Get daily activity for streak calculation
-  const dailyActivityQuery = createMessageStatsQuery(guildId, start, end)
-    .select(({ fn, eb, lit }) => [
-      "author_id",
-      fn.count<number>("author_id").as("message_count"),
-      eb
-        .fn("date", [eb("sent_at", "/", lit(1000)), sql.lit("unixepoch")])
-        .as("date"),
-    ])
-    .groupBy(["author_id", "date"])
-    .where(
-      "author_id",
-      "in",
-      userStats.map((u) => u.author_id),
-    );
+      const userStats = yield* userStatsQuery;
 
-  const dailyActivity = await run(dailyActivityQuery);
+      // Get daily activity for streak calculation
+      const dailyActivityQuery = createMessageStatsQuery(
+        db,
+        guildId,
+        start,
+        end,
+      )
+        .select(({ fn, eb, lit }) => [
+          "author_id",
+          fn.count<number>("author_id").as("message_count"),
+          eb
+            .fn("date", [eb("sent_at", "/", lit(1000)), sql.lit("unixepoch")])
+            .as("date"),
+        ])
+        .groupBy(["author_id", "date"])
+        .where(
+          "author_id",
+          "in",
+          userStats.map((u) => u.author_id),
+        );
 
-  // Group daily activity by user
-  const dailyActivityByUser = dailyActivity.reduce(
-    (acc, record) => {
-      const userId = record.author_id;
-      if (!acc[userId]) acc[userId] = [];
-      acc[userId].push({
-        date: record.date as string,
-        messageCount: record.message_count,
+      const dailyActivity = yield* dailyActivityQuery;
+
+      // Group daily activity by user
+      const dailyActivityByUser = dailyActivity.reduce(
+        (acc, record) => {
+          const userId = record.author_id;
+          if (!acc[userId]) acc[userId] = [];
+          acc[userId].push({
+            date: record.date as string,
+            messageCount: record.message_count,
+          });
+          return acc;
+        },
+        {} as Record<string, { date: string; messageCount: number }[]>,
+      );
+
+      return userStats.map((user) => {
+        const codeStatsArray = user.code_stats_json
+          ? JSON.stringify(user.code_stats_json).split(",").filter(Boolean)
+          : [];
+
+        const userDailyActivity = fillDateGaps(
+          dailyActivityByUser[user.author_id] || [],
+          start,
+          end,
+          { messageCount: 0 },
+        );
+
+        return {
+          userId: user.author_id,
+          messageCount: user.message_count,
+          wordCount: user.word_count || 0,
+          reactionCount: user.reaction_count || 0,
+          codeStats: aggregateCodeStats(codeStatsArray),
+          streakData: calculateStreakData(userDailyActivity),
+        };
       });
-      return acc;
-    },
-    {} as Record<string, { date: string; messageCount: number }[]>,
+    }),
   );
-
-  return userStats.map((user) => {
-    const codeStatsArray = user.code_stats_json
-      ? JSON.stringify(user.code_stats_json).split(",").filter(Boolean)
-      : [];
-
-    const userDailyActivity = fillDateGaps(
-      dailyActivityByUser[user.author_id] || [],
-      start,
-      end,
-      { messageCount: 0 },
-    );
-
-    return {
-      userId: user.author_id,
-      messageCount: user.message_count,
-      wordCount: user.word_count || 0,
-      reactionCount: user.reaction_count || 0,
-      codeStats: aggregateCodeStats(codeStatsArray),
-      streakData: calculateStreakData(userDailyActivity),
-    };
-  });
 }
 
 export function calculateCohortBenchmarks(
