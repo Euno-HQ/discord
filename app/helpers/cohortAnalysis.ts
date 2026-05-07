@@ -272,7 +272,7 @@ export async function getCohortMetrics(
       eb.fn.count<number>("author_id").as("message_count"),
       eb.fn.sum<number>("word_count").as("word_count"),
       eb.fn.sum<number>("react_count").as("reaction_count"),
-      eb.fn("group_concat", ["code_stats"]).as("code_stats_json"),
+      eb.fn("group_concat", ["code_stats", eb.lit("|||")]).as("code_stats_json"),
       eb
         .fn("date", [eb("sent_at", "/", eb.lit(1000)), sql.lit("unixepoch")])
         .as("date"),
@@ -318,7 +318,7 @@ export async function getCohortMetrics(
 
   return userStats.map((user) => {
     const codeStatsArray = user.code_stats_json
-      ? JSON.stringify(user.code_stats_json).split(",").filter(Boolean)
+      ? user.code_stats_json.split("|||").filter(Boolean)
       : [];
 
     const userDailyActivity = fillDateGaps(
