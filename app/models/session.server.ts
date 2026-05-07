@@ -9,6 +9,7 @@ import { AuthorizationCode } from "simple-oauth2";
 
 import { db, run, runTakeFirst, runTakeFirstOrThrow } from "#~/AppRuntime";
 import { type DB } from "#~/Database";
+import { BOT_PERMISSIONS } from "#~/helpers/botPermissions";
 import {
   applicationId,
   discordSecret,
@@ -228,8 +229,7 @@ export async function initOauthLogin({
 
   // Add bot-specific parameters
   if (flow !== "user") {
-    // Core permissions: ManageRoles + SendMessages + ManageMessages + ReadMessageHistory + ModerateMembers
-    authParams.permissions = "1099512100352";
+    authParams.permissions = BOT_PERMISSIONS.toString();
     if (guildId) {
       authParams.guild_id = guildId;
     }

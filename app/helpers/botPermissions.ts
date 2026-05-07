@@ -15,8 +15,10 @@ export const REQUIRED_PERMISSIONS = [
     flag: PermissionFlagsBits.SendMessagesInThreads,
     name: "Send Messages in Threads",
   },
+  { flag: PermissionFlagsBits.EmbedLinks, name: "Embed Links" },
   { flag: PermissionFlagsBits.ViewChannel, name: "View Channels" },
   { flag: PermissionFlagsBits.KickMembers, name: "Kick Members" },
+  { flag: PermissionFlagsBits.BanMembers, name: "Ban Members" },
   { flag: PermissionFlagsBits.ModerateMembers, name: "Moderate Members" },
   {
     flag: PermissionFlagsBits.CreatePrivateThreads,
