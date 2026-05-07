@@ -32,6 +32,7 @@ import { startEscalationResolver } from "#~/discord/escalationResolver";
 import { initDiscordBot } from "#~/discord/gateway";
 import onboardGuild from "#~/discord/onboardGuild";
 import { startReactjiChanneler } from "#~/discord/reactjiChanneler";
+import { startTicketClosureService } from "#~/discord/ticketClosureService";
 import { applicationKey } from "#~/helpers/env.server";
 
 // Side-effect import: registers job handler and notification builder
@@ -126,6 +127,9 @@ const startup = Effect.gen(function* () {
   // Start escalation resolver scheduler (must be after client is ready)
   startEscalationResolver(discordClient);
   runtime.runFork(runJobRunner);
+
+  // Start ticket closure scheduler — processes pending closures every minute
+  startTicketClosureService();
 
   yield* logEffect("info", "Gateway", "Gateway initialization completed", {
     guildCount: discordClient.guilds.cache.size,
