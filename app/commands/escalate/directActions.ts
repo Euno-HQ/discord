@@ -215,7 +215,14 @@ export const banUserAndDeleteMessages = (
           DELETE_MESSAGE_SECONDS,
         ),
       catch: (error) => new DiscordApiError({ operation: "ban", cause: error }),
-    });
+    }).pipe(
+      Effect.withSpan("discord.ban", {
+        attributes: {
+          userId: reportedUserId,
+          deleteMessageSeconds: DELETE_MESSAGE_SECONDS,
+        },
+      }),
+    );
 
     yield* logEffect(
       "info",
