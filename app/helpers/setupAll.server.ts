@@ -7,15 +7,17 @@ import {
   Routes,
   type APIChannel,
   type APIMessage,
+  type APIRole,
   type RESTPostAPIGuildChannelJSONBody,
 } from "discord-api-types/v10";
 
-import { db, run } from "#~/AppRuntime";
+import { db, run, runTakeFirst } from "#~/AppRuntime";
 import { DEFAULT_MESSAGE_TEXT } from "#~/commands/setupHoneypot";
 import { DEFAULT_BUTTON_TEXT } from "#~/commands/setupTickets";
 import { ssrDiscordSdk } from "#~/discord/api";
 import { applicationId } from "#~/helpers/env.server";
 import { log } from "#~/helpers/observability";
+import { createJob } from "#~/jobs/jobRunner";
 import { registerGuild, setSettings, SETTINGS } from "#~/models/guilds.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
@@ -30,6 +32,8 @@ export interface SetupAllOptions {
   deletionLogChannel?: string; // channel ID, CREATE_SENTINEL, or undefined (disabled)
   honeypotChannel?: string; // channel ID, CREATE_SENTINEL, or undefined (disabled)
   ticketChannel?: string; // channel ID, CREATE_SENTINEL, or undefined (disabled)
+  applicationChannel?: string; // channel ID, CREATE_SENTINEL, or undefined (disabled)
+  memberRoleId?: string; // role ID or undefined
 }
 
 export interface SetupAllResult {
@@ -37,6 +41,8 @@ export interface SetupAllResult {
   deletionLogChannelId: string | undefined;
   honeypotChannelId: string | undefined;
   ticketChannelId: string | undefined;
+  applicationChannelId: string | undefined;
+  memberRoleId: string | undefined;
   created: string[]; // names of channels that were created
 }
 
@@ -91,12 +97,31 @@ export async function setupAll(
     deletionLogChannel,
     honeypotChannel,
     ticketChannel,
+    applicationChannel,
+    memberRoleId,
   } = options;
 
   const created: string[] = [];
 
   // Register guild (idempotent)
   await registerGuild(guildId);
+
+  // --- Load existing config to skip unchanged values ---
+  const existingAppConfig = await runTakeFirst(
+    db
+      .selectFrom("application_config")
+      .select(["channel_id", "role_id"])
+      .where("guild_id", "=", guildId),
+  );
+  const existingHoneypot = await runTakeFirst(
+    db
+      .selectFrom("honeypot_config")
+      .select("channel_id")
+      .where("guild_id", "=", guildId),
+  );
+  const existingTicket = await runTakeFirst(
+    db.selectFrom("tickets_config").select("channel_id"),
+  );
 
   // --- Logs category (created if mod-log or deletion-log needs creation) ---
   let logsCategoryId: string | undefined;
@@ -140,6 +165,165 @@ export async function setupAll(
     deletionLogChannelId = deletionLogChannel;
   }
 
+  // --- Member application channel (optional) ---
+  let applicationChannelId: string | undefined;
+  let resolvedMemberRoleId: string | undefined;
+
+  // Check if application config is unchanged (skip re-sending message + bulk job)
+  const appChannelUnchanged =
+    applicationChannel !== undefined &&
+    applicationChannel !== CREATE_SENTINEL &&
+    memberRoleId !== undefined &&
+    memberRoleId !== CREATE_SENTINEL &&
+    existingAppConfig?.channel_id === applicationChannel &&
+    existingAppConfig?.role_id === memberRoleId;
+
+  if (appChannelUnchanged) {
+    // Application config unchanged — just set IDs for settings save, skip all API calls
+    applicationChannelId = applicationChannel;
+    resolvedMemberRoleId = memberRoleId;
+    log(
+      "info",
+      "setupAll",
+      "Application config unchanged, skipping message + bulk job",
+      { guildId, applicationChannelId, resolvedMemberRoleId },
+    );
+  } else if (applicationChannel !== undefined && memberRoleId !== undefined) {
+    // Step 1: Resolve @member role
+    if (memberRoleId === CREATE_SENTINEL) {
+      const role = (await ssrDiscordSdk.post(Routes.guildRoles(guildId), {
+        body: { name: "Member", permissions: "0" },
+      })) as APIRole;
+      resolvedMemberRoleId = role.id;
+      created.push("Member role");
+    } else {
+      resolvedMemberRoleId = memberRoleId;
+    }
+
+    // Step 2: Fetch current @everyone role permissions
+    const roles = (await ssrDiscordSdk.get(
+      Routes.guildRoles(guildId),
+    )) as APIRole[];
+    const everyoneRole = roles.find((r) => r.id === guildId);
+    const everyonePerms = BigInt(everyoneRole?.permissions ?? "0");
+
+    // Step 3: Fetch current @member role permissions
+    const memberRole = roles.find((r) => r.id === resolvedMemberRoleId);
+    const memberPerms = BigInt(memberRole?.permissions ?? "0");
+
+    // Step 4: Create #apply-here channel (before permission changes so bot still has access)
+    if (applicationChannel === CREATE_SENTINEL) {
+      const botUserId = applicationId;
+      const ch = await createGuildChannel(guildId, {
+        name: "apply-here",
+        type: ChannelType.GuildText,
+        permission_overwrites: [
+          {
+            id: guildId,
+            type: OverwriteType.Role,
+            deny: String(
+              PermissionFlagsBits.ViewChannel |
+                PermissionFlagsBits.SendMessages |
+                PermissionFlagsBits.CreatePublicThreads |
+                PermissionFlagsBits.CreatePrivateThreads,
+            ),
+          },
+          {
+            id: moderatorRoleId,
+            type: OverwriteType.Role,
+            allow: String(
+              PermissionFlagsBits.ViewChannel |
+                PermissionFlagsBits.ReadMessageHistory,
+            ),
+          },
+          {
+            id: resolvedMemberRoleId,
+            type: OverwriteType.Role,
+            deny: String(PermissionFlagsBits.ViewChannel),
+          },
+          {
+            id: botUserId,
+            type: OverwriteType.Member,
+            allow: String(
+              PermissionFlagsBits.ViewChannel |
+                PermissionFlagsBits.SendMessages |
+                PermissionFlagsBits.CreatePrivateThreads |
+                PermissionFlagsBits.ManageThreads,
+            ),
+          },
+        ],
+      });
+      applicationChannelId = ch.id;
+      created.push("apply-here");
+    } else {
+      applicationChannelId = applicationChannel;
+    }
+
+    // Step 5: Post "Apply to Join" button
+    const appMessage = await sendChannelMessage(applicationChannelId, {
+      content:
+        "Welcome! To gain access to this server, please submit an application. A moderator will review it shortly.",
+      components: [
+        {
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              type: ComponentType.Button,
+              label: "Apply to Join",
+              style: ButtonStyle.Primary,
+              custom_id: "apply-to-join",
+            },
+          ],
+        },
+      ],
+    });
+
+    // Step 6: Insert into application_config (upsert on re-setup)
+    await run(
+      db
+        .insertInto("application_config")
+        .values({
+          guild_id: guildId,
+          channel_id: applicationChannelId,
+          role_id: resolvedMemberRoleId,
+          message_id: appMessage.id,
+        })
+        .onConflict((c) =>
+          c.column("guild_id").doUpdateSet({
+            channel_id: applicationChannelId,
+            role_id: resolvedMemberRoleId,
+            message_id: appMessage.id,
+          }),
+        ),
+    );
+
+    // Create a persistent background job for bulk role assignment.
+    // The job will scan for the final cursor on first execution, then
+    // assign the role in batches with checkpointing, and finally update
+    // permissions once all members have the role.
+    const bulkRoleId = resolvedMemberRoleId;
+    await createJob({
+      guildId,
+      jobType: "bulk_role_assignment",
+      payload: {
+        roleId: bulkRoleId,
+        everyonePermissions: String(everyonePerms),
+        memberPermissions: String(memberPerms),
+      },
+      totalPhases: 1,
+      notifyChannelId: modLogChannelId,
+    });
+
+    log(
+      "info",
+      "setupAll",
+      "Created background job for member-role assignment",
+      {
+        guildId,
+      },
+    );
+  }
+
   // --- Save guild settings ---
   await setSettings(guildId, {
     [SETTINGS.modLog]: modLogChannelId,
@@ -147,6 +331,12 @@ export async function setupAll(
     [SETTINGS.restricted]: restrictedRoleId,
     ...(deletionLogChannelId
       ? { [SETTINGS.deletionLog]: deletionLogChannelId }
+      : {}),
+    ...(resolvedMemberRoleId
+      ? { [SETTINGS.memberRole]: resolvedMemberRoleId }
+      : {}),
+    ...(applicationChannelId
+      ? { [SETTINGS.applicationChannel]: applicationChannelId }
       : {}),
   });
 
@@ -193,7 +383,12 @@ export async function setupAll(
     ticketChannelId = ticketChannel;
   }
 
-  if (ticketChannelId !== undefined) {
+  const ticketUnchanged =
+    ticketChannelId !== undefined &&
+    ticketChannel !== CREATE_SENTINEL &&
+    existingTicket?.channel_id === ticketChannelId;
+
+  if (ticketChannelId !== undefined && !ticketUnchanged) {
     const ticketMessage = await sendChannelMessage(ticketChannelId, {
       components: [
         {
@@ -233,6 +428,8 @@ export async function setupAll(
     deletionLogChannelId,
     honeypotChannelId,
     ticketChannelId,
+    applicationChannelId,
+    memberRoleId: resolvedMemberRoleId,
     created,
   };
 }

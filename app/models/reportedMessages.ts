@@ -186,6 +186,24 @@ export const getUserReportStats = (userId: string, guildId: string) =>
   );
 
 /**
+ * Count distinct guilds where this user has spam reports (for cross-guild spam detection).
+ */
+export const getSpamReportGuildCount = (userId: string) =>
+  Effect.gen(function* () {
+    const kysely = yield* DatabaseService;
+
+    const [result] = yield* kysely
+      .selectFrom("reported_messages")
+      .select(({ fn }) => fn.count("guild_id").distinct().as("count"))
+      .where("reported_user_id", "=", userId)
+      .where("reason", "=", ReportReasons.spam);
+
+    return Number(result?.count ?? 0);
+  }).pipe(
+    Effect.withSpan("getSpamReportGuildCount", { attributes: { userId } }),
+  );
+
+/**
  * Count spam reports for a user in a guild (used for auto-kick threshold).
  */
 export const getSpamReportCount = (userId: string, guildId: string) =>

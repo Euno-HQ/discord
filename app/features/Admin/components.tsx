@@ -260,6 +260,56 @@ export function InvoiceTable({
   );
 }
 
+/** Badge showing job status with color coding. Processing jobs verified by Supervisor. */
+export function JobStatusBadge({
+  status,
+  fiberActive,
+}: {
+  status: string;
+  fiberActive: boolean;
+}) {
+  const colors: Record<string, string> = {
+    pending: "bg-yellow-500/20 text-yellow-400",
+    processing: fiberActive
+      ? "bg-green-500/20 text-green-400"
+      : "bg-orange-500/20 text-orange-400",
+    completed: "bg-gray-500/20 text-gray-400",
+    failed: "bg-red-500/20 text-red-400",
+  };
+
+  const label = status === "processing" && !fiberActive ? "stale" : status;
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[status] ?? "bg-gray-500/20 text-gray-300"}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+/** Progress display for multi-phase jobs. */
+export function JobProgressBar({
+  phase,
+  totalPhases,
+  progressCount,
+}: {
+  phase: number;
+  totalPhases: number;
+  progressCount: number;
+}) {
+  return (
+    <div className="text-xs text-gray-400">
+      <span>
+        Phase {phase}/{totalPhases}
+      </span>
+      {progressCount > 0 && (
+        <span className="ml-2">{progressCount.toLocaleString()} processed</span>
+      )}
+    </div>
+  );
+}
+
 export function PostHogSection({
   featureFlags,
   groupProperties,

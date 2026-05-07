@@ -13,6 +13,8 @@ export const SETTINGS = {
   restricted: "restricted",
   quorum: "quorum",
   deletionLog: "deletionLog",
+  memberRole: "memberRole",
+  applicationChannel: "applicationChannel",
 } as const;
 
 export const DEFAULT_QUORUM = 3;
@@ -25,6 +27,8 @@ interface SettingsRecord {
   [SETTINGS.restricted]?: string;
   [SETTINGS.quorum]?: number;
   [SETTINGS.deletionLog]?: string;
+  [SETTINGS.memberRole]?: string;
+  [SETTINGS.applicationChannel]?: string;
 }
 
 export const fetchGuild = async (guildId: string) => {
@@ -79,7 +83,10 @@ export const setSettings = async (
     db
       .updateTable("guilds")
       .set("settings", (eb) =>
-        eb.fn("json_patch", ["settings", eb.val(JSON.stringify(settings))]),
+        eb.fn("json_patch", [
+          eb.fn("coalesce", ["settings", eb.val("{}")]),
+          eb.val(JSON.stringify(settings)),
+        ]),
       )
       .where("id", "=", guildId),
   );

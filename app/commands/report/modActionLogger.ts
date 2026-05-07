@@ -13,6 +13,7 @@ import {
 import { Effect } from "effect";
 
 import { runEffect } from "#~/AppRuntime";
+import { resolveApplicationsForDeparture } from "#~/commands/memberApplications";
 import { logAutomod } from "#~/commands/report/automodLog.ts";
 import { AUDIT_LOG_WINDOW_MS, fetchAuditLogEntry } from "#~/discord/auditLog";
 import { fetchUser } from "#~/effects/discordSdk.ts";
@@ -175,6 +176,9 @@ const memberRemoveEffect = (member: GuildMember | PartialGuildMember) =>
       guildId: guild.id,
     });
 
+    // Resolve any pending applications for this user
+    yield* resolveApplicationsForDeparture(guild.id, user.id);
+
     const auditLogs = yield* fetchKickAuditLog(guild, user);
     if (!auditLogs || auditLogs.actionType === "left") {
       return;
@@ -263,7 +267,8 @@ const memberUpdateEffect = (
       },
     );
 
-    const entry = yield* fetchAuditLogEntry(
+    // Look for a manual timeout first (MemberUpdate audit log)
+    let entry = yield* fetchAuditLogEntry(
       guild,
       user.id,
       AuditLogEvent.MemberUpdate,
@@ -279,7 +284,29 @@ const memberUpdateEffect = (
         }),
     );
 
-    const executor = entry?.executor ?? null;
+    // Fall back to automod timeout if no manual entry found
+    let isAutomod = false;
+    if (!entry && isTimeoutApplied) {
+      const automodEntry = yield* fetchAuditLogEntry(
+        guild,
+        user.id,
+        AuditLogEvent.AutoModerationUserCommunicationDisabled,
+        (entries) =>
+          entries.find((e) => {
+            if (e.targetId !== user.id) return false;
+            if (Date.now() - e.createdTimestamp >= AUDIT_LOG_WINDOW_MS)
+              return false;
+            return true;
+          }),
+      );
+      if (automodEntry) {
+        isAutomod = true;
+        entry = automodEntry;
+      }
+    }
+
+    // For automod, the executor is the rule creator (misleading), so use null
+    const executor = isAutomod ? null : (entry?.executor ?? null);
     const reason = entry?.reason ?? "";
 
     // Skip if the bot performed this action (it's already logged elsewhere)
@@ -299,6 +326,7 @@ const memberUpdateEffect = (
         executor,
         reason,
         duration: duration!,
+        isAutomod,
       });
     } else {
       yield* logModAction({

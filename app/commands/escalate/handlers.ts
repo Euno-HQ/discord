@@ -24,6 +24,7 @@ import {
 
 import {
   banUser,
+  banUserAndDeleteMessages,
   deleteMessages,
   kickUser,
   restrictUser,
@@ -180,11 +181,13 @@ const expedite = (interaction: MessageComponentInteraction) =>
     Effect.catchAll((error) =>
       logEffect("error", "EscalationHandlers", "Expedite failed", {
         error,
-      }).pipe(() =>
-        interactionFollowUp(interaction, {
-          content: "Something went wrong while executing the resolution.",
-          flags: [MessageFlags.Ephemeral],
-        }).pipe(Effect.catchAll(() => Effect.void)),
+      }).pipe(
+        Effect.zipRight(
+          interactionFollowUp(interaction, {
+            content: "Something went wrong while executing the resolution.",
+            flags: [MessageFlags.Ephemeral],
+          }).pipe(Effect.catchAll(() => Effect.void)),
+        ),
       ),
     ),
   );
@@ -234,10 +237,12 @@ const escalate = (interaction: MessageComponentInteraction) =>
     Effect.catchAll((error) =>
       logEffect("error", "EscalationHandlers", "Error handling escalation", {
         error,
-      }).pipe(() =>
-        interactionEditReply(interaction, {
-          content: "Failed to process escalation",
-        }).pipe(Effect.catchAll(() => Effect.void)),
+      }).pipe(
+        Effect.zipRight(
+          interactionEditReply(interaction, {
+            content: "Failed to process escalation",
+          }).pipe(Effect.catchAll(() => Effect.void)),
+        ),
       ),
     ),
   );
@@ -269,10 +274,12 @@ export const EscalationHandlers = {
       Effect.catchAll((error) =>
         logEffect("error", "EscalationHandlers", "Error deleting messages", {
           error,
-        }).pipe(() =>
-          interactionEditReply(interaction, {
-            content: "Failed to delete messages",
-          }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(
+          Effect.zipRight(
+            interactionEditReply(interaction, {
+              content: "Failed to delete messages",
+            }).pipe(Effect.catchAll(() => Effect.void)),
+          ),
         ),
       ),
     ),
@@ -295,11 +302,13 @@ export const EscalationHandlers = {
       Effect.catchAll((error) =>
         logEffect("error", "EscalationHandlers", "Error kicking user", {
           error,
-        }).pipe(() =>
-          interactionReply(interaction, {
-            content: "Failed to kick user",
-            flags: [MessageFlags.Ephemeral],
-          }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(
+          Effect.zipRight(
+            interactionReply(interaction, {
+              content: "Failed to kick user",
+              flags: [MessageFlags.Ephemeral],
+            }).pipe(Effect.catchAll(() => Effect.void)),
+          ),
         ),
       ),
       Effect.withSpan("escalation-kickUser", {
@@ -335,11 +344,52 @@ export const EscalationHandlers = {
       Effect.catchAll((error) =>
         logEffect("error", "EscalationHandlers", "Error banning user", {
           error,
-        }).pipe(() =>
-          interactionReply(interaction, {
-            content: "Failed to ban user",
-            flags: [MessageFlags.Ephemeral],
-          }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(
+          Effect.zipRight(
+            interactionReply(interaction, {
+              content: "Failed to ban user",
+              flags: [MessageFlags.Ephemeral],
+            }).pipe(Effect.catchAll(() => Effect.void)),
+          ),
+        ),
+      ),
+    ),
+  banAndDelete: (interaction: MessageComponentInteraction) =>
+    Effect.gen(function* () {
+      const reportedUserId = interaction.customId.split("|")[1];
+
+      const result = yield* banUserAndDeleteMessages(interaction);
+
+      yield* interactionReply(
+        interaction,
+        `<@${reportedUserId}> banned + messages deleted by ${result.actionBy}`,
+      );
+    }).pipe(
+      Effect.withSpan("escalation-banUserAndDeleteMessages", {
+        attributes: {
+          guildId: interaction.guildId,
+          userId: interaction.user.id,
+        },
+      }),
+      Effect.catchTag("NotAuthorizedError", () =>
+        interactionReply(interaction, {
+          content: "Insufficient permissions",
+          flags: [MessageFlags.Ephemeral],
+        }).pipe(Effect.catchAll(() => Effect.void)),
+      ),
+      Effect.catchAll((error) =>
+        logEffect(
+          "error",
+          "EscalationHandlers",
+          "Error banning user and deleting messages",
+          { error },
+        ).pipe(
+          Effect.zipRight(
+            interactionReply(interaction, {
+              content: "Failed to ban user and delete messages",
+              flags: [MessageFlags.Ephemeral],
+            }).pipe(Effect.catchAll(() => Effect.void)),
+          ),
         ),
       ),
     ),
@@ -369,11 +419,13 @@ export const EscalationHandlers = {
       Effect.catchAll((error) =>
         logEffect("error", "EscalationHandlers", "Error restricting user", {
           error,
-        }).pipe(() =>
-          interactionReply(interaction, {
-            content: "Failed to restrict user",
-            flags: [MessageFlags.Ephemeral],
-          }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(
+          Effect.zipRight(
+            interactionReply(interaction, {
+              content: "Failed to restrict user",
+              flags: [MessageFlags.Ephemeral],
+            }).pipe(Effect.catchAll(() => Effect.void)),
+          ),
         ),
       ),
     ),
@@ -403,11 +455,13 @@ export const EscalationHandlers = {
       Effect.catchAll((error) =>
         logEffect("error", "EscalationHandlers", "Error timing out user", {
           error,
-        }).pipe(() =>
-          interactionReply(interaction, {
-            content: "Failed to timeout user",
-            flags: [MessageFlags.Ephemeral],
-          }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(
+          Effect.zipRight(
+            interactionReply(interaction, {
+              content: "Failed to timeout user",
+              flags: [MessageFlags.Ephemeral],
+            }).pipe(Effect.catchAll(() => Effect.void)),
+          ),
         ),
       ),
     ),
