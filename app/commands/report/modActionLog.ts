@@ -23,6 +23,7 @@ export type ModActionReport =
       executor: User | PartialUser | null;
       reason: string;
       duration: string;
+      isAutomod?: boolean;
     }
   | {
       guild: Guild;
@@ -69,27 +70,7 @@ export const logModAction = (report: ModActionReport) =>
     ]);
 
     // Construct the log message
-    const actionLabels: Record<ModActionReport["actionType"], string> = {
-      ban: "was banned",
-      kick: "was kicked",
-      unban: "was unbanned",
-      timeout: "was timed out",
-      timeout_removed: "had timeout removed",
-      left: "left",
-    };
-    const actionLabel = actionLabels[actionType];
-    const executorMention = executor
-      ? ` by <@${executor.id}> (${executor.username})`
-      : " by unknown";
-
-    const reasonText = reason ? ` ${reason}` : " for no reason";
-    const durationText =
-      actionType === "timeout" ? ` for ${report.duration}` : "";
-
-    const logContent = truncateMessage(
-      `<@${user.id}> (${user.username}) ${actionLabel}${durationText}
--# ${executorMention}${reasonText} <t:${Math.floor(Date.now() / 1000)}:R>`,
-    ).trim();
+    const logContent = formatModActionMessage(report);
 
     // Send log to thread
     const logMessage = yield* sendMessage(thread, {
@@ -119,3 +100,38 @@ export const logModAction = (report: ModActionReport) =>
       },
     }),
   );
+
+/**
+ * Pure function that formats the mod action log message content.
+ * Extracted from logModAction for testability.
+ */
+export function formatModActionMessage(
+  report: Exclude<ModActionReport, { actionType: "left" }>,
+): string {
+  const { user, actionType, executor, reason } = report;
+
+  const actionLabels: Record<ModActionReport["actionType"], string> = {
+    ban: "was banned",
+    kick: "was kicked",
+    unban: "was unbanned",
+    timeout: "was timed out",
+    timeout_removed: "had timeout removed",
+    left: "left",
+  };
+  const actionLabel = actionLabels[actionType];
+  const isAutomod = "isAutomod" in report && report.isAutomod === true;
+  const executorMention = executor
+    ? ` by <@${executor.id}> (${executor.username})`
+    : isAutomod
+      ? " by AutoMod"
+      : " by unknown";
+
+  const reasonText = reason ? ` ${reason}` : isAutomod ? "" : " for no reason";
+  const durationText =
+    actionType === "timeout" ? ` for ${report.duration}` : "";
+
+  return truncateMessage(
+    `<@${user.id}> (${user.username}) ${actionLabel}${durationText}
+-# ${executorMention}${reasonText} <t:${Math.floor(Date.now() / 1000)}:R>`,
+  ).trim();
+}

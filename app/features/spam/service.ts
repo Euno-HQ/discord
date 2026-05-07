@@ -6,13 +6,19 @@
 import type { GuildMember, Message } from "discord.js";
 import { Context, Effect, Layer } from "effect";
 
-import { getMessageContent } from "#~/helpers/discord.ts";
 import { DatabaseService } from "#~/Database.ts";
 import { logEffect } from "#~/effects/observability.ts";
+import { getMessageContent } from "#~/helpers/discord.ts";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server.ts";
 
 import { analyzeBehavior } from "./behaviorAnalyzer.ts";
-import { analyzeContent } from "./contentAnalyzer.ts";
+import {
+  analyzeContent,
+  buildContentHash,
+  buildEmbedBody,
+  buildEmbedText,
+  hasLinkInContentOrEmbeds,
+} from "./contentAnalyzer.ts";
 import {
   cleanupTracker,
   getRecentMessages,
@@ -25,7 +31,7 @@ import {
   type SpamSignal,
   type SpamVerdict,
 } from "./spamScorer.ts";
-import { analyzeVelocity } from "./velocityAnalyzer.ts";
+import { analyzeVelocity, getPriorDuplicates } from "./velocityAnalyzer.ts";
 
 export interface ISpamDetectionService {
   readonly checkMessage: (
@@ -168,10 +174,19 @@ export const SpamDetectionServiceLive = Layer.effect(
           // Use forwarding-aware extractor: cross-server forwards store the
           // original text in messageSnapshots, not in message.content.
           const content = getMessageContent(message);
-          const hasLink = content.includes("http");
+
+          // Build a text representation of all embeds for hashing and analysis
+          const embedText = buildEmbedText(message.embeds);
+          const embedBody = buildEmbedBody(message.embeds);
+          const hasLink = hasLinkInContentOrEmbeds(content, message.embeds);
 
           // Record in activity tracker
-          const contentHash = content.toLowerCase().trim();
+          const attachmentIds = Array.from(message.attachments.keys());
+          const contentHash = buildContentHash(
+            content,
+            embedText,
+            attachmentIds,
+          );
           recordMessage(tracker, guildId, userId, {
             messageId: message.id,
             channelId: message.channelId,
@@ -190,7 +205,10 @@ export const SpamDetectionServiceLive = Layer.effect(
           }
 
           // Run pure analyzers
-          const contentSignals = analyzeContent(content);
+          const combinedContent = embedBody
+            ? `${content} ${embedBody}`
+            : content;
+          const contentSignals = analyzeContent(combinedContent);
           const behaviorSignals = analyzeBehavior(message, member);
 
           const recentMessages = getRecentMessages(tracker, guildId, userId);
@@ -202,7 +220,29 @@ export const SpamDetectionServiceLive = Layer.effect(
             ...velocitySignals,
           ];
 
-          return computeVerdict(allSignals);
+          const verdict = computeVerdict(allSignals);
+
+          // When a duplicate velocity signal fires, the prior duplicate messages
+          // had tier=none when they were processed and were never logged.
+          // Attach them to the verdict so the response handler can back-fill
+          // them into reported_messages and clean them up on kick.
+          const hasDuplicateSignal = velocitySignals.some(
+            (s) =>
+              s.name === "duplicate_messages" ||
+              s.name === "cross_channel_spam",
+          );
+          if (hasDuplicateSignal) {
+            const priorDuplicates = getPriorDuplicates(
+              recentMessages,
+              message.id,
+              contentHash,
+            );
+            if (priorDuplicates.length > 0) {
+              return { ...verdict, priorDuplicates };
+            }
+          }
+
+          return verdict;
         }).pipe(
           Effect.catchAll((error) =>
             Effect.gen(function* () {

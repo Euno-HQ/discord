@@ -68,7 +68,7 @@ async function seed() {
   // Create free guild with subscription
   await db
     .insertInto("guilds")
-    .values({ id: TEST_GUILD_FREE_ID, settings: null })
+    .values({ id: TEST_GUILD_FREE_ID, settings: JSON.stringify({}) })
     .onConflict((oc) => oc.doNothing())
     .execute();
 
@@ -90,7 +90,7 @@ async function seed() {
   // Create paid guild with subscription
   await db
     .insertInto("guilds")
-    .values({ id: TEST_GUILD_PAID_ID, settings: null })
+    .values({ id: TEST_GUILD_PAID_ID, settings: JSON.stringify({}) })
     .onConflict((oc) => oc.doNothing())
     .execute();
 

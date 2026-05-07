@@ -1,0 +1,984 @@
+import {
+  ButtonStyle,
+  OverwriteType,
+  PermissionFlagsBits,
+  Routes,
+  TextInputStyle,
+  type APIRole,
+} from "discord-api-types/v10";
+import {
+  ActionRowBuilder,
+  ChannelType,
+  ComponentType,
+  InteractionType,
+  MessageFlags,
+  ModalBuilder,
+  TextInputBuilder,
+} from "discord.js";
+import { Effect } from "effect";
+
+import { DatabaseService } from "#~/Database.ts";
+import { ssrDiscordSdk as rest } from "#~/discord/api";
+import {
+  fetchChannel,
+  interactionReply,
+  interactionUpdate,
+} from "#~/effects/discordSdk.ts";
+import { DiscordApiError } from "#~/effects/errors.ts";
+import { logEffect } from "#~/effects/observability.ts";
+import {
+  hasModRole,
+  quoteMessageContent,
+  type MessageComponentCommand,
+  type ModalCommand,
+} from "#~/helpers/discord";
+import { activateMembershipGateEffect } from "#~/jobs/bulkRoleAssignment";
+import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { getOrCreateUserThread } from "#~/models/userThreads";
+
+/**
+ * Resolve any pending applications for a user who left the guild.
+ * Called from GuildMemberRemove handler.
+ */
+export const resolveApplicationsForDeparture = (
+  guildId: string,
+  userId: string,
+) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+    const [pending] = yield* db
+      .selectFrom("applications")
+      .select("id")
+      .where("guild_id", "=", guildId)
+      .where("user_id", "=", userId)
+      .where("status", "=", "pending");
+
+    if (!pending) return;
+
+    yield* db
+      .updateTable("applications")
+      .set({
+        status: "denied",
+        resolved_at: new Date().toISOString(),
+      })
+      .where("id", "=", pending.id);
+
+    yield* resolveLogMessage(
+      guildId,
+      userId,
+      `<@${userId}> left the server — application auto-denied`,
+    );
+  }).pipe(Effect.catchAll(() => Effect.void));
+
+/** Update the mod-log summary message with resolution details. */
+const resolveLogMessage = (
+  guildId: string,
+  applicantUserId: string,
+  content: string,
+) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+    const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(guildId, [
+      SETTINGS.modLog,
+    ]);
+
+    const [app] = yield* db
+      .selectFrom("applications")
+      .select("log_message_id")
+      .where("guild_id", "=", guildId)
+      .where("user_id", "=", applicantUserId)
+      .orderBy("created_at", "desc");
+
+    if (!app?.log_message_id) return;
+
+    yield* Effect.tryPromise(() =>
+      rest.patch(Routes.channelMessage(modLog, app.log_message_id!), {
+        body: {
+          content,
+          allowedMentions: {},
+        },
+      }),
+    );
+  }).pipe(Effect.catchAll(() => Effect.void));
+
+export const Command = [
+  {
+    command: {
+      type: InteractionType.MessageComponent,
+      name: "apply-to-join",
+    },
+    handler: (interaction) =>
+      Effect.gen(function* () {
+        // Block duplicate applications before showing the modal
+        const db = yield* DatabaseService;
+        const existingApp = yield* db
+          .selectFrom("applications")
+          .selectAll()
+          .where("guild_id", "=", interaction.guildId!)
+          .where("user_id", "=", interaction.user.id)
+          .where("status", "=", "pending");
+
+        if (existingApp[0]) {
+          yield* interactionReply(interaction, {
+            content:
+              "You already have a pending application. Please wait for a moderator to review it.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const modal = new ModalBuilder()
+          .setCustomId("modal-apply-to-join")
+          .setTitle("Apply to join this community");
+
+        const aboutRow = new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setLabel("Tell us about yourself")
+            .setCustomId("about")
+            .setMinLength(20)
+            .setMaxLength(500)
+            .setRequired(true)
+            .setStyle(TextInputStyle.Paragraph),
+        );
+        const referralRow = new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setLabel("How did you find this server?")
+            .setCustomId("referral")
+            .setMaxLength(200)
+            .setRequired(true)
+            .setStyle(TextInputStyle.Short),
+        );
+        const goalsRow = new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setLabel("What do you hope to get from this community?")
+            .setCustomId("goals")
+            .setMaxLength(300)
+            .setRequired(true)
+            .setStyle(TextInputStyle.Paragraph),
+        );
+
+        // @ts-expect-error busted types
+        modal.addComponents(aboutRow, referralRow, goalsRow);
+
+        yield* Effect.tryPromise(() => interaction.showModal(modal));
+      }).pipe(
+        Effect.catchAll(() => Effect.void),
+        Effect.withSpan("applyToJoinModal", {
+          attributes: {
+            guildId: interaction.guildId,
+            userId: interaction.user.id,
+          },
+        }),
+      ),
+  } satisfies MessageComponentCommand,
+
+  {
+    command: {
+      type: InteractionType.ModalSubmit,
+      name: "modal-apply-to-join",
+    },
+    handler: (interaction) =>
+      Effect.gen(function* () {
+        if (
+          !interaction.channel ||
+          !interaction.guild ||
+          !interaction.message
+        ) {
+          yield* interactionReply(interaction, {
+            content: "Something went wrong while submitting your application",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const { fields, user } = interaction;
+        const about = fields.getTextInputValue("about");
+        const referral = fields.getTextInputValue("referral");
+        const goals = fields.getTextInputValue("goals");
+
+        const db = yield* DatabaseService;
+        const configRows = yield* db
+          .selectFrom("application_config")
+          .selectAll()
+          .where("guild_id", "=", interaction.guild.id);
+        const config = configRows[0];
+
+        if (!config) {
+          yield* interactionReply(interaction, {
+            content:
+              "Applications are not configured for this server. Please contact an administrator.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const applyChannel = yield* fetchChannel(
+          interaction.guild,
+          config.channel_id,
+        );
+
+        if (
+          !applyChannel?.isTextBased() ||
+          applyChannel.type !== ChannelType.GuildText
+        ) {
+          yield* interactionReply(interaction, {
+            content:
+              "The application channel is misconfigured. Please contact an administrator.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const thread = yield* Effect.tryPromise(() =>
+          applyChannel.threads.create({
+            name: `Application: ${user.username}`,
+            autoArchiveDuration: 60 * 24 * 7,
+            type: ChannelType.PrivateThread,
+            invitable: false,
+          }),
+        );
+
+        // Record the application in the database
+        yield* db.insertInto("applications").values({
+          id: crypto.randomUUID(),
+          guild_id: interaction.guild.id,
+          user_id: user.id,
+          thread_id: thread.id,
+          status: "pending",
+          created_at: new Date().toISOString(),
+        });
+
+        const applicationComponents = [
+          {
+            type: ComponentType.TextDisplay,
+            content: `Tell us about yourself\n${quoteMessageContent(about)}`,
+          },
+          {
+            type: ComponentType.TextDisplay,
+            content: `How did you find this server?\n${quoteMessageContent(referral)}`,
+          },
+          {
+            type: ComponentType.TextDisplay,
+            content: `What do you hope to get from this community?\n${quoteMessageContent(goals)}`,
+          },
+        ];
+
+        // Post application receipt to the applicant's private thread
+        yield* Effect.tryPromise(() =>
+          rest.post(Routes.channelMessages(thread.id), {
+            body: {
+              flags: MessageFlags.IsComponentsV2,
+              components: [
+                {
+                  type: ComponentType.Container,
+                  components: [
+                    {
+                      type: ComponentType.TextDisplay,
+                      content: `<@${user.id}>, your application has been received. A moderator will review it shortly.`,
+                    },
+                    { type: ComponentType.Separator },
+                    ...applicationComponents,
+                    { type: ComponentType.Separator },
+                    {
+                      type: ComponentType.ActionRow,
+                      components: [
+                        {
+                          type: ComponentType.Button,
+                          custom_id: `app-retract||${user.id}`,
+                          label: "Retract Application",
+                          style: ButtonStyle.Secondary,
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+        );
+
+        // Post review message with approve/deny buttons to the mod-log user thread
+        const modThread = yield* getOrCreateUserThread(interaction.guild, user);
+
+        const reviewMsg = (yield* Effect.tryPromise(() =>
+          rest.post(Routes.channelMessages(modThread.id), {
+            body: {
+              flags: MessageFlags.IsComponentsV2,
+              components: [
+                {
+                  type: ComponentType.Container,
+                  components: [
+                    {
+                      type: ComponentType.TextDisplay,
+                      content: `## Application from ${user.displayName}\nApplicant thread: <#${thread.id}>`,
+                    },
+                    { type: ComponentType.Separator },
+                    ...applicationComponents,
+                    { type: ComponentType.Separator },
+                    {
+                      type: ComponentType.ActionRow,
+                      components: [
+                        {
+                          type: ComponentType.Button,
+                          custom_id: `app-approve||${user.id}`,
+                          label: "Approve",
+                          style: ButtonStyle.Success,
+                        },
+                        {
+                          type: ComponentType.Button,
+                          custom_id: `app-deny||${user.id}`,
+                          label: "Deny",
+                          style: ButtonStyle.Danger,
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+        )) as { id: string };
+
+        // Post summary to mod-log channel with link to the review message
+        const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(
+          interaction.guild.id,
+          [SETTINGS.modLog],
+        );
+        const reviewLink = `https://discord.com/channels/${interaction.guild.id}/${modThread.id}/${reviewMsg.id}`;
+        const logMsg = (yield* Effect.tryPromise(() =>
+          rest.post(Routes.channelMessages(modLog), {
+            body: {
+              content: `<@${user.id}> applied to join — [review application](${reviewLink})`,
+              allowedMentions: {},
+            },
+          }),
+        )) as { id: string };
+
+        // Store the log message ID so we can update it on resolution
+        yield* db
+          .updateTable("applications")
+          .set({
+            log_message_id: logMsg.id,
+            review_message_id: reviewMsg.id,
+          })
+          .where("guild_id", "=", interaction.guild.id)
+          .where("user_id", "=", user.id)
+          .where("status", "=", "pending");
+
+        yield* interactionReply(interaction, {
+          content:
+            "Your application has been submitted! A moderator will review it shortly.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            yield* logEffect(
+              "error",
+              "MemberApplication",
+              "Error submitting application",
+              { error },
+            );
+
+            yield* interactionReply(interaction, {
+              content: "Something went wrong while submitting your application",
+              flags: MessageFlags.Ephemeral,
+            }).pipe(Effect.catchAll(() => Effect.void));
+          }),
+        ),
+        Effect.withSpan("modalApplyToJoin", {
+          attributes: {
+            guildId: interaction.guildId,
+            userId: interaction.user.id,
+          },
+        }),
+      ),
+  } satisfies ModalCommand,
+
+  {
+    command: {
+      type: InteractionType.MessageComponent,
+      name: "app-approve",
+    },
+    handler: (interaction) =>
+      Effect.gen(function* () {
+        const [, applicantUserId] = interaction.customId.split("||");
+
+        if (!interaction.guild || !interaction.member) {
+          yield* interactionReply(interaction, {
+            content: "Something went wrong",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const guildId = interaction.guild.id;
+        const approverId = interaction.user.id;
+
+        // Verify the user has the moderator role
+        const { [SETTINGS.moderator]: modRoleId } = yield* fetchSettingsEffect(
+          guildId,
+          [SETTINGS.moderator],
+        );
+        if (!hasModRole(interaction, modRoleId)) {
+          yield* interactionReply(interaction, {
+            content: "Only moderators can approve applications.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const db = yield* DatabaseService;
+        const configRows = yield* db
+          .selectFrom("application_config")
+          .selectAll()
+          .where("guild_id", "=", guildId);
+        const config = configRows[0];
+
+        if (!config) {
+          yield* interactionReply(interaction, {
+            content: "Application config not found for this server.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Verify a pending application exists before taking action
+        const [appRow] = yield* db
+          .selectFrom("applications")
+          .selectAll()
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId)
+          .where("status", "=", "pending");
+
+        if (!appRow) {
+          yield* interactionReply(interaction, {
+            content:
+              "No pending application found — it may have already been resolved or retracted.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        yield* db
+          .updateTable("applications")
+          .set({
+            status: "approved",
+            reviewed_by: approverId,
+            resolved_at: new Date().toISOString(),
+          })
+          .where("id", "=", appRow.id);
+
+        yield* Effect.tryPromise(() =>
+          rest.put(
+            Routes.guildMemberRole(guildId, applicantUserId, config.role_id),
+          ),
+        );
+
+        yield* interactionReply(interaction, {
+          content: `<@${applicantUserId}>'s application has been approved by <@${approverId}>.`,
+          allowedMentions: {},
+        });
+
+        // Attempt to notify the applicant via DM
+        yield* Effect.tryPromise(async () => {
+          const dmChannel = (await rest.post(Routes.userChannels(), {
+            body: { recipient_id: applicantUserId },
+          })) as { id: string };
+          await rest.post(Routes.channelMessages(dmChannel.id), {
+            body: {
+              content: `Your application to **${interaction.guild!.name}** has been approved! Welcome to the community!`,
+            },
+          });
+        }).pipe(Effect.catchAll(() => Effect.void));
+
+        const appMsgLink = `https://discord.com/channels/${guildId}/${interaction.channelId}/${interaction.message?.id}`;
+        yield* resolveLogMessage(
+          guildId,
+          applicantUserId,
+          `<@${applicantUserId}>'s [application](${appMsgLink}) approved by <@${approverId}>`,
+        );
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            yield* logEffect(
+              "error",
+              "MemberApplication",
+              "Error approving application",
+              { error },
+            );
+
+            yield* interactionReply(interaction, {
+              content: "Something went wrong while approving the application",
+              flags: MessageFlags.Ephemeral,
+            }).pipe(Effect.catchAll(() => Effect.void));
+          }),
+        ),
+        Effect.withSpan("appApprove", {
+          attributes: {
+            guildId: interaction.guildId,
+            userId: interaction.user.id,
+          },
+        }),
+      ),
+  } satisfies MessageComponentCommand,
+
+  {
+    command: {
+      type: InteractionType.MessageComponent,
+      name: "app-deny",
+    },
+    handler: (interaction) =>
+      Effect.gen(function* () {
+        const [, applicantUserId] = interaction.customId.split("||");
+
+        if (!interaction.guild || !interaction.member) {
+          yield* interactionReply(interaction, {
+            content: "Something went wrong",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const guildId = interaction.guild.id;
+        const denierId = interaction.user.id;
+
+        // Verify the user has the moderator role
+        const { [SETTINGS.moderator]: denyModRoleId } =
+          yield* fetchSettingsEffect(guildId, [SETTINGS.moderator]);
+        if (!hasModRole(interaction, denyModRoleId)) {
+          yield* interactionReply(interaction, {
+            content: "Only moderators can deny applications.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const db = yield* DatabaseService;
+
+        // Verify a pending application exists before taking action
+        const [denyAppRow] = yield* db
+          .selectFrom("applications")
+          .selectAll()
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId)
+          .where("status", "=", "pending");
+
+        if (!denyAppRow) {
+          yield* interactionReply(interaction, {
+            content:
+              "No pending application found — it may have already been resolved or retracted.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Notify the applicant via DM before kicking, fall back to thread
+        const dmSent = yield* Effect.tryPromise(async () => {
+          const dmChannel = (await rest.post(Routes.userChannels(), {
+            body: { recipient_id: applicantUserId },
+          })) as { id: string };
+          await rest.post(Routes.channelMessages(dmChannel.id), {
+            body: {
+              content: `Your application to **${interaction.guild!.name}** has been denied.`,
+            },
+          });
+          return true;
+        }).pipe(Effect.catchAll(() => Effect.succeed(false)));
+
+        if (!dmSent && denyAppRow.thread_id) {
+          yield* Effect.tryPromise(() =>
+            rest.post(Routes.channelMessages(denyAppRow.thread_id), {
+              body: {
+                content: `<@${applicantUserId}>, your application has been denied.`,
+              },
+            }),
+          ).pipe(Effect.catchAll(() => Effect.void));
+        }
+
+        yield* db
+          .updateTable("applications")
+          .set({
+            status: "denied",
+            reviewed_by: denierId,
+            resolved_at: new Date().toISOString(),
+          })
+          .where("id", "=", denyAppRow.id);
+
+        // Kick the applicant
+        yield* Effect.tryPromise(() =>
+          rest.delete(Routes.guildMember(guildId, applicantUserId), {
+            reason: `Application denied by ${denierId}`,
+          }),
+        );
+
+        yield* interactionReply(interaction, {
+          content: `<@${applicantUserId}>'s application has been denied by <@${denierId}>. They have been kicked from the server.`,
+          allowedMentions: {},
+        });
+
+        const appMsgLink = `https://discord.com/channels/${guildId}/${interaction.channelId}/${interaction.message?.id}`;
+        yield* resolveLogMessage(
+          guildId,
+          applicantUserId,
+          `<@${applicantUserId}>'s [application](${appMsgLink}) denied by <@${denierId}> (kicked)`,
+        );
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            yield* logEffect(
+              "error",
+              "MemberApplication",
+              "Error denying application",
+              { error },
+            );
+
+            yield* interactionReply(interaction, {
+              content: "Something went wrong while denying the application",
+              flags: MessageFlags.Ephemeral,
+            }).pipe(Effect.catchAll(() => Effect.void));
+          }),
+        ),
+        Effect.withSpan("appDeny", {
+          attributes: {
+            guildId: interaction.guildId,
+            userId: interaction.user.id,
+          },
+        }),
+      ),
+  } satisfies MessageComponentCommand,
+
+  {
+    command: {
+      type: InteractionType.MessageComponent,
+      name: "app-retract",
+    },
+    handler: (interaction) =>
+      Effect.gen(function* () {
+        const [, applicantUserId] = interaction.customId.split("||");
+
+        if (!interaction.guild) {
+          yield* interactionReply(interaction, {
+            content: "Something went wrong",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Only the applicant can retract their own application
+        if (interaction.user.id !== applicantUserId) {
+          yield* interactionReply(interaction, {
+            content: "Only the applicant can retract their application.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const guildId = interaction.guild.id;
+
+        const db = yield* DatabaseService;
+        yield* db
+          .updateTable("applications")
+          .set({
+            status: "retracted",
+            reviewed_by: applicantUserId,
+            resolved_at: new Date().toISOString(),
+          })
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId)
+          .where("status", "=", "pending");
+
+        // Disable approve/deny buttons on the mod thread review message
+        const [retractAppRow] = yield* db
+          .selectFrom("applications")
+          .select(["review_message_id"])
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId)
+          .orderBy("created_at", "desc");
+
+        const [modThreadRow] = yield* db
+          .selectFrom("user_threads")
+          .select("thread_id")
+          .where("guild_id", "=", guildId)
+          .where("user_id", "=", applicantUserId);
+
+        if (retractAppRow?.review_message_id && modThreadRow?.thread_id) {
+          // Fetch the existing message to preserve application content
+          const existingMsg = (yield* Effect.tryPromise(() =>
+            rest.get(
+              Routes.channelMessage(
+                modThreadRow.thread_id,
+                retractAppRow.review_message_id!,
+              ),
+            ),
+          ).pipe(Effect.catchAll(() => Effect.succeed(null)))) as {
+            components?: { components?: unknown[] }[];
+          } | null;
+
+          if (existingMsg?.components?.[0]) {
+            const container = existingMsg.components[0] as {
+              components: unknown[];
+            };
+            // Replace the header and swap buttons for disabled ones
+            const updatedComponents = container.components.map(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Components V2 types not fully supported
+              (c: any) => {
+                if (
+                  c.type === ComponentType.TextDisplay &&
+                  c.content?.startsWith("## Application from")
+                ) {
+                  return {
+                    ...c,
+                    content: `## Application from <@${applicantUserId}>\n*Retracted by applicant*`,
+                  };
+                }
+                if (c.type === ComponentType.ActionRow) {
+                  return {
+                    type: ComponentType.ActionRow,
+                    components: [
+                      {
+                        type: ComponentType.Button,
+                        custom_id: `app-approve||${applicantUserId}`,
+                        label: "Approve",
+                        style: ButtonStyle.Success,
+                        disabled: true,
+                      },
+                      {
+                        type: ComponentType.Button,
+                        custom_id: `app-deny||${applicantUserId}`,
+                        label: "Deny",
+                        style: ButtonStyle.Danger,
+                        disabled: true,
+                      },
+                    ],
+                  };
+                }
+                return c;
+              },
+            );
+
+            yield* Effect.tryPromise(() =>
+              rest.patch(
+                Routes.channelMessage(
+                  modThreadRow.thread_id,
+                  retractAppRow.review_message_id!,
+                ),
+                {
+                  body: {
+                    flags: MessageFlags.IsComponentsV2,
+                    components: [
+                      {
+                        ...existingMsg.components![0],
+                        components: updatedComponents,
+                      },
+                    ],
+                  },
+                },
+              ),
+            ).pipe(Effect.catchAll(() => Effect.void));
+          }
+        }
+
+        yield* interactionReply(interaction, {
+          content:
+            "Your application has been retracted. You can apply again at any time.",
+        });
+
+        yield* resolveLogMessage(
+          guildId,
+          applicantUserId,
+          `<@${applicantUserId}> retracted their application`,
+        );
+
+        yield* Effect.tryPromise(() =>
+          rest.patch(Routes.channel(interaction.channelId), {
+            body: { archived: true, locked: true },
+          }),
+        );
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            yield* logEffect(
+              "error",
+              "MemberApplication",
+              "Error retracting application",
+              { error },
+            );
+
+            yield* interactionReply(interaction, {
+              content: "Something went wrong while retracting the application",
+              flags: MessageFlags.Ephemeral,
+            }).pipe(Effect.catchAll(() => Effect.void));
+          }),
+        ),
+        Effect.withSpan("appRetract", {
+          attributes: {
+            guildId: interaction.guildId,
+            userId: interaction.user.id,
+          },
+        }),
+      ),
+  } satisfies MessageComponentCommand,
+
+  {
+    command: {
+      type: InteractionType.MessageComponent,
+      name: "activate-gate",
+    },
+    handler: (interaction) =>
+      Effect.gen(function* () {
+        const [, guildId] = interaction.customId.split("|");
+
+        if (!interaction.guild || !interaction.member) {
+          yield* interactionReply(interaction, {
+            content: "Something went wrong",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Verify the user has the moderator role
+        const { [SETTINGS.moderator]: modRoleId } = yield* fetchSettingsEffect(
+          guildId,
+          [SETTINGS.moderator],
+        );
+        if (!hasModRole(interaction, modRoleId)) {
+          yield* interactionReply(interaction, {
+            content: "Only moderators can activate the membership gate.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Load application_config to get role_id
+        const db = yield* DatabaseService;
+        const [config] = yield* db
+          .selectFrom("application_config")
+          .selectAll()
+          .where("guild_id", "=", guildId);
+
+        if (!config) {
+          yield* interactionReply(interaction, {
+            content:
+              "Application config not found. Re-run `/setup` to configure.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Fetch current role permissions from Discord API
+        const roles = (yield* Effect.tryPromise({
+          try: () => rest.get(Routes.guildRoles(guildId)),
+          catch: (error) =>
+            new DiscordApiError({ operation: "fetchGuildRoles", cause: error }),
+        })) as APIRole[];
+
+        const everyoneRole = roles.find((r) => r.id === guildId);
+        const memberRole = roles.find((r) => r.id === config.role_id);
+
+        if (!everyoneRole || !memberRole) {
+          yield* interactionReply(interaction, {
+            content:
+              "Could not find required roles. Re-run `/setup` to configure.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        // Idempotency check: if @everyone already has ViewChannel denied, gate is active
+        const everyonePerms = BigInt(everyoneRole.permissions);
+        if ((everyonePerms & PermissionFlagsBits.ViewChannel) === 0n) {
+          yield* interactionUpdate(interaction, {
+            flags: MessageFlags.IsComponentsV2,
+            components: [
+              {
+                type: ComponentType.Container,
+                accent_color: 0x57f287, // green
+                components: [
+                  {
+                    type: ComponentType.TextDisplay,
+                    content: `## Membership gate is active\n\nThe membership gate was already activated.`,
+                  },
+                ],
+              },
+            ],
+          });
+          return;
+        }
+
+        // Run the gate activation
+        yield* activateMembershipGateEffect({
+          guildId,
+          roleId: config.role_id,
+          everyonePermissions: everyoneRole.permissions,
+          memberPermissions: memberRole.permissions,
+        });
+
+        // Reveal #apply-here to @everyone now that the gate is active
+        yield* Effect.tryPromise({
+          try: () =>
+            rest.put(Routes.channelPermission(config.channel_id, guildId), {
+              body: {
+                type: OverwriteType.Role,
+                allow: String(
+                  PermissionFlagsBits.ViewChannel |
+                    PermissionFlagsBits.ReadMessageHistory,
+                ),
+                deny: String(
+                  PermissionFlagsBits.SendMessages |
+                    PermissionFlagsBits.CreatePublicThreads |
+                    PermissionFlagsBits.CreatePrivateThreads,
+                ),
+              },
+            }),
+          catch: (error) =>
+            new DiscordApiError({
+              operation: "revealApplyHere",
+              cause: error,
+            }),
+        });
+
+        // On success: replace the message with confirmation
+        yield* interactionUpdate(interaction, {
+          flags: MessageFlags.IsComponentsV2,
+          components: [
+            {
+              type: ComponentType.Container,
+              accent_color: 0x57f287, // green
+              components: [
+                {
+                  type: ComponentType.TextDisplay,
+                  content: `## Membership gate activated\n\nThe membership gate has been activated by <@${interaction.user.id}>. New members will only see the application channel until approved.`,
+                },
+              ],
+            },
+          ],
+        });
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            yield* logEffect(
+              "error",
+              "MembershipGate",
+              "Failed to activate gate",
+              {
+                guildId: interaction.guildId,
+                error: String(error),
+              },
+            );
+            yield* interactionReply(interaction, {
+              content:
+                "Gate activation failed. The button is still active — you can try again.",
+              flags: MessageFlags.Ephemeral,
+            }).pipe(Effect.catchAll(() => Effect.void));
+          }),
+        ),
+        Effect.withSpan("activateGate", {
+          attributes: {
+            guildId: interaction.guildId,
+            userId: interaction.user.id,
+          },
+        }),
+      ),
+  } satisfies MessageComponentCommand,
+];

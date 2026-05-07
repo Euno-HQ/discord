@@ -1,64 +1,60 @@
-import { describe, expect, it } from "vitest";
+import {
+  getMostSevereResolution,
+  resolutions,
+  type Resolution,
+} from "./modResponse.js";
 
-import { getMostSevereResolution, resolutions } from "./modResponse.js";
+test("returns track for empty list", () => {
+  expect(getMostSevereResolution([])).toBe(resolutions.track);
+});
 
-describe("getMostSevereResolution", () => {
-  it("returns most severe when given multiple resolutions", () => {
-    expect(getMostSevereResolution([resolutions.track, resolutions.ban])).toBe(
-      resolutions.ban,
-    );
+test("returns the only resolution when list has one item", () => {
+  expect(getMostSevereResolution([resolutions.kick])).toBe(resolutions.kick);
+});
 
-    expect(
-      getMostSevereResolution([resolutions.timeout, resolutions.restrict]),
-    ).toBe(resolutions.restrict);
+test("returns ban over kick", () => {
+  expect(getMostSevereResolution([resolutions.kick, resolutions.ban])).toBe(
+    resolutions.ban,
+  );
+});
 
-    expect(
-      getMostSevereResolution([
-        resolutions.track,
-        resolutions.kick,
-        resolutions.timeout,
-      ]),
-    ).toBe(resolutions.kick);
-  });
+test("returns ban over all others", () => {
+  const all: Resolution[] = [
+    resolutions.track,
+    resolutions.timeout,
+    resolutions.restrict,
+    resolutions.kick,
+    resolutions.ban,
+  ];
+  expect(getMostSevereResolution(all)).toBe(resolutions.ban);
+});
 
-  it("returns the resolution when given a single resolution", () => {
-    expect(getMostSevereResolution([resolutions.track])).toBe(
-      resolutions.track,
-    );
-    expect(getMostSevereResolution([resolutions.ban])).toBe(resolutions.ban);
-  });
+test("order of input does not matter", () => {
+  expect(
+    getMostSevereResolution([resolutions.ban, resolutions.track]),
+  ).toBe(resolutions.ban);
+  expect(
+    getMostSevereResolution([resolutions.track, resolutions.ban]),
+  ).toBe(resolutions.ban);
+});
 
-  it("handles all resolutions being tied", () => {
-    expect(
-      getMostSevereResolution([
-        resolutions.track,
-        resolutions.timeout,
-        resolutions.restrict,
-        resolutions.kick,
-        resolutions.ban,
-      ]),
-    ).toBe(resolutions.ban);
-  });
+test("severity order: track < timeout < restrict < kick < ban", () => {
+  expect(
+    getMostSevereResolution([resolutions.track, resolutions.timeout]),
+  ).toBe(resolutions.timeout);
+  expect(
+    getMostSevereResolution([resolutions.timeout, resolutions.restrict]),
+  ).toBe(resolutions.restrict);
+  expect(
+    getMostSevereResolution([resolutions.restrict, resolutions.kick]),
+  ).toBe(resolutions.kick);
+  expect(
+    getMostSevereResolution([resolutions.kick, resolutions.ban]),
+  ).toBe(resolutions.ban);
+});
 
-  it("returns track for empty array", () => {
-    expect(getMostSevereResolution([])).toBe(resolutions.track);
-  });
-
-  it("correctly orders all severity levels", () => {
-    expect(getMostSevereResolution([resolutions.ban, resolutions.track])).toBe(
-      resolutions.ban,
-    );
-    expect(
-      getMostSevereResolution([resolutions.track, resolutions.timeout]),
-    ).toBe(resolutions.timeout);
-    expect(
-      getMostSevereResolution([resolutions.timeout, resolutions.restrict]),
-    ).toBe(resolutions.restrict);
-    expect(
-      getMostSevereResolution([resolutions.restrict, resolutions.kick]),
-    ).toBe(resolutions.kick);
-    expect(getMostSevereResolution([resolutions.kick, resolutions.ban])).toBe(
-      resolutions.ban,
-    );
-  });
+test("duplicates do not change result", () => {
+  expect(
+    getMostSevereResolution([resolutions.kick, resolutions.kick, resolutions.track]),
+  ).toBe(resolutions.kick);
 });

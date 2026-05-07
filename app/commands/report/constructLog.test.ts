@@ -1,6 +1,12 @@
 import { MessageReferenceType, type Message } from "discord.js";
 
-import { getMessageContent, isForwardedMessage } from "./constructLog";
+import { ReportReasons } from "#~/models/reportedMessages";
+
+import {
+  getMessageContent,
+  isForwardedMessage,
+  ReadableReasons,
+} from "./constructLog";
 
 // Minimal Message stub — only the fields these helpers inspect.
 const makeMessage = (
@@ -48,6 +54,11 @@ test("isForwardedMessage returns true when reference type is Forward", () => {
   ).toBe(true);
 });
 
+test("isForwardedMessage returns false when reference is undefined", () => {
+  const message = {} as unknown as Parameters<typeof isForwardedMessage>[0];
+  expect(isForwardedMessage(message)).toBe(false);
+});
+
 // ── getMessageContent ──────────────────────────────────────────────────────
 
 test("getMessageContent returns message.content for a plain message", () => {
@@ -82,4 +93,21 @@ test("getMessageContent ignores snapshots for non-forwarded messages", () => {
     snapshotContent: "snapshot that should be ignored",
   });
   expect(getMessageContent(msg)).toBe("reply text");
+});
+
+// ── ReadableReasons ──
+
+test("maps all ReportReasons to readable strings", () => {
+  const allReasons: ReportReasons[] = [
+    ReportReasons.anonReport,
+    ReportReasons.track,
+    ReportReasons.modResolution,
+    ReportReasons.spam,
+    ReportReasons.automod,
+  ];
+  for (const reason of allReasons) {
+    expect(ReadableReasons[reason]).toBeDefined();
+    expect(typeof ReadableReasons[reason]).toBe("string");
+    expect(ReadableReasons[reason].length).toBeGreaterThan(0);
+  }
 });

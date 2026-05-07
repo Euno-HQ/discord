@@ -20,6 +20,14 @@ export interface SpamVerdict {
   signals: SpamSignal[];
   /** Short summary for mod log display */
   summary: string;
+  /**
+   * Prior duplicate messages identified in the activity tracker.
+   * Populated by the service layer when a duplicate_messages or
+   * cross_channel_spam velocity signal fires, so the response handler can
+   * back-fill these earlier messages into reported_messages and ensure
+   * they are cleaned up on kick.
+   */
+  priorDuplicates?: readonly { messageId: string; channelId: string }[];
 }
 
 /** Score thresholds for each response tier */

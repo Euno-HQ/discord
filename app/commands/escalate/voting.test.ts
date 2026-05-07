@@ -1,6 +1,6 @@
 import { resolutions } from "#~/helpers/modResponse";
 
-import { tallyVotes } from "./voting";
+import { shouldTriggerEarlyResolution, tallyVotes } from "./voting";
 
 describe("tallyVotes", () => {
   it("returns empty tally for no votes", () => {
@@ -126,5 +126,63 @@ describe("tallyVotes", () => {
       "mod2",
     ]);
     expect(result.byResolution.get(resolutions.ban)).toEqual(["mod3"]);
+  });
+});
+
+describe("shouldTriggerEarlyResolution", () => {
+  it("triggers when leader count reaches quorum with simple strategy", () => {
+    const tally = tallyVotes([
+      { vote: resolutions.ban, voter_id: "u1" },
+      { vote: resolutions.ban, voter_id: "u2" },
+      { vote: resolutions.ban, voter_id: "u3" },
+    ]);
+    expect(shouldTriggerEarlyResolution(tally, 3, "simple")).toBe(true);
+  });
+
+  it("does not trigger below quorum with simple strategy", () => {
+    const tally = tallyVotes([
+      { vote: resolutions.ban, voter_id: "u1" },
+      { vote: resolutions.ban, voter_id: "u2" },
+    ]);
+    expect(shouldTriggerEarlyResolution(tally, 3, "simple")).toBe(false);
+  });
+
+  it("never triggers with majority strategy", () => {
+    const tally = tallyVotes([
+      { vote: resolutions.ban, voter_id: "u1" },
+      { vote: resolutions.ban, voter_id: "u2" },
+      { vote: resolutions.ban, voter_id: "u3" },
+      { vote: resolutions.ban, voter_id: "u4" },
+      { vote: resolutions.ban, voter_id: "u5" },
+    ]);
+    expect(shouldTriggerEarlyResolution(tally, 3, "majority")).toBe(false);
+  });
+
+  it("triggers with null strategy (defaults to simple behavior)", () => {
+    const tally = tallyVotes([
+      { vote: resolutions.kick, voter_id: "u1" },
+      { vote: resolutions.kick, voter_id: "u2" },
+      { vote: resolutions.kick, voter_id: "u3" },
+    ]);
+    expect(shouldTriggerEarlyResolution(tally, 3, null)).toBe(true);
+  });
+
+  it("triggers when leader exceeds quorum", () => {
+    const tally = tallyVotes([
+      { vote: resolutions.ban, voter_id: "u1" },
+      { vote: resolutions.ban, voter_id: "u2" },
+      { vote: resolutions.ban, voter_id: "u3" },
+      { vote: resolutions.ban, voter_id: "u4" },
+    ]);
+    expect(shouldTriggerEarlyResolution(tally, 3, "simple")).toBe(true);
+  });
+
+  it("does not trigger when total votes reach quorum but no single option does", () => {
+    const tally = tallyVotes([
+      { vote: resolutions.ban, voter_id: "u1" },
+      { vote: resolutions.kick, voter_id: "u2" },
+      { vote: resolutions.restrict, voter_id: "u3" },
+    ]);
+    expect(shouldTriggerEarlyResolution(tally, 3, "simple")).toBe(false);
   });
 });

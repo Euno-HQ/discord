@@ -118,26 +118,26 @@ jobs:
             RANGE_LABEL="since ${LAST_TAG}"
           fi
 
-          cat > /tmp/pr-body.md <<INNEREOF
-## Release Candidate ${VERSION}
+          sed 's/^ \{10\}//' > /tmp/pr-body.md <<EOF
+          ## Release Candidate ${VERSION}
 
-### Commits ${RANGE_LABEL}
+          ### Commits ${RANGE_LABEL}
 
-${COMMIT_LOG}
+          ${COMMIT_LOG}
 
-### Testing Checklist
+          ### Testing Checklist
 
-- [ ] Bot starts and connects to Discord
-- [ ] Slash commands respond correctly
-- [ ] DB migrations run cleanly
-- [ ] No regressions in moderation features
-- [ ] UAT environment tested (https://uat.euno-staging.reactiflux.com)
+          - [ ] Bot starts and connects to Discord
+          - [ ] Slash commands respond correctly
+          - [ ] DB migrations run cleanly
+          - [ ] No regressions in moderation features
+          - [ ] UAT environment tested (https://uat.euno-staging.reactiflux.com)
 
-### Reviewers
+          ### Reviewers
 
-Please review the changes above for any issues. If you find bugs or need
-fixes, push them directly to the \`rc/${VERSION}\` branch before merging.
-INNEREOF
+          Please review the changes above for any issues. If you find bugs or need
+          fixes, push them directly to the \`rc/${VERSION}\` branch before merging.
+          EOF
 
       - name: Update existing RC pull request
         if: steps.check-commits.outputs.count != '0' && steps.existing-pr.outputs.number

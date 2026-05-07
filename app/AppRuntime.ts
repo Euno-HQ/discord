@@ -10,6 +10,7 @@ import {
   type BooleanFlag,
 } from "#~/effects/featureFlags";
 import { PostHogService, PostHogServiceLive } from "#~/effects/posthog";
+import { SupervisorServiceLive } from "#~/effects/supervisor";
 import { TracingLive } from "#~/effects/tracing.js";
 import { SpamDetectionServiceLive } from "#~/features/spam/service.ts";
 import { isProd } from "#~/helpers/env.server.js";
@@ -30,6 +31,7 @@ const AppLayer = Layer.mergeAll(
   FeatureFlagServiceLive,
   Layer.provide(SpamDetectionServiceLive, DatabaseLayer),
   MessageCacheServiceLive,
+  SupervisorServiceLive,
   InfraLayer,
 );
 

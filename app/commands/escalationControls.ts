@@ -19,6 +19,7 @@ export const EscalationCommands: MessageComponentCommand[] = [
   { command: button("escalate-delete"), handler: h.delete },
   { command: button("escalate-kick"), handler: h.kick },
   { command: button("escalate-ban"), handler: h.ban },
+  { command: button("escalate-ban-delete"), handler: h.banAndDelete },
   { command: button("escalate-restrict"), handler: h.restrict },
   { command: button("escalate-timeout"), handler: h.timeout },
 

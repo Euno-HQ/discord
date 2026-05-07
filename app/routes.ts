@@ -6,6 +6,7 @@ export default [
     route("app/", "routes/__auth/app.tsx"),
 
     route("app/admin", "routes/__auth/admin.tsx"),
+    route("app/admin/jobs", "routes/__auth/admin.jobs.tsx"),
     route("app/admin/:guildId", "routes/__auth/admin.$guildId.tsx"),
 
     route("app/:guildId", "routes/__auth/guild.tsx"),
