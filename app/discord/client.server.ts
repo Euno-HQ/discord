@@ -16,6 +16,7 @@ export const client = new Client({
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.DirectMessageReactions,
     GatewayIntentBits.AutoModerationExecution,
+    GatewayIntentBits.AutoModerationConfiguration,
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
