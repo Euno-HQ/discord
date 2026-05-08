@@ -8,6 +8,7 @@ import { Context, Effect, Layer } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
 import { logEffect } from "#~/effects/observability.ts";
+import { getMessageContent } from "#~/helpers/discord.ts";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server.ts";
 
 import { analyzeBehavior } from "./behaviorAnalyzer.ts";
@@ -170,7 +171,9 @@ export const SpamDetectionServiceLive = Layer.effect(
           }
 
           const userId = message.author.id;
-          const content = message.content;
+          // Use forwarding-aware extractor: cross-server forwards store the
+          // original text in messageSnapshots, not in message.content.
+          const content = getMessageContent(message);
 
           // Build a text representation of all embeds for hashing and analysis
           const embedText = buildEmbedText(message.embeds);
