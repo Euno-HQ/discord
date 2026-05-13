@@ -69,6 +69,7 @@ export const upsertDeletionLogThread = (
         user_id: userId,
         guild_id: guildId,
         thread_id: threadId,
+        created_at: new Date().toISOString(),
       })
       .onConflict((oc) =>
         oc

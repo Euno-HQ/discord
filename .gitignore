@@ -22,3 +22,4 @@ vite.config.ts*
 /playwright/.cache/
 /.playwright-mcp/
 .claude/
+.worktrees/
