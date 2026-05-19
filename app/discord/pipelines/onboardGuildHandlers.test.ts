@@ -33,7 +33,7 @@ vi.mock("#~/models/guilds.server", () => ({
   fetchGuild: vi.fn(),
 }));
 vi.mock("#~/discord/deployCommands.server", () => ({
-  deployCommands: vi.fn().mockResolvedValue(undefined),
+  deployToGuild: vi.fn().mockResolvedValue(undefined),
 }));
 
 // --- Helpers ---
@@ -76,23 +76,23 @@ beforeEach(() => {
 
 describe("handleGuildCreate", () => {
   test("skips welcome and deploy when guild already exists (reconnect)", async () => {
-    const { deployCommands } = await import("#~/discord/deployCommands.server");
+    const { deployToGuild } = await import("#~/discord/deployCommands.server");
     vi.mocked(fetchGuild).mockResolvedValue({ id: "guild-1" } as any);
 
     const event = makeGuildCreateEvent();
     await runHandler(handleGuildCreate(event as any));
 
-    expect(deployCommands).not.toHaveBeenCalled();
+    expect(deployToGuild).not.toHaveBeenCalled();
   });
 
   test("deploys commands for new guild install", async () => {
-    const { deployCommands } = await import("#~/discord/deployCommands.server");
+    const { deployToGuild } = await import("#~/discord/deployCommands.server");
     vi.mocked(fetchGuild).mockResolvedValue(undefined as any);
 
     const event = makeGuildCreateEvent();
     await runHandler(handleGuildCreate(event as any));
 
-    expect(deployCommands).toHaveBeenCalled();
+    expect(deployToGuild).toHaveBeenCalled();
   });
 
   test("always emits guildJoined metric", async () => {

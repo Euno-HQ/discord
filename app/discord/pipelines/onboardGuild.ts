@@ -17,23 +17,25 @@ export const onboardGuildPipeline: Effect.Effect<void, never, RuntimeContext> =
       ),
 
       Stream.mapEffect((e) => {
-        switch (e.type) {
-          case "GuildCreate":
-            return handleGuildCreate(e);
-          case "GuildDelete":
-            return handleGuildDelete(e);
-          default:
-            return Effect.void;
-        }
+        const handler = (() => {
+          switch (e.type) {
+            case "GuildCreate":
+              return handleGuildCreate(e);
+            case "GuildDelete":
+              return handleGuildDelete(e);
+            default:
+              return Effect.void;
+          }
+        })();
+        return handler.pipe(
+          Effect.catchAll((err) =>
+            logEffect("warn", "OnboardGuild", "Pipeline handler failed", {
+              eventType: e.type,
+              error: String(err),
+            }),
+          ),
+        );
       }),
-
-      Stream.catchAll((err) =>
-        Stream.fromEffect(
-          logEffect("warn", "OnboardGuild", "Pipeline handler failed", {
-            error: String(err),
-          }),
-        ),
-      ),
 
       Stream.runDrain,
     );
