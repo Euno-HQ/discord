@@ -14,14 +14,12 @@ import { Command as forceBan } from "#~/commands/force-ban";
 import { Command as memberApplications } from "#~/commands/memberApplications";
 import { Command as modreport } from "#~/commands/modreport";
 import { Command as report } from "#~/commands/report";
-import modActionLogger from "#~/commands/report/modActionLogger";
 import { Command as setup } from "#~/commands/setup";
 import { SetupComponentCommands } from "#~/commands/setupHandlers";
 import { Command as setupHoneypot } from "#~/commands/setupHoneypot";
 import { Command as setupReactjiChannel } from "#~/commands/setupReactjiChannel";
 import { Command as setupTicket } from "#~/commands/setupTickets";
 import { Command as track } from "#~/commands/track";
-import { startActivityTracking } from "#~/discord/activityTracker";
 import {
   deployCommands,
   registerCommand,
@@ -32,10 +30,12 @@ import {
   MessageCacheService,
   startMessageCacheExpiration,
 } from "#~/discord/messageCacheService";
-import onboardGuild from "#~/discord/onboardGuild";
+import { activityTrackerPipeline } from "#~/discord/pipelines/activityTracker";
 import { automodPipeline } from "#~/discord/pipelines/automod";
 import { deletionLoggerPipeline } from "#~/discord/pipelines/deletionLogger";
-import { startReactjiChanneler } from "#~/discord/reactjiChanneler";
+import { modActionLoggerPipeline } from "#~/discord/pipelines/modActionLogger";
+import { onboardGuildPipeline } from "#~/discord/pipelines/onboardGuild";
+import { reactjiChannelerPipeline } from "#~/discord/pipelines/reactjiChanneler";
 import { applicationKey } from "#~/helpers/env.server";
 
 // Side-effect import: registers job handler and notification builder
@@ -125,14 +125,7 @@ const startup = Effect.gen(function* () {
     globalThis.__discordOneTimeSetupDone = true;
 
     yield* Effect.tryPromise({
-      try: () =>
-        Promise.allSettled([
-          onboardGuild(discordClient),
-          modActionLogger(discordClient),
-          deployCommands(discordClient),
-          startActivityTracking(discordClient),
-          startReactjiChanneler(discordClient),
-        ]),
+      try: () => Promise.allSettled([deployCommands(discordClient)]),
       catch: (error) =>
         new DiscordApiError({ operation: "init", cause: error }),
     });
@@ -217,6 +210,10 @@ const startup = Effect.gen(function* () {
   globalThis.__pipelineFibers = [
     yield* deletionLoggerPipeline.pipe(Effect.fork),
     yield* automodPipeline.pipe(Effect.fork),
+    yield* modActionLoggerPipeline.pipe(Effect.fork),
+    yield* activityTrackerPipeline.pipe(Effect.fork),
+    yield* onboardGuildPipeline.pipe(Effect.fork),
+    yield* reactjiChannelerPipeline.pipe(Effect.fork),
   ];
   yield* logEffect("info", "Server", "Pipeline fibers forked");
 });

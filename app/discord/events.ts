@@ -1,5 +1,6 @@
 import type {
   AutoModerationActionExecution,
+  AutoModerationRule,
   Guild,
   GuildBan,
   GuildMember,
@@ -95,6 +96,22 @@ export interface AutoModerationActionEvent {
   readonly execution: AutoModerationActionExecution;
 }
 
+export interface AutoModerationRuleCreateEvent {
+  readonly type: "AutoModerationRuleCreate";
+  readonly rule: AutoModerationRule;
+}
+
+export interface AutoModerationRuleDeleteEvent {
+  readonly type: "AutoModerationRuleDelete";
+  readonly rule: AutoModerationRule;
+}
+
+export interface AutoModerationRuleUpdateEvent {
+  readonly type: "AutoModerationRuleUpdate";
+  readonly oldRule: AutoModerationRule | null;
+  readonly newRule: AutoModerationRule;
+}
+
 export interface MessageReactionAddEvent {
   readonly type: "MessageReactionAdd";
   readonly reaction: MessageReaction | PartialMessageReaction;
@@ -130,6 +147,9 @@ export type DiscordEvent =
   | GuildCreateEvent
   | GuildDeleteEvent
   | AutoModerationActionEvent
+  | AutoModerationRuleCreateEvent
+  | AutoModerationRuleDeleteEvent
+  | AutoModerationRuleUpdateEvent
   | MessageReactionAddEvent
   | MessageReactionRemoveEvent
   | ThreadCreateEvent;
