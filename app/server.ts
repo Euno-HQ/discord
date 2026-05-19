@@ -22,7 +22,6 @@ import { Command as setupReactjiChannel } from "#~/commands/setupReactjiChannel"
 import { Command as setupTicket } from "#~/commands/setupTickets";
 import { Command as track } from "#~/commands/track";
 import { startActivityTracking } from "#~/discord/activityTracker";
-import automod from "#~/discord/automod";
 import {
   deployCommands,
   registerCommand,
@@ -34,6 +33,7 @@ import {
   startMessageCacheExpiration,
 } from "#~/discord/messageCacheService";
 import onboardGuild from "#~/discord/onboardGuild";
+import { automodPipeline } from "#~/discord/pipelines/automod";
 import { deletionLoggerPipeline } from "#~/discord/pipelines/deletionLogger";
 import { startReactjiChanneler } from "#~/discord/reactjiChanneler";
 import { applicationKey } from "#~/helpers/env.server";
@@ -128,7 +128,6 @@ const startup = Effect.gen(function* () {
       try: () =>
         Promise.allSettled([
           onboardGuild(discordClient),
-          automod(discordClient),
           modActionLogger(discordClient),
           deployCommands(discordClient),
           startActivityTracking(discordClient),
@@ -217,6 +216,7 @@ const startup = Effect.gen(function* () {
   }
   globalThis.__pipelineFibers = [
     yield* deletionLoggerPipeline.pipe(Effect.fork),
+    yield* automodPipeline.pipe(Effect.fork),
   ];
   yield* logEffect("info", "Server", "Pipeline fibers forked");
 });
