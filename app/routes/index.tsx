@@ -16,10 +16,27 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
   return null;
 };
 
-function StandardBadge() {
+export const meta: Route.MetaFunction = () => [
+  { title: "Euno — Moderation, decided together" },
+  {
+    name: "description",
+    content:
+      "The Discord moderation bot for mod teams of 3+. Mod tracking and anonymous reports are free; escalation voting and shared ticketing are $100 a year.",
+  },
+  { tagName: "link", rel: "canonical", href: "https://euno.reactiflux.com/" },
+  { property: "og:url", content: "https://euno.reactiflux.com/" },
+  { property: "og:title", content: "Euno — Moderation, decided together" },
+  {
+    property: "og:description",
+    content:
+      "Anonymous reports and mod tracking, free. Escalation voting and shared ticketing for $100 a year.",
+  },
+];
+
+function TeamBadge() {
   return (
     <span className="bg-accent-subtle text-accent ml-2 inline-flex items-center rounded px-2 py-0.5 text-xs font-medium tracking-wide uppercase">
-      Standard
+      Team
     </span>
   );
 }
@@ -55,7 +72,7 @@ export default function Index() {
               href="/auth?flow=signup"
               className="bg-accent-strong rounded px-6 py-3 text-base font-medium text-white hover:bg-amber-700"
             >
-              Start your free 90-day trial
+              Add Euno — free
             </a>
             <a
               href="#comparison"
@@ -65,8 +82,8 @@ export default function Index() {
             </a>
           </div>
           <p className="mx-auto mt-6 max-w-xl text-sm text-stone-500">
-            No credit card. Five-minute setup. $100/year after trial — one
-            price, no tiers.
+            Free for mod tracking and anonymous reports — no card, no time
+            limit. Escalation voting and shared tickets are $100 a year.
           </p>
           <p className="mt-10 text-sm text-stone-400">
             Built by people who've moderated Discord servers since they were
@@ -314,7 +331,7 @@ export default function Index() {
             <div>
               <h3 className="font-serif font-semibold text-stone-900">
                 Velocity spam detection
-                <StandardBadge />
+                <TeamBadge />
               </h3>
               <p className="mt-1 text-sm text-stone-600">
                 Cross-channel duplicate detection, channel hopping, rapid-fire
@@ -325,7 +342,7 @@ export default function Index() {
             <div>
               <h3 className="font-serif font-semibold text-stone-900">
                 Tickets
-                <StandardBadge />
+                <TeamBadge />
               </h3>
               <p className="mt-1 text-sm text-stone-600">
                 Button-click ticket system. Members fill a form, a private
@@ -374,46 +391,81 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Pricing — single tier; full details + FAQ live on /pricing */}
+      {/* Pricing — free tier + paid "Team" upgrade; full details + FAQ on /pricing */}
       <section className="bg-surface-light-alt px-6 py-16 lg:py-24">
-        <div className="mx-auto max-w-md">
+        <div className="mx-auto max-w-3xl">
           <h2 className="text-center font-serif text-3xl font-bold text-stone-900">
-            One price. Every feature.
+            Free to run. $100 a year to decide together.
           </h2>
           <p className="mt-4 text-center text-stone-600">
-            No tiers, no feature gates. Try everything free for 90 days.
+            Mod tracking and anonymous reports are free for any server. The
+            team-decision features are the paid tier.
           </p>
-          <div className="border-accent-strong mt-10 rounded border-2 bg-white p-8 shadow-lg">
-            <p className="font-serif text-xl font-bold text-stone-900">
-              Free for 90 days
-            </p>
-            <p className="mt-1 text-sm text-stone-600">
-              Full product. No credit card. No feature gates.
-            </p>
-            <div className="my-6 border-t border-stone-200" />
-            <p>
-              <span className="text-4xl font-bold text-stone-900">$100</span>
-              <span className="text-base font-medium text-stone-500">
-                {" "}
-                / year
-              </span>
-            </p>
-            <p className="mt-1 text-sm text-stone-600">
-              Flat. One tier. One server.
-            </p>
-            <a
-              href="/auth?flow=signup"
-              className="bg-accent-strong mt-8 block rounded px-4 py-3 text-center text-base font-medium text-white hover:bg-amber-700"
-            >
-              Start your free 90-day trial
-            </a>
+          <div className="mt-10 grid items-start gap-8 md:grid-cols-2">
+            {/* Free */}
+            <div className="rounded border border-stone-300 bg-white p-8">
+              <h3 className="font-serif text-xl font-bold text-stone-900">
+                Free
+              </h3>
+              <p className="mt-2">
+                <span className="text-4xl font-bold text-stone-900">$0</span>
+              </p>
+              <p className="mt-1 text-sm text-stone-500">
+                For any server, no time limit
+              </p>
+              <ul className="mt-6 space-y-3 text-sm text-stone-700">
+                <li>Anonymous community reports</li>
+                <li>Per-user mod tracking &amp; action history</li>
+                <li>Content spam detection &amp; honeypot channels</li>
+                <li>Deletion logging</li>
+                <li>Standard moderation commands</li>
+              </ul>
+              <a
+                href="/auth?flow=signup"
+                className="mt-8 block rounded border border-stone-300 px-4 py-2 text-center text-sm font-medium text-stone-700 hover:bg-stone-100"
+              >
+                Add Euno free
+              </a>
+            </div>
+
+            {/* Team (paid) */}
+            <div className="border-accent-strong rounded border-2 bg-white p-8 shadow-lg">
+              <h3 className="font-serif text-xl font-bold text-stone-900">
+                Team
+              </h3>
+              <p className="mt-2">
+                <span className="text-4xl font-bold text-stone-900">$100</span>
+                <span className="text-base font-medium text-stone-500">
+                  {" "}
+                  / year
+                </span>
+              </p>
+              <p className="mt-1 text-sm text-stone-500">
+                Everything in Free, plus team decisions
+              </p>
+              <ul className="mt-6 space-y-3 text-sm text-stone-700">
+                <li>Escalation voting</li>
+                <li>Shared ticketing</li>
+                <li>/modreport analytics</li>
+                <li>Velocity &amp; raid spam detection</li>
+                <li>Data export &amp; extended history</li>
+              </ul>
+              <a
+                href="/auth?flow=signup"
+                className="bg-accent-strong mt-8 block rounded px-4 py-2 text-center text-sm font-medium text-white hover:bg-amber-700"
+              >
+                Start free, upgrade anytime
+              </a>
+            </div>
+          </div>
+          <p className="mt-8 text-center">
             <a
               href="/pricing"
-              className="mt-3 block text-center text-sm font-medium text-stone-600 hover:text-stone-900"
+              className="text-sm font-medium text-stone-600 hover:text-stone-900"
             >
               See full pricing &amp; FAQ →
             </a>
-          </div>
+          </p>
         </div>
       </section>
 
