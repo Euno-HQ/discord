@@ -8,9 +8,10 @@ env:
   HUSKY: 0
 
 on:
+  pull_request:
   push:
-    branches-ignore:
-      - "main"
+    branches:
+      - main
 
 jobs:
   lint:

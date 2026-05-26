@@ -15,7 +15,10 @@ directory.
 
 ## Development workflow
 
-- PRs to main use merge commits (not squash-and-merge).
+- Merge method is per PR type (enforced by branch rulesets): feature PRs → `main` are
+  **squash-merged**; RC PRs (`rc/* → release`) and back-merge PRs (`release → main`) use
+  **merge commits**. Merge commits preserve the ancestry the `release → main` back-merge
+  depends on. See CONTRIBUTING.md → PR merge strategy.
 - Do not push directly to `main` or `release`.
 - When an RC PR is open (`rc/v*` branch → `release`), bug fixes for the release
   should target the `rc/v*` branch.
