@@ -23,6 +23,7 @@ export default [
   route("healthcheck", "routes/healthcheck.tsx"),
   route("/", "routes/index.tsx"),
   route("pricing", "routes/pricing.tsx"),
+  route("features", "routes/features.tsx"),
   route("logout", "routes/logout.tsx"),
   route("payment/success", "routes/payment.success.tsx"),
   route("webhooks/stripe", "routes/webhooks.stripe.tsx"),
