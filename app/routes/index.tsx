@@ -33,7 +33,6 @@ export const meta: Route.MetaFunction = () => [
   },
 ];
 
-
 export default function Index() {
   return (
     <div className="bg-surface-light min-h-screen">
