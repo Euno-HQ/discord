@@ -256,7 +256,7 @@ const flag = rows.filter((r) => r.status === "FLAG").length;
 const info = rows.filter((r) => r.status === "INFO").length;
 const exitCode = flag === 0 ? 0 : 1;
 
-const esc = (s: string) => s.replace(/\|/g, "\\|");
+const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 const tbody = rows
   .map(
     (r, i) =>
