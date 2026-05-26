@@ -85,6 +85,25 @@ This is what makes auto-merge *wait* for green rather than merging instantly. It
 closes the pre-existing gap that `main` has no required status checks
 (see `project_cicd_architecture` memory / `notes/2025-12-14_1_...`).
 
+**Verified & corrected 2026-05-26.** The May 25 config was a repository **ruleset**
+("Checks pass", id `16854963`), not classic branch protection — and it was
+misconfigured: `enforcement: disabled`, targeting `~ALL` branches, and bundling a
+`Restrict updates` rule that (with no bypass actors) would have blocked *all* updates
+to a branch, including PR merges. Corrected via the rulesets API to:
+
+- `enforcement: active`
+- target `~DEFAULT_BRANCH` (main only)
+- rules: `deletion`, `non_fast_forward`, `required_status_checks`; the `update`
+  (Restrict updates) rule **removed** so PR merges/auto-merge to main still work
+- required checks: `build`, `ESLint`, `TypeScript`, `Vitest`
+  (team chose to keep `build` from `cd.yml` in addition to the `ci.yml` checks)
+- `strict_required_status_checks_policy: false` (avoid auto-merge stalls when main advances)
+- repo `allow_auto_merge` was already `true`
+
+Caveat: `build` is produced by `cd.yml` (`on: push`), so it reports on same-repo branch
+pushes; fork PRs (which don't trigger `cd.yml`) would lack `build`. This team pushes
+branches directly, so not a concern in practice.
+
 ### 3. New workflow `.github/workflows/backmerge.yml`
 
 Trigger:
