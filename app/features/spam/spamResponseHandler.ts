@@ -346,32 +346,18 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
     return result;
   }).pipe(Effect.withSpan("SpamResponse.logSpamReport"));
 
-/** Execute a softban (ban + unban) for honeypot triggers */
+/** Execute a softban (ban + unban) for honeypot triggers — 7-day message wipe. */
 const executeSoftban = (
   message: Message,
   member: GuildMember,
   verdict: SpamVerdict,
 ) =>
   Effect.gen(function* () {
-    const guild = message.guild!;
-
-    yield* Effect.tryPromise(async () => {
-      await member.ban({
-        reason: "honeypot spam detected",
-        deleteMessageSeconds: 604800, // 7 days
-      });
-      await guild.members.unban(member);
-    }).pipe(
-      Effect.catchAll((error) =>
-        logEffect("error", "SpamResponse", "Failed to softban user", {
-          error: String(error),
-          userId: member.id,
-          guildId: guild.id,
-        }),
-      ),
-    );
-
+    yield* softbanMember(member, "honeypot spam detected", 604800);
     yield* logSpamReport(message, verdict);
-
-    featureStats.honeypotTriggered(guild.id, member.id, message.channelId);
+    featureStats.honeypotTriggered(
+      message.guild!.id,
+      member.id,
+      message.channelId,
+    );
   }).pipe(Effect.withSpan("SpamResponse.executeSoftban"));
