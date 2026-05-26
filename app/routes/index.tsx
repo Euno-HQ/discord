@@ -45,33 +45,47 @@ export default function Index() {
       </nav>
 
       {/* Hero */}
+      {/*
+        Headline A/B: Variant B "Moderation, decided together." ships as the
+        live control. Variant A "Stop making the call alone." is the designated
+        A/B challenger (see notes/2026-05-12_1_page-copy-homepage-hero.md). No
+        experiment infrastructure exists yet — swap the <h1> to run the
+        challenger once PostHog experiments are wired up.
+      */}
       <section className="px-6 py-20 lg:py-28">
         <div className="mx-auto max-w-3xl text-center">
-          <h1 className="font-serif text-4xl font-bold tracking-tight text-stone-900 lg:text-5xl">
-            A moderation system, not a moderation toolkit
+          <p className="text-accent-strong text-sm font-medium tracking-wide uppercase">
+            For mod teams of 3+
+          </p>
+          <h1 className="mt-4 font-serif text-4xl font-bold tracking-tight text-stone-900 lg:text-5xl">
+            Moderation, decided together.
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg text-stone-600">
-            Other bots give you commands and leave you to build a workflow. Euno
-            ships one. Run /setup and your server gets anonymous reporting, spam
-            detection, deletion logging, and team-based escalation — all working
-            together, out of the box.
+            Escalation votes, anonymous reports, and shared tickets — so the
+            hard calls in your server get decided together, not dumped on
+            whoever was online.
           </p>
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <a
               href="/auth?flow=signup"
               className="bg-accent-strong rounded px-6 py-3 text-base font-medium text-white hover:bg-amber-700"
             >
-              Add to Discord
+              Start your free 90-day trial
             </a>
             <a
-              href="#features"
+              href="#comparison"
               className="text-base font-medium text-stone-600 hover:text-stone-900"
             >
-              See how it works
+              See how a team uses it
             </a>
           </div>
-          <p className="mt-6 text-sm text-stone-500">
-            Free to start. 90-day trial on paid features.
+          <p className="mx-auto mt-6 max-w-xl text-sm text-stone-500">
+            No credit card. Five-minute setup. $100/year after trial — one
+            price, no tiers.
+          </p>
+          <p className="mt-10 text-sm text-stone-400">
+            Built by people who've moderated Discord servers since they were
+            called guilds.
           </p>
         </div>
       </section>
