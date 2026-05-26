@@ -13,6 +13,7 @@ import { EscalationCommands } from "#~/commands/escalationControls";
 import { Command as forceBan } from "#~/commands/force-ban";
 import { Command as memberApplications } from "#~/commands/memberApplications";
 import { Command as modreport } from "#~/commands/modreport";
+import { PurgeMessagesCommands } from "#~/commands/purgeMessages";
 import { Command as report } from "#~/commands/report";
 import { Command as setup } from "#~/commands/setup";
 import { SetupComponentCommands } from "#~/commands/setupHandlers";
@@ -114,6 +115,7 @@ const startup = Effect.gen(function* () {
     registerCommand(checkRequirements),
     registerCommand(modreport),
     registerCommand(memberApplications),
+    registerCommand(PurgeMessagesCommands),
   ]);
 
   yield* logEffect("debug", "Server", "initializing Discord bot");
