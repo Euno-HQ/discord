@@ -58,8 +58,6 @@ describe("guardFeature", () => {
   const makeMockFlags = (enabled: boolean): IFeatureFlagService => ({
     isPostHogEnabled: (_flag, _guildId) => Effect.succeed(enabled),
     getPostHogValue: () => Effect.die("not implemented"),
-    isTierEnabled: () => Effect.succeed(false),
-    requireTierFeature: () => Effect.void,
   });
 
   test("succeeds when isPostHogEnabled returns true", async () => {

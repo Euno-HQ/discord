@@ -13,8 +13,6 @@ const makeFlags = (enabled: boolean, calls = { n: 0 }): IFeatureFlagService =>
       return Effect.succeed(enabled);
     },
     getPostHogValue: () => Effect.die("unused"),
-    isTierEnabled: () => Effect.succeed(false),
-    requireTierFeature: () => Effect.void,
   }) as unknown as IFeatureFlagService;
 
 const NOW = 1_000_000;
