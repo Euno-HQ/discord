@@ -13,10 +13,21 @@ jobs:
   create-rc:
     runs-on: ubuntu-latest
     steps:
+      # App token (not GITHUB_TOKEN) so the RC branch push and PR trigger ci.yml/cd.yml —
+      # required checks can never go green on a PR opened by GITHUB_TOKEN.
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: Euno-HQ
+
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Ensure release branch exists
         run: |
@@ -52,7 +63,7 @@ jobs:
         if: steps.check-commits.outputs.count != '0'
         id: existing-pr
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           EXISTING=$(gh pr list \
             --base release \
@@ -119,6 +130,8 @@ jobs:
           fi
 
           sed 's/^ \{10\}//' > /tmp/pr-body.md <<EOF
+          > ⚠️ **Approving this PR auto-merges it into \`release\` as a merge commit.** Approve only after UAT passes. The merge commit preserves ancestry, which the automated \`release\` → \`main\` back-merge depends on.
+
           ## Release Candidate ${VERSION}
 
           ### Commits ${RANGE_LABEL}
@@ -142,21 +155,27 @@ jobs:
       - name: Update existing RC pull request
         if: steps.check-commits.outputs.count != '0' && steps.existing-pr.outputs.number
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.existing-pr.outputs.number }}
         run: |
           echo "Updating existing RC PR #${PR_NUMBER}"
           gh pr edit "$PR_NUMBER" --body-file /tmp/pr-body.md
+          # Idempotent: ensure auto-merge (merge commit) stays enabled.
+          gh pr merge "$PR_NUMBER" --auto --merge
 
       - name: Create new RC pull request
         if: steps.check-commits.outputs.count != '0' && !steps.existing-pr.outputs.number
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           echo "Creating new RC PR for ${VERSION}"
-          gh pr create \
+          PR_URL=$(gh pr create \
             --base release \
             --head "rc/${VERSION}" \
             --title "RC: ${VERSION}" \
-            --body-file /tmp/pr-body.md
+            --body-file /tmp/pr-body.md)
+          echo "Created ${PR_URL}"
+          # Enable auto-merge as a merge commit: it lands once the release gate
+          # (1 approval + CI checks) is satisfied. Approval is the post-UAT sign-off.
+          gh pr merge "$PR_URL" --auto --merge

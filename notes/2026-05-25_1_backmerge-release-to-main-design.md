@@ -188,11 +188,14 @@ which also blocked `backmerge.yml`'s own `gh pr merge --merge`. **Fixed 2026-05-
 `allow_merge_commit` enabled (squash kept, rebase off).
 
 Team policy (2026-05-26):
-- **RC PR (`rc/* → release`): merge commit, via auto-merge.** `release-candidate.yml`
-  enables auto-merge (`--merge`) on the RC PR and prepends a first-line note to the PR
-  body: approving the PR auto-merges it into `release` (as a merge commit) — approve only
-  after UAT passes. **Dependency:** `release` must require an approving review, otherwise
-  auto-merge can't be enabled / would merge instantly and skip UAT.
+- **RC PR (`rc/* → release`): merge commit, via auto-merge.** ✅ `release-candidate.yml`
+  generates an App token (so the RC branch push + PR trigger `ci.yml`/`cd.yml` — a PR
+  opened by `GITHUB_TOKEN` would never get checks and stay stuck), prepends a first-line
+  note to the PR body (approve only after UAT; approval auto-merges as a merge commit),
+  and enables `gh pr merge --auto --merge`. Gated by the **"Release PR gate"** ruleset
+  (id 16897399): 1 approving review (dismiss-stale on push), `build`/`ESLint`/`TypeScript`/
+  `Vitest` checks, and **`allowed_merge_methods: ["merge"]`** — squash/rebase are blocked on
+  `release`, so the RC PR *cannot* be squashed (footgun closed at the platform level).
 - **Back-merge PR (`release → main`): merge commit** — already `--merge` in `backmerge.yml`.
 - **Feature PRs to `main`: squash** (team preference). Safe for the back-merge: RC is cut
   from `main`, so what those commits are (squashed or not) doesn't matter; only the
@@ -202,10 +205,11 @@ Team policy (2026-05-26):
 
 - `.github/workflows/ci.yml` — change triggers (single CI source of truth). ✅ done
 - `.github/workflows/backmerge.yml` — new workflow. ✅ done
-- `.github/workflows/release-candidate.yml` — enable auto-merge (`--merge`) on the RC PR +
-  first-line body note. ⬜ pending (needs `release` approval gate)
-- Repo settings: required checks on `main` (✅ done via ruleset), `allow_auto_merge` (✅),
-  `allow_merge_commit` (✅ 2026-05-26), and a required review on `release` (⬜ pending).
+- `.github/workflows/release-candidate.yml` — App token + first-line body note + RC PR
+  auto-merge (`--merge`). ✅ done
+- Repo settings: `main` required checks via "Checks pass" ruleset (✅), `allow_auto_merge`
+  (✅), `allow_merge_commit` (✅), `release` gate via "Release PR gate" ruleset — review +
+  CI checks + merge-only (✅, 2026-05-26).
 - Optional: a `backmerge` label.
 
 ## Open questions
