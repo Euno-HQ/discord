@@ -57,11 +57,18 @@ Production releases follow a weekly release candidate (RC) cycle:
    - Push bug fixes directly to the `rc/v*` branch (each push re-deploys UAT)
 
 3. **Promote to production**: When testing is complete:
-   - Merge the RC PR into `release`
+   - **Approve** the RC PR — it auto-merges into `release` as a merge commit once CI
+     passes (pushing a new fix to `rc/*` dismisses the approval, so you re-approve the
+     final state). Do not squash; the `release` ruleset only allows merge commits.
    - A draft GitHub Release is automatically created
    - Review and publish the GitHub Release to trigger production deployment
 
-4. **Ad-hoc releases**: The RC workflow can be triggered manually via
+4. **Back-merge to `main`**: Publishing the Release automatically opens a
+   `release → main` PR (a merge commit) so any fixes made on `rc/*` during testing flow
+   back into the development line. It is CI-gated and auto-merges when clean; if it
+   conflicts, it waits for a human to resolve. See `.github/workflows/backmerge.yml`.
+
+5. **Ad-hoc releases**: The RC workflow can be triggered manually via
    `workflow_dispatch` for urgent releases outside the weekly cycle.
 
 **Important:** The `release` branch is managed by automation. Do not push to it
@@ -69,8 +76,19 @@ directly.
 
 ### PR merge strategy
 
-PRs to `main` use **merge commits** (not squash-and-merge). This preserves
-individual commit history on main.
+Merge method depends on the PR type. The `main` and `release` branch rulesets
+enforce these — you can't pick the wrong one:
+
+| PR | Merge method | Notes |
+|----|--------------|-------|
+| Feature → `main` | **Squash** | The PR title becomes the commit on `main`, so keep it meaningful. |
+| `rc/*` → `release` | **Merge commit** (auto-merge) | Bot-opened; approving it auto-merges once CI passes. Squash/rebase are blocked on `release`. |
+| `release` → `main` (back-merge) | **Merge commit** | Bot-opened after a Release is published; returns release-only fixes to `main`. |
+
+Why merge commits for the RC and back-merge PRs: squashing (or rebasing) creates
+new commits with no ancestry link to `main`, which turns the `release → main`
+back-merge into a conflict **every cycle**. Feature PRs to `main` can squash freely,
+because `rc/*` branches are cut from `main` regardless of how those commits look.
 
 # Implementation notes
 
