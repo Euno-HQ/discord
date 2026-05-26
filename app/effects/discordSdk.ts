@@ -336,3 +336,60 @@ export const interactionDeferUpdate = (
         cause: error,
       }),
   }).pipe(Effect.withSpan("discord.interactionDeferUpdate"));
+
+/**
+ * Softban a member: ban to delete their recent messages, then immediately
+ * unban so they can rejoin a clean invite. Discord deletes messages
+ * server-side based on `deleteMessageSeconds`.
+ *
+ * If `ban` succeeds but `unban` fails, the user is left BANNED. This case is
+ * logged at error level inside the helper before the `DiscordApiError`
+ * propagates, so the operational incident is never lost even if a caller
+ * forgets to handle it. Callers can distinguish the failure mode by checking
+ * `error.operation` — `softbanMember.ban` vs `softbanMember.unban`.
+ */
+export const softbanMember = (
+  member: GuildMember,
+  reason: string,
+  deleteMessageSeconds: number,
+): Effect.Effect<void, DiscordApiError, never> =>
+  Effect.gen(function* () {
+    yield* Effect.tryPromise({
+      try: () => member.ban({ reason, deleteMessageSeconds }),
+      catch: (error) =>
+        new DiscordApiError({
+          operation: "softbanMember.ban",
+          cause: error,
+        }),
+    });
+
+    yield* Effect.tryPromise({
+      try: () => member.guild.members.unban(member, reason),
+      catch: (error) =>
+        new DiscordApiError({
+          operation: "softbanMember.unban",
+          cause: error,
+        }),
+    }).pipe(
+      Effect.tapError((error) =>
+        logEffect(
+          "error",
+          "Discord",
+          "Softban: ban succeeded but unban failed — user is BANNED",
+          {
+            error: String(error.cause),
+            userId: member.id,
+            guildId: member.guild.id,
+          },
+        ),
+      ),
+    );
+  }).pipe(
+    Effect.withSpan("discord.softbanMember", {
+      attributes: {
+        userId: member.id,
+        guildId: member.guild.id,
+        deleteMessageSeconds,
+      },
+    }),
+  );

@@ -8,7 +8,7 @@ import { Effect } from "effect";
 
 import { logUserMessage } from "#~/commands/report/userLog.ts";
 import { client } from "#~/discord/client.server.ts";
-import { deleteMessage } from "#~/effects/discordSdk.ts";
+import { deleteMessage, softbanMember } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import { featureStats } from "#~/helpers/metrics.ts";
 import { applyRestriction, timeout } from "#~/models/discord.server.ts";
@@ -36,49 +36,6 @@ export const CROSS_GUILD_SPAM_THRESHOLD = 3;
  * Resets on bot restart, which is acceptable — the DM is informational, not critical.
  */
 const crossGuildDmSent = new Set<string>();
-
-/**
- * Ban a member to delete their recent messages, then immediately unban so
- * they can rejoin a clean invite. Discord deletes messages server-side based
- * on `deleteMessageSeconds`. Splits ban and unban into separate Effect steps
- * so that a failing unban after a successful ban is logged as the operational
- * incident it is — a user left banned — rather than swallowed alongside the
- * ban error.
- */
-export const softbanMember = (
-  member: GuildMember,
-  reason: string,
-  deleteMessageSeconds: number,
-): Effect.Effect<void, never> =>
-  Effect.gen(function* () {
-    yield* Effect.tryPromise(() =>
-      member.ban({ reason, deleteMessageSeconds }),
-    ).pipe(
-      Effect.catchAll((error) =>
-        logEffect("error", "SpamResponse", "Softban: ban failed", {
-          error: String(error),
-          userId: member.id,
-          guildId: member.guild.id,
-        }).pipe(Effect.zipRight(Effect.fail(error))),
-      ),
-    );
-
-    yield* Effect.tryPromise(() =>
-      member.guild.members.unban(member, reason),
-    ).pipe(
-      Effect.catchAll((error) =>
-        logEffect(
-          "error",
-          "SpamResponse",
-          "Softban: ban succeeded but unban failed — user is BANNED",
-          { error: String(error), userId: member.id, guildId: member.guild.id },
-        ),
-      ),
-    );
-  }).pipe(
-    Effect.catchAll(() => Effect.void),
-    Effect.withSpan("SpamResponse.softbanMember"),
-  );
 
 /** Execute the graduated response for a spam verdict. */
 export const executeResponse = (
@@ -161,6 +118,13 @@ export const executeResponse = (
           member,
           "Autokicked for repeated spam (1h message cleanup)",
           3600,
+        ).pipe(
+          Effect.catchTag("DiscordApiError", (error) =>
+            logEffect("warn", "SpamResponse", "Failed to softban spammer", {
+              error: String(error.cause),
+              operation: error.operation,
+            }),
+          ),
         );
 
         // Clean up all reported messages for the kicked user — including any
@@ -353,7 +317,16 @@ const executeSoftban = (
   verdict: SpamVerdict,
 ) =>
   Effect.gen(function* () {
-    yield* softbanMember(member, "honeypot spam detected", 604800);
+    yield* softbanMember(member, "honeypot spam detected", 604800).pipe(
+      Effect.catchTag("DiscordApiError", (error) =>
+        logEffect("error", "SpamResponse", "Failed to softban user", {
+          error: String(error.cause),
+          operation: error.operation,
+          userId: member.id,
+          guildId: message.guild!.id,
+        }),
+      ),
+    );
     yield* logSpamReport(message, verdict);
     featureStats.honeypotTriggered(
       message.guild!.id,

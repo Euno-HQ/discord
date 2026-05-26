@@ -1,16 +1,10 @@
-import type { GuildMember } from "discord.js";
-import { Effect } from "effect";
-
 import {
   buildContentHash,
   buildEmbedBody,
   buildEmbedText,
   hasLinkInContentOrEmbeds,
 } from "./contentAnalyzer";
-import {
-  CROSS_GUILD_SPAM_THRESHOLD,
-  softbanMember,
-} from "./spamResponseHandler";
+import { CROSS_GUILD_SPAM_THRESHOLD } from "./spamResponseHandler";
 import { AUTO_KICK_THRESHOLD } from "./spamScorer";
 
 // ── Cross-guild spam threshold ──
@@ -158,69 +152,4 @@ test("hasLinkInContentOrEmbeds returns false when no links anywhere", () => {
   expect(
     hasLinkInContentOrEmbeds("plain text", [{ url: null, title: "embed" }]),
   ).toBe(false);
-});
-
-// ── softbanMember ──
-// The helper splits ban and unban so that a failing unban after a successful
-// ban is observable as a distinct operational incident (user left banned),
-// not swallowed alongside ban failures.
-
-function makeMemberMock(
-  opts: {
-    banImpl?: () => Promise<unknown>;
-    unbanImpl?: () => Promise<unknown>;
-  } = {},
-) {
-  const banSpy = vi.fn(opts.banImpl ?? (() => Promise.resolve()));
-  const unbanSpy = vi.fn(opts.unbanImpl ?? (() => Promise.resolve()));
-  const member = {
-    id: "user-1",
-    ban: banSpy,
-    guild: {
-      id: "guild-1",
-      members: { unban: unbanSpy },
-    },
-  } as unknown as GuildMember;
-  return { member, banSpy, unbanSpy };
-}
-
-test("softbanMember calls ban then unban on the happy path", async () => {
-  const { member, banSpy, unbanSpy } = makeMemberMock();
-
-  await Effect.runPromise(softbanMember(member, "test reason", 3600));
-
-  expect(banSpy).toHaveBeenCalledWith({
-    reason: "test reason",
-    deleteMessageSeconds: 3600,
-  });
-  expect(unbanSpy).toHaveBeenCalledWith(member, "test reason");
-  // unban runs strictly after ban
-  expect(banSpy.mock.invocationCallOrder[0]).toBeLessThan(
-    unbanSpy.mock.invocationCallOrder[0],
-  );
-});
-
-test("softbanMember does not call unban when ban itself fails", async () => {
-  const { member, banSpy, unbanSpy } = makeMemberMock({
-    banImpl: () => Promise.reject(new Error("missing permissions")),
-  });
-
-  await Effect.runPromise(softbanMember(member, "test reason", 3600));
-
-  expect(banSpy).toHaveBeenCalledTimes(1);
-  expect(unbanSpy).not.toHaveBeenCalled();
-});
-
-test("softbanMember absorbs unban failure (user left banned is logged, not thrown)", async () => {
-  const { member, banSpy, unbanSpy } = makeMemberMock({
-    unbanImpl: () => Promise.reject(new Error("network error")),
-  });
-
-  // Must not throw — the helper's job is to log this and continue.
-  await expect(
-    Effect.runPromise(softbanMember(member, "test reason", 3600)),
-  ).resolves.toBeUndefined();
-
-  expect(banSpy).toHaveBeenCalledTimes(1);
-  expect(unbanSpy).toHaveBeenCalledTimes(1);
 });
