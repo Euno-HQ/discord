@@ -1,6 +1,7 @@
 import { redirect } from "react-router";
 
-import { Login } from "#~/basics/login";
+import { SiteFooter } from "#~/components/SiteFooter";
+import { SiteHeader } from "#~/components/SiteHeader";
 import { getUser } from "#~/models/session.server";
 
 import type { Route } from "./+types/index";
@@ -26,23 +27,7 @@ function StandardBadge() {
 export default function Index() {
   return (
     <div className="bg-surface-light min-h-screen">
-      {/* Nav */}
-      <nav className="flex items-center justify-between px-6 py-4 lg:px-8">
-        <span className="text-accent-strong font-serif text-xl font-bold">
-          Euno
-        </span>
-        <div className="flex items-center gap-4">
-          <Login className="w-auto rounded-none bg-transparent px-3 py-2 text-sm font-medium text-stone-600 shadow-none hover:bg-transparent hover:text-stone-900 focus:bg-transparent">
-            Log in
-          </Login>
-          <a
-            href="/auth?flow=signup"
-            className="bg-accent-strong rounded px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
-          >
-            Add to Discord
-          </a>
-        </div>
-      </nav>
+      <SiteHeader />
 
       {/* Hero */}
       {/*
@@ -132,8 +117,8 @@ export default function Index() {
                   <p className="mt-2 text-stone-700">
                     The mod can escalate the call to a vote before it lands. The
                     decision gets logged as the team&apos;s, not one
-                    person&apos;s — and the user who was banned can&apos;t pin it
-                    on &ldquo;that one mod.&rdquo;
+                    person&apos;s — and the user who was banned can&apos;t pin
+                    it on &ldquo;that one mod.&rdquo;
                   </p>
                 </div>
               </div>
@@ -203,9 +188,9 @@ export default function Index() {
           </p>
 
           <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-stone-500">
-            MEE6 and Carl-bot are excellent bots — they&apos;re built for servers
-            where one mod can reasonably make every call. Euno is built for
-            teams where that stopped being true a long time ago.
+            MEE6 and Carl-bot are excellent bots — they&apos;re built for
+            servers where one mod can reasonably make every call. Euno is built
+            for teams where that stopped being true a long time ago.
           </p>
 
           {/*
@@ -488,26 +473,7 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-stone-300 bg-stone-200 px-6 py-8">
-        <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 text-sm text-stone-500 sm:flex-row sm:justify-between">
-          <div className="flex gap-6">
-            <a href="/terms" className="hover:text-stone-700">
-              Terms
-            </a>
-            <a href="/privacy" className="hover:text-stone-700">
-              Privacy
-            </a>
-            <a
-              href="mailto:support@euno.reactiflux.com"
-              className="hover:text-stone-700"
-            >
-              Support
-            </a>
-          </div>
-          <p>Built by the team behind Reactiflux.</p>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }
