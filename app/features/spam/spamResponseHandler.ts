@@ -157,14 +157,10 @@ export const executeResponse = (
       const { message: logMessage } = logResult;
       const spamCount = yield* getSpamReportCount(userId, guildId);
       if (spamCount >= AUTO_KICK_THRESHOLD) {
-        yield* Effect.tryPromise(() =>
-          member.kick("Autokicked for repeated spam"),
-        ).pipe(
-          Effect.catchAll((error) =>
-            logEffect("warn", "SpamResponse", "Failed to kick spammer", {
-              error: String(error),
-            }),
-          ),
+        yield* softbanMember(
+          member,
+          "Autokicked for repeated spam (1h message cleanup)",
+          3600,
         );
 
         // Clean up all reported messages for the kicked user — including any
@@ -182,7 +178,7 @@ export const executeResponse = (
 
         yield* Effect.tryPromise(() =>
           logMessage.reply({
-            content: `Automatically kicked <@${userId}> for spam`,
+            content: `Automatically removed <@${userId}> for spam (last hour of messages also deleted)`,
             allowedMentions: {},
           }),
         ).pipe(Effect.catchAll(() => Effect.void));
