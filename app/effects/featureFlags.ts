@@ -18,6 +18,9 @@ export const BooleanFlag = Schema.Literal(
   "ticketing",
   "analytics",
   "deletion-log",
+  "velocity-spam",
+  "member-applications",
+  "data-export",
 );
 export type BooleanFlag = typeof BooleanFlag.Type;
 
