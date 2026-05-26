@@ -1,0 +1,64 @@
+{
+  "snapshot_date": "2026-05-12T23:08:23.177Z",
+  "source_db_path": "/Users/vcarl/workspace/mod-bot/.worktrees/metrics-research/prod-mod-bot.sqlite3",
+  "gtm_launch_date": null,
+  "metrics": {
+    "installs_per_week": {
+      "cohort_floor": "2026-02-18",
+      "value": []
+    },
+    "trial_to_paid_conversion": {
+      "cohort_floor": "2026-02-18",
+      "value": []
+    },
+    "ttfv_days": {
+      "cohort_floor": "2026-02-20",
+      "value": {
+        "sample_n": 0,
+        "min_days": null,
+        "avg_days": null,
+        "max_days": null
+      }
+    },
+    "feature_activation_d7_d30": {
+      "cohort_floor": "2026-02-18",
+      "value": {
+        "windows": [
+          {
+            "window": "d7",
+            "eligible": 0,
+            "modLog": 0,
+            "moderator": 0,
+            "deletionLog": 0,
+            "honeypot": 0,
+            "reactji": 0,
+            "membergate": 0
+          },
+          {
+            "window": "d30",
+            "eligible": 0,
+            "modLog": 0,
+            "moderator": 0,
+            "deletionLog": 0,
+            "honeypot": 0,
+            "reactji": 0,
+            "membergate": 0
+          }
+        ],
+        "tickets_lifetime": 9
+      }
+    },
+    "retention_7d_30d": {
+      "cohort_floor": "2026-02-20",
+      "value": []
+    },
+    "churn_snapshot": {
+      "value": [
+        {
+          "status": "active",
+          "cnt": 1
+        }
+      ]
+    }
+  }
+}
