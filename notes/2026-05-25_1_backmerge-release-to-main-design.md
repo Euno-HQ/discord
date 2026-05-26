@@ -169,11 +169,43 @@ If `main` protection is later changed to *require pull requests*, no part of thi
 breaks — it already uses a PR for every back-merge. (This is a deliberate improvement over
 an earlier direct-push variant that would have broken under that change.)
 
+## Merge-method prerequisite (CRITICAL — found via squash simulation 2026-05-26)
+
+**The back-merge only works if the RC PR lands on `release` as a true merge commit.**
+This is load-bearing, not stylistic.
+
+Simulation (squash-merge `rc/v2026.20` into `release`, then back-merge `release → main`):
+- **Merge commit** RC→release: `merge-base(release, main)` = rc tip → back-merge **clean,
+  0 conflicts** (git knows rc's commits are already on main).
+- **Squash** RC→release: `merge-base(release, main)` = old release tip → back-merge
+  **CONFLICT** (e.g. `app/commands/report/modActionLogger.ts`). The squash commit is a
+  fresh snapshot with no ancestry to rc's commits, so git re-merges the entire RC diff
+  against a stale base and collides wherever `main` has since moved. Squash here is
+  morally a cherry-pick — the exact recurring-conflict trap this design avoids.
+
+Repo state when found: `allow_merge_commit:false, allow_squash_merge:true` (squash-only),
+which also blocked `backmerge.yml`'s own `gh pr merge --merge`. **Fixed 2026-05-26:**
+`allow_merge_commit` enabled (squash kept, rebase off).
+
+Team policy (2026-05-26):
+- **RC PR (`rc/* → release`): merge commit, via auto-merge.** `release-candidate.yml`
+  enables auto-merge (`--merge`) on the RC PR and prepends a first-line note to the PR
+  body: approving the PR auto-merges it into `release` (as a merge commit) — approve only
+  after UAT passes. **Dependency:** `release` must require an approving review, otherwise
+  auto-merge can't be enabled / would merge instantly and skip UAT.
+- **Back-merge PR (`release → main`): merge commit** — already `--merge` in `backmerge.yml`.
+- **Feature PRs to `main`: squash** (team preference). Safe for the back-merge: RC is cut
+  from `main`, so what those commits are (squashed or not) doesn't matter; only the
+  RC→release and release→main steps must be merge commits.
+
 ## Files / changes
 
-- `.github/workflows/ci.yml` — change triggers (single CI source of truth).
-- `.github/workflows/backmerge.yml` — new workflow.
-- Repo settings (manual, documented): required status checks on `main` + allow auto-merge.
+- `.github/workflows/ci.yml` — change triggers (single CI source of truth). ✅ done
+- `.github/workflows/backmerge.yml` — new workflow. ✅ done
+- `.github/workflows/release-candidate.yml` — enable auto-merge (`--merge`) on the RC PR +
+  first-line body note. ⬜ pending (needs `release` approval gate)
+- Repo settings: required checks on `main` (✅ done via ruleset), `allow_auto_merge` (✅),
+  `allow_merge_commit` (✅ 2026-05-26), and a required review on `release` (⬜ pending).
 - Optional: a `backmerge` label.
 
 ## Open questions
