@@ -90,6 +90,140 @@ export default function Index() {
         </div>
       </section>
 
+      {/* Comparison — team-decisions framing, not a feature checklist */}
+      <section
+        id="comparison"
+        className="border-t border-stone-200 px-6 py-16 lg:py-24"
+      >
+        <div className="mx-auto max-w-4xl">
+          <p className="text-accent-strong text-center text-sm font-medium tracking-wide uppercase">
+            A different starting assumption
+          </p>
+          <h2 className="mt-3 text-center font-serif text-3xl font-bold text-stone-900">
+            Moderation isn't a solo sport.
+          </h2>
+          <p className="mx-auto mt-6 max-w-2xl text-center text-lg text-stone-600">
+            MEE6 and Carl-bot are built on a quiet assumption — that one mod,
+            acting alone, is the unit of moderation. Euno is built on a
+            different one.
+          </p>
+
+          <div className="mt-12 space-y-10">
+            {/* Moment 1 */}
+            <div>
+              <h3 className="font-serif text-lg font-semibold text-stone-900">
+                When a mod hits &ldquo;ban&rdquo; on a tough call
+              </h3>
+              <div className="mt-4 grid gap-6 md:grid-cols-2">
+                <div>
+                  <p className="text-xs font-medium tracking-wide text-stone-500 uppercase">
+                    Most mod bots
+                  </p>
+                  <p className="mt-2 text-stone-600">
+                    The action lands instantly and lives in an audit log. If
+                    another mod would&apos;ve called it differently, that
+                    conversation happens after the fact, if it happens at all.
+                  </p>
+                </div>
+                <div>
+                  <p className="text-accent-strong text-xs font-medium tracking-wide uppercase">
+                    Euno
+                  </p>
+                  <p className="mt-2 text-stone-700">
+                    The mod can escalate the call to a vote before it lands. The
+                    decision gets logged as the team&apos;s, not one
+                    person&apos;s — and the user who was banned can&apos;t pin it
+                    on &ldquo;that one mod.&rdquo;
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Moment 2 */}
+            <div>
+              <h3 className="font-serif text-lg font-semibold text-stone-900">
+                When a community member wants to report another member
+              </h3>
+              <div className="mt-4 grid gap-6 md:grid-cols-2">
+                <div>
+                  <p className="text-xs font-medium tracking-wide text-stone-500 uppercase">
+                    Most mod bots
+                  </p>
+                  <p className="mt-2 text-stone-600">
+                    The report drops into a channel. Whichever mod sees it first
+                    usually acts on it alone.
+                  </p>
+                </div>
+                <div>
+                  <p className="text-accent-strong text-xs font-medium tracking-wide uppercase">
+                    Euno
+                  </p>
+                  <p className="mt-2 text-stone-700">
+                    The report goes to the whole mod team, anonymously. The
+                    reporter isn&apos;t exposed, and the response is coordinated
+                    instead of racing the first available mod.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Moment 3 */}
+            <div>
+              <h3 className="font-serif text-lg font-semibold text-stone-900">
+                When the mod team doesn&apos;t agree on a call
+              </h3>
+              <div className="mt-4 grid gap-6 md:grid-cols-2">
+                <div>
+                  <p className="text-xs font-medium tracking-wide text-stone-500 uppercase">
+                    Most mod bots
+                  </p>
+                  <p className="mt-2 text-stone-600">
+                    Last action wins. The disagreement migrates to #mod-chat and
+                    stays there until someone gives up or burns out.
+                  </p>
+                </div>
+                <div>
+                  <p className="text-accent-strong text-xs font-medium tracking-wide uppercase">
+                    Euno
+                  </p>
+                  <p className="mt-2 text-stone-700">
+                    A vote resolves it. The outcome belongs to the team, the
+                    reasoning is captured, and the next similar case has a
+                    precedent instead of a grudge.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p className="mx-auto mt-12 max-w-2xl text-center text-stone-700">
+            When every hard call is one mod&apos;s call, mods burn out and
+            communities get whiplash. Shared decisions are what keep a mod team
+            — and a community — together over years, not months.
+          </p>
+
+          <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-stone-500">
+            MEE6 and Carl-bot are excellent bots — they&apos;re built for servers
+            where one mod can reasonably make every call. Euno is built for
+            teams where that stopped being true a long time ago.
+          </p>
+
+          {/*
+            TODO: when /case-studies/reactiflux ships, add the spec's primary
+            CTA "See how Reactiflux runs it →". Omitted now to avoid a dead
+            link while the case study is deferred pending sourced quotes.
+          */}
+          <div className="mt-8 flex justify-center">
+            <a
+              href="#features"
+              className="text-base font-medium text-stone-600 hover:text-stone-900"
+            >
+              What&apos;s in Euno →
+            </a>
+          </div>
+        </div>
+      </section>
+
       {/* Problem statement */}
       <section className="bg-surface-light-alt px-6 py-16 lg:py-24">
         <div className="mx-auto max-w-2xl">
