@@ -123,7 +123,7 @@ export default function Features() {
               label="Hard calls go to a team vote."
             />
             <FlowStep
-              href="#tracking"
+              href="#team-decisions"
               step="Resolve"
               label="Decide with the full picture, on the record."
             />
