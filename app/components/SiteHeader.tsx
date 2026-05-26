@@ -12,6 +12,12 @@ export function SiteHeader() {
       </a>
       <div className="flex items-center gap-4">
         <a
+          href="/features"
+          className="text-sm font-medium text-stone-600 hover:text-stone-900"
+        >
+          Features
+        </a>
+        <a
           href="/pricing"
           className="text-sm font-medium text-stone-600 hover:text-stone-900"
         >

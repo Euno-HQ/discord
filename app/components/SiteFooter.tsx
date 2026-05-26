@@ -7,6 +7,9 @@ export function SiteFooter() {
     <footer className="border-t border-stone-300 bg-stone-200 px-6 py-8">
       <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 text-sm text-stone-500 sm:flex-row sm:justify-between">
         <div className="flex gap-6">
+          <a href="/features" className="hover:text-stone-700">
+            Features
+          </a>
           <a href="/pricing" className="hover:text-stone-700">
             Pricing
           </a>
