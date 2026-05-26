@@ -33,13 +33,6 @@ export const meta: Route.MetaFunction = () => [
   },
 ];
 
-function TeamBadge() {
-  return (
-    <span className="bg-accent-subtle text-accent ml-2 inline-flex items-center rounded px-2 py-0.5 text-xs font-medium tracking-wide uppercase">
-      Team
-    </span>
-  );
-}
 
 export default function Index() {
   return (
@@ -217,7 +210,7 @@ export default function Index() {
           */}
           <div className="mt-8 flex justify-center">
             <a
-              href="#features"
+              href="/features"
               className="text-base font-medium text-stone-600 hover:text-stone-900"
             >
               What&apos;s in Euno →
@@ -296,74 +289,6 @@ export default function Index() {
                 Pull up any user's full history with /modreport. Report count
                 trends, action breakdowns, top channels, which staff reported
                 them. Make informed decisions, not gut calls.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Supporting features */}
-      <section className="bg-surface-light-alt px-6 py-16 lg:py-24">
-        <div className="mx-auto max-w-5xl">
-          <h2 className="text-center font-serif text-3xl font-bold text-stone-900">
-            Plus everything you'd expect
-          </h2>
-          <div className="mt-12 grid gap-x-8 gap-y-10 md:grid-cols-2 lg:grid-cols-3">
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Content spam detection
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Keyword matching, zalgo detection, mass ping blocking, and
-                honeypot channels. Graduated responses from logging to softban.
-                Works immediately.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Deletion logging
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Deleted messages are captured and attributed automatically. See
-                what was said after someone tries to cover their tracks.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Velocity spam detection
-                <TeamBadge />
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Cross-channel duplicate detection, channel hopping, rapid-fire
-                messaging. Catches coordinated raids, not just individual
-                spammers.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Tickets
-                <TeamBadge />
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Button-click ticket system. Members fill a form, a private
-                thread is created, your team gets pinged.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Reactji forwarding
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Set an emoji + threshold. Messages that hit it get forwarded to
-                a highlights channel.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Force ban
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Ban users who already left the server. No more escaped alts.
               </p>
             </div>
           </div>
