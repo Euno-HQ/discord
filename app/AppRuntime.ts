@@ -94,6 +94,17 @@ export const runEffect = <A, E>(
   effect: Effect.Effect<A, E, RuntimeContext>,
 ): Promise<A> => runtime.runPromise(effect);
 
+/** Promise bridge: evaluate a PostHog flag for a guild from async/await code. */
+export const isFeatureEnabled = (
+  flag: BooleanFlag,
+  guildId: string,
+): Promise<boolean> =>
+  runEffect(
+    Effect.flatMap(FeatureFlagService, (flags) =>
+      flags.isPostHogEnabled(flag, guildId),
+    ),
+  );
+
 // Run an Effect through the ManagedRuntime, returning a Promise<Exit>.
 export const runEffectExit = <A, E>(
   effect: Effect.Effect<A, E, RuntimeContext>,
