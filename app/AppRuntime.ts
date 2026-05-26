@@ -30,7 +30,10 @@ const AppLayer = Layer.mergeAll(
   DatabaseLayer,
   PostHogServiceLive,
   FeatureFlagServiceLive,
-  Layer.provide(SpamDetectionServiceLive, DatabaseLayer),
+  Layer.provide(
+    SpamDetectionServiceLive,
+    Layer.merge(DatabaseLayer, FeatureFlagServiceLive),
+  ),
   MessageCacheServiceLive,
   SupervisorServiceLive,
   DiscordEventBusLive,
