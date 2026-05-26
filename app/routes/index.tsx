@@ -374,101 +374,45 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Pricing */}
+      {/* Pricing — single tier; full details + FAQ live on /pricing */}
       <section className="bg-surface-light-alt px-6 py-16 lg:py-24">
-        <div className="mx-auto max-w-5xl">
+        <div className="mx-auto max-w-md">
           <h2 className="text-center font-serif text-3xl font-bold text-stone-900">
-            Pricing
+            One price. Every feature.
           </h2>
-          <div className="mt-12 grid gap-8 md:grid-cols-3">
-            {/* Free */}
-            <div className="rounded border border-stone-300 bg-white p-6">
-              <h3 className="font-serif text-xl font-bold text-stone-900">
-                Free
-              </h3>
-              <p className="mt-2">
-                <span className="text-4xl font-bold text-stone-900">$0</span>
-              </p>
-              <p className="mt-1 text-sm text-stone-500">
-                See what's happening
-              </p>
-              <ul className="mt-6 space-y-3 text-sm text-stone-700">
-                <li>Basic reporting (staff tracking, non-anonymous)</li>
-                <li>
-                  Content-based spam detection (keyword matching, zalgo, mass
-                  pings)
-                </li>
-                <li>Deletion logging</li>
-                <li>Mod action recording</li>
-                <li>Honeypot channels</li>
-                <li>Reactji forwarding</li>
-                <li>Force ban</li>
-              </ul>
-              <a
-                href="/auth?flow=signup"
-                className="mt-8 block rounded border border-stone-300 px-4 py-2 text-center text-sm font-medium text-stone-700 hover:bg-stone-100"
-              >
-                Add to Discord
-              </a>
-            </div>
-
-            {/* Standard */}
-            <div className="border-accent-strong rounded border-2 bg-white p-6 shadow-lg">
-              <h3 className="font-serif text-xl font-bold text-stone-900">
-                Standard
-              </h3>
-              <p className="mt-2">
-                <span className="text-4xl font-bold text-stone-900">$100</span>
-                <span className="text-base font-medium text-stone-500">
-                  /year
-                </span>
-              </p>
-              <p className="mt-1 text-sm text-stone-500">Act on it as a team</p>
-              <ul className="mt-6 space-y-3 text-sm text-stone-700">
-                <li>Everything in Free</li>
-                <li>Anonymous community reports</li>
-                <li>Escalation voting</li>
-                <li>Ticket system</li>
-                <li>
-                  Velocity-based spam detection (cross-channel dupes, channel
-                  hopping, rapid-fire)
-                </li>
-                <li>/modreport user analytics</li>
-              </ul>
-              <p className="text-accent-strong mt-4 text-xs font-medium">
-                90-day free trial
-              </p>
-              <a
-                href="/auth?flow=signup"
-                className="bg-accent-strong mt-4 block rounded px-4 py-2 text-center text-sm font-medium text-white hover:bg-amber-700"
-              >
-                Start free trial
-              </a>
-            </div>
-
-            {/* Custom */}
-            <div className="rounded border border-stone-300 bg-white p-6">
-              <h3 className="font-serif text-xl font-bold text-stone-900">
-                Custom
-              </h3>
-              <p className="mt-2 text-lg font-semibold text-stone-900">
-                Contact us
-              </p>
-              <p className="mt-1 text-sm text-stone-500">&nbsp;</p>
-              <ul className="mt-6 space-y-3 text-sm text-stone-700">
-                <li>Everything in Standard</li>
-                <li>Dedicated bot instance</li>
-                <li>Stable release channel</li>
-                <li>Support SLA</li>
-                <li>Priority feature requests</li>
-              </ul>
-              <a
-                href="mailto:support@euno.reactiflux.com?subject=Custom%20Euno%20Plan"
-                className="mt-8 block rounded border border-stone-300 px-4 py-2 text-center text-sm font-medium text-stone-700 hover:bg-stone-100"
-              >
-                Contact Sales
-              </a>
-            </div>
+          <p className="mt-4 text-center text-stone-600">
+            No tiers, no feature gates. Try everything free for 90 days.
+          </p>
+          <div className="border-accent-strong mt-10 rounded border-2 bg-white p-8 shadow-lg">
+            <p className="font-serif text-xl font-bold text-stone-900">
+              Free for 90 days
+            </p>
+            <p className="mt-1 text-sm text-stone-600">
+              Full product. No credit card. No feature gates.
+            </p>
+            <div className="my-6 border-t border-stone-200" />
+            <p>
+              <span className="text-4xl font-bold text-stone-900">$100</span>
+              <span className="text-base font-medium text-stone-500">
+                {" "}
+                / year
+              </span>
+            </p>
+            <p className="mt-1 text-sm text-stone-600">
+              Flat. One tier. One server.
+            </p>
+            <a
+              href="/auth?flow=signup"
+              className="bg-accent-strong mt-8 block rounded px-4 py-3 text-center text-base font-medium text-white hover:bg-amber-700"
+            >
+              Start your free 90-day trial
+            </a>
+            <a
+              href="/pricing"
+              className="mt-3 block text-center text-sm font-medium text-stone-600 hover:text-stone-900"
+            >
+              See full pricing &amp; FAQ →
+            </a>
           </div>
         </div>
       </section>
