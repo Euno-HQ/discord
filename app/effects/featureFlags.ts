@@ -1,6 +1,7 @@
 import { Context, Effect, Layer, Schema, type ParseResult } from "effect";
 
 import { FeatureDisabledError } from "#~/effects/errors";
+import { logEffect } from "#~/effects/observability";
 import { PostHogService, PostHogServiceLive } from "#~/effects/posthog";
 
 export const BooleanFlag = Schema.Literal(
@@ -51,7 +52,16 @@ export const FeatureFlagServiceLive = Layer.scoped(
           }),
         ).pipe(
           Effect.map((result) => result ?? false),
-          Effect.catchAll(() => Effect.succeed(false as boolean)),
+          // A PostHog outage otherwise silently disables a paid feature for every
+          // guild with zero signal — warn so it's visible, then fail closed.
+          Effect.catchAll((error) =>
+            logEffect(
+              "warn",
+              "FeatureFlagService",
+              "PostHog flag check failed, defaulting to disabled",
+              { flag, guildId, error: String(error) },
+            ).pipe(Effect.as(false as boolean)),
+          ),
           Effect.tap((enabled) => Effect.annotateCurrentSpan({ enabled })),
           Effect.withSpan("FeatureFlagService.isPostHogEnabled", {
             attributes: { flag, guildId },

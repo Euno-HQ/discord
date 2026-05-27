@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 
 import type { IFeatureFlagService } from "#~/effects/featureFlags";
+import { logEffect } from "#~/effects/observability";
 
 import { analyzeVelocity } from "./velocityAnalyzer";
 
@@ -40,6 +41,18 @@ export const gatedVelocitySignals = (
     } else {
       enabled = yield* flags.isPostHogEnabled("velocity-spam", guildId);
       cache.set(guildId, { value: enabled, expiresAt: now + ttlMs });
+      // Logged on cache-miss only (≤ once per guild per TTL) so a guild silently
+      // missing velocity detection is visible — `enabled:false` here means the
+      // velocity-spam flag is off for that guild.
+      yield* logEffect(
+        "debug",
+        "SpamDetection",
+        "velocity-spam flag evaluated",
+        {
+          guildId,
+          enabled,
+        },
+      );
     }
 
     return enabled ? analyzeVelocity(recentMessages, contentHash) : [];

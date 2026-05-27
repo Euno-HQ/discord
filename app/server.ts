@@ -53,7 +53,10 @@ import { botStats } from "./helpers/metrics";
 
 export const app = express();
 
-const logger = pinoHttp();
+// Tag HTTP access logs with a `service` field so a single service-based filter
+// (e.g. `grep -v '"service":"http"'`) separates infra noise from app logs, which
+// already carry `service`.
+const logger = pinoHttp({ customProps: () => ({ service: "http" }) });
 app.use(logger);
 
 // Suppress Chrome DevTools 404 warnings
