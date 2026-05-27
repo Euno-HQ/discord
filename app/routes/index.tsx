@@ -1,6 +1,7 @@
 import { redirect } from "react-router";
 
-import { Login } from "#~/basics/login";
+import { SiteFooter } from "#~/components/SiteFooter";
+import { SiteHeader } from "#~/components/SiteHeader";
 import { getUser } from "#~/models/session.server";
 
 import type { Route } from "./+types/index";
@@ -15,64 +16,205 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
   return null;
 };
 
-function StandardBadge() {
-  return (
-    <span className="bg-accent-subtle text-accent ml-2 inline-flex items-center rounded px-2 py-0.5 text-xs font-medium tracking-wide uppercase">
-      Standard
-    </span>
-  );
-}
+export const meta: Route.MetaFunction = () => [
+  { title: "Euno — Moderation, decided together" },
+  {
+    name: "description",
+    content:
+      "The Discord moderation bot for mod teams of 3+. Mod tracking and anonymous reports are free; escalation voting and shared ticketing are $100 a year.",
+  },
+  { tagName: "link", rel: "canonical", href: "https://euno.reactiflux.com/" },
+  { property: "og:url", content: "https://euno.reactiflux.com/" },
+  { property: "og:title", content: "Euno — Moderation, decided together" },
+  {
+    property: "og:description",
+    content:
+      "Anonymous reports and mod tracking, free. Escalation voting and shared ticketing for $100 a year.",
+  },
+];
 
 export default function Index() {
   return (
     <div className="bg-surface-light min-h-screen">
-      {/* Nav */}
-      <nav className="flex items-center justify-between px-6 py-4 lg:px-8">
-        <span className="text-accent-strong font-serif text-xl font-bold">
-          Euno
-        </span>
-        <div className="flex items-center gap-4">
-          <Login className="w-auto rounded-none bg-transparent px-3 py-2 text-sm font-medium text-stone-600 shadow-none hover:bg-transparent hover:text-stone-900 focus:bg-transparent">
-            Log in
-          </Login>
-          <a
-            href="/auth?flow=signup"
-            className="bg-accent-strong rounded px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
-          >
-            Add to Discord
-          </a>
-        </div>
-      </nav>
+      <SiteHeader />
 
       {/* Hero */}
+      {/*
+        Headline A/B: Variant B "Moderation, decided together." ships as the
+        live control. Variant A "Stop making the call alone." is the designated
+        A/B challenger (see notes/2026-05-12_1_page-copy-homepage-hero.md). No
+        experiment infrastructure exists yet — swap the <h1> to run the
+        challenger once PostHog experiments are wired up.
+      */}
       <section className="px-6 py-20 lg:py-28">
         <div className="mx-auto max-w-3xl text-center">
-          <h1 className="font-serif text-4xl font-bold tracking-tight text-stone-900 lg:text-5xl">
-            A moderation system, not a moderation toolkit
+          <p className="text-accent-strong text-sm font-medium tracking-wide uppercase">
+            For mod teams of 3+
+          </p>
+          <h1 className="mt-4 font-serif text-4xl font-bold tracking-tight text-stone-900 lg:text-5xl">
+            Moderation, decided together.
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg text-stone-600">
-            Other bots give you commands and leave you to build a workflow. Euno
-            ships one. Run /setup and your server gets anonymous reporting, spam
-            detection, deletion logging, and team-based escalation — all working
-            together, out of the box.
+            Escalation votes, anonymous reports, and shared tickets — so the
+            hard calls in your server get decided together, not dumped on
+            whoever was online.
           </p>
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <a
               href="/auth?flow=signup"
               className="bg-accent-strong rounded px-6 py-3 text-base font-medium text-white hover:bg-amber-700"
             >
-              Add to Discord
+              Add Euno — free
             </a>
             <a
-              href="#features"
+              href="#comparison"
               className="text-base font-medium text-stone-600 hover:text-stone-900"
             >
-              See how it works
+              See how a team uses it
             </a>
           </div>
-          <p className="mt-6 text-sm text-stone-500">
-            Free to start. 90-day trial on paid features.
+          <p className="mx-auto mt-6 max-w-xl text-sm text-stone-500">
+            Free for mod tracking and anonymous reports — no card, no time
+            limit. Escalation voting and shared tickets are $100 a year.
           </p>
+          <p className="mt-10 text-sm text-stone-400">
+            Built by people who've moderated Discord servers since they were
+            called guilds.
+          </p>
+        </div>
+      </section>
+
+      {/* Comparison — team-decisions framing, not a feature checklist */}
+      <section
+        id="comparison"
+        className="border-t border-stone-200 px-6 py-16 lg:py-24"
+      >
+        <div className="mx-auto max-w-4xl">
+          <p className="text-accent-strong text-center text-sm font-medium tracking-wide uppercase">
+            A different starting assumption
+          </p>
+          <h2 className="mt-3 text-center font-serif text-3xl font-bold text-stone-900">
+            Moderation isn't a solo sport.
+          </h2>
+          <p className="mx-auto mt-6 max-w-2xl text-center text-lg text-stone-600">
+            MEE6 and Carl-bot are built on a quiet assumption — that one mod,
+            acting alone, is the unit of moderation. Euno is built on a
+            different one.
+          </p>
+
+          <div className="mt-12 space-y-10">
+            {/* Moment 1 */}
+            <div>
+              <h3 className="font-serif text-lg font-semibold text-stone-900">
+                When a mod hits &ldquo;ban&rdquo; on a tough call
+              </h3>
+              <div className="mt-4 grid gap-6 md:grid-cols-2">
+                <div>
+                  <p className="text-xs font-medium tracking-wide text-stone-500 uppercase">
+                    Most mod bots
+                  </p>
+                  <p className="mt-2 text-stone-600">
+                    The action lands instantly and lives in an audit log. If
+                    another mod would&apos;ve called it differently, that
+                    conversation happens after the fact, if it happens at all.
+                  </p>
+                </div>
+                <div>
+                  <p className="text-accent-strong text-xs font-medium tracking-wide uppercase">
+                    Euno
+                  </p>
+                  <p className="mt-2 text-stone-700">
+                    The mod can escalate the call to a vote before it lands. The
+                    decision gets logged as the team&apos;s, not one
+                    person&apos;s — and the user who was banned can&apos;t pin
+                    it on &ldquo;that one mod.&rdquo;
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Moment 2 */}
+            <div>
+              <h3 className="font-serif text-lg font-semibold text-stone-900">
+                When a community member wants to report another member
+              </h3>
+              <div className="mt-4 grid gap-6 md:grid-cols-2">
+                <div>
+                  <p className="text-xs font-medium tracking-wide text-stone-500 uppercase">
+                    Most mod bots
+                  </p>
+                  <p className="mt-2 text-stone-600">
+                    The report drops into a channel. Whichever mod sees it first
+                    usually acts on it alone.
+                  </p>
+                </div>
+                <div>
+                  <p className="text-accent-strong text-xs font-medium tracking-wide uppercase">
+                    Euno
+                  </p>
+                  <p className="mt-2 text-stone-700">
+                    The report goes to the whole mod team, anonymously. The
+                    reporter isn&apos;t exposed, and the response is coordinated
+                    instead of racing the first available mod.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Moment 3 */}
+            <div>
+              <h3 className="font-serif text-lg font-semibold text-stone-900">
+                When the mod team doesn&apos;t agree on a call
+              </h3>
+              <div className="mt-4 grid gap-6 md:grid-cols-2">
+                <div>
+                  <p className="text-xs font-medium tracking-wide text-stone-500 uppercase">
+                    Most mod bots
+                  </p>
+                  <p className="mt-2 text-stone-600">
+                    Last action wins. The disagreement migrates to #mod-chat and
+                    stays there until someone gives up or burns out.
+                  </p>
+                </div>
+                <div>
+                  <p className="text-accent-strong text-xs font-medium tracking-wide uppercase">
+                    Euno
+                  </p>
+                  <p className="mt-2 text-stone-700">
+                    A vote resolves it. The outcome belongs to the team, the
+                    reasoning is captured, and the next similar case has a
+                    precedent instead of a grudge.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p className="mx-auto mt-12 max-w-2xl text-center text-stone-700">
+            When every hard call is one mod&apos;s call, mods burn out and
+            communities get whiplash. Shared decisions are what keep a mod team
+            — and a community — together over years, not months.
+          </p>
+
+          <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-stone-500">
+            MEE6 and Carl-bot are excellent bots — they&apos;re built for
+            servers where one mod can reasonably make every call. Euno is built
+            for teams where that stopped being true a long time ago.
+          </p>
+
+          {/*
+            TODO: when /case-studies/reactiflux ships, add the spec's primary
+            CTA "See how Reactiflux runs it →". Omitted now to avoid a dead
+            link while the case study is deferred pending sourced quotes.
+          */}
+          <div className="mt-8 flex justify-center">
+            <a
+              href="/features"
+              className="text-base font-medium text-stone-600 hover:text-stone-900"
+            >
+              What&apos;s in Euno →
+            </a>
+          </div>
         </div>
       </section>
 
@@ -152,74 +294,6 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Supporting features */}
-      <section className="bg-surface-light-alt px-6 py-16 lg:py-24">
-        <div className="mx-auto max-w-5xl">
-          <h2 className="text-center font-serif text-3xl font-bold text-stone-900">
-            Plus everything you'd expect
-          </h2>
-          <div className="mt-12 grid gap-x-8 gap-y-10 md:grid-cols-2 lg:grid-cols-3">
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Content spam detection
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Keyword matching, zalgo detection, mass ping blocking, and
-                honeypot channels. Graduated responses from logging to softban.
-                Works immediately.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Deletion logging
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Deleted messages are captured and attributed automatically. See
-                what was said after someone tries to cover their tracks.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Velocity spam detection
-                <StandardBadge />
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Cross-channel duplicate detection, channel hopping, rapid-fire
-                messaging. Catches coordinated raids, not just individual
-                spammers.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Tickets
-                <StandardBadge />
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Button-click ticket system. Members fill a form, a private
-                thread is created, your team gets pinged.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Reactji forwarding
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Set an emoji + threshold. Messages that hit it get forwarded to
-                a highlights channel.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-serif font-semibold text-stone-900">
-                Force ban
-              </h3>
-              <p className="mt-1 text-sm text-stone-600">
-                Ban users who already left the server. No more escaped alts.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* Federation roadmap tease */}
       <section className="px-6 py-16 lg:py-24">
         <div className="border-accent-strong mx-auto max-w-3xl rounded border-l-4 bg-amber-50 p-8">
@@ -241,15 +315,19 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Pricing */}
+      {/* Pricing — free tier + paid "Team" upgrade; full details + FAQ on /pricing */}
       <section className="bg-surface-light-alt px-6 py-16 lg:py-24">
-        <div className="mx-auto max-w-5xl">
+        <div className="mx-auto max-w-3xl">
           <h2 className="text-center font-serif text-3xl font-bold text-stone-900">
-            Pricing
+            Free to run. $100 a year to decide together.
           </h2>
-          <div className="mt-12 grid gap-8 md:grid-cols-3">
+          <p className="mt-4 text-center text-stone-600">
+            Mod tracking and anonymous reports are free for any server. The
+            team-decision features are the paid tier.
+          </p>
+          <div className="mt-10 grid items-start gap-8 md:grid-cols-2">
             {/* Free */}
-            <div className="rounded border border-stone-300 bg-white p-6">
+            <div className="rounded border border-stone-300 bg-white p-8">
               <h3 className="font-serif text-xl font-bold text-stone-900">
                 Free
               </h3>
@@ -257,109 +335,65 @@ export default function Index() {
                 <span className="text-4xl font-bold text-stone-900">$0</span>
               </p>
               <p className="mt-1 text-sm text-stone-500">
-                See what's happening
+                For any server, no time limit
               </p>
               <ul className="mt-6 space-y-3 text-sm text-stone-700">
-                <li>Basic reporting (staff tracking, non-anonymous)</li>
-                <li>
-                  Content-based spam detection (keyword matching, zalgo, mass
-                  pings)
-                </li>
+                <li>Anonymous community reports</li>
+                <li>Per-user mod tracking &amp; action history</li>
+                <li>Content spam detection &amp; honeypot channels</li>
                 <li>Deletion logging</li>
-                <li>Mod action recording</li>
-                <li>Honeypot channels</li>
-                <li>Reactji forwarding</li>
-                <li>Force ban</li>
+                <li>Standard moderation commands</li>
               </ul>
               <a
                 href="/auth?flow=signup"
                 className="mt-8 block rounded border border-stone-300 px-4 py-2 text-center text-sm font-medium text-stone-700 hover:bg-stone-100"
               >
-                Add to Discord
+                Add Euno free
               </a>
             </div>
 
-            {/* Standard */}
-            <div className="border-accent-strong rounded border-2 bg-white p-6 shadow-lg">
+            {/* Team (paid) */}
+            <div className="border-accent-strong rounded border-2 bg-white p-8 shadow-lg">
               <h3 className="font-serif text-xl font-bold text-stone-900">
-                Standard
+                Team
               </h3>
               <p className="mt-2">
                 <span className="text-4xl font-bold text-stone-900">$100</span>
                 <span className="text-base font-medium text-stone-500">
-                  /year
+                  {" "}
+                  / year
                 </span>
               </p>
-              <p className="mt-1 text-sm text-stone-500">Act on it as a team</p>
-              <ul className="mt-6 space-y-3 text-sm text-stone-700">
-                <li>Everything in Free</li>
-                <li>Anonymous community reports</li>
-                <li>Escalation voting</li>
-                <li>Ticket system</li>
-                <li>
-                  Velocity-based spam detection (cross-channel dupes, channel
-                  hopping, rapid-fire)
-                </li>
-                <li>/modreport user analytics</li>
-              </ul>
-              <p className="text-accent-strong mt-4 text-xs font-medium">
-                90-day free trial
+              <p className="mt-1 text-sm text-stone-500">
+                Everything in Free, plus team decisions
               </p>
+              <ul className="mt-6 space-y-3 text-sm text-stone-700">
+                <li>Escalation voting</li>
+                <li>Shared ticketing</li>
+                <li>/modreport analytics</li>
+                <li>Velocity &amp; raid spam detection</li>
+                <li>Data export &amp; extended history</li>
+              </ul>
               <a
                 href="/auth?flow=signup"
-                className="bg-accent-strong mt-4 block rounded px-4 py-2 text-center text-sm font-medium text-white hover:bg-amber-700"
+                className="bg-accent-strong mt-8 block rounded px-4 py-2 text-center text-sm font-medium text-white hover:bg-amber-700"
               >
-                Start free trial
-              </a>
-            </div>
-
-            {/* Custom */}
-            <div className="rounded border border-stone-300 bg-white p-6">
-              <h3 className="font-serif text-xl font-bold text-stone-900">
-                Custom
-              </h3>
-              <p className="mt-2 text-lg font-semibold text-stone-900">
-                Contact us
-              </p>
-              <p className="mt-1 text-sm text-stone-500">&nbsp;</p>
-              <ul className="mt-6 space-y-3 text-sm text-stone-700">
-                <li>Everything in Standard</li>
-                <li>Dedicated bot instance</li>
-                <li>Stable release channel</li>
-                <li>Support SLA</li>
-                <li>Priority feature requests</li>
-              </ul>
-              <a
-                href="mailto:support@euno.reactiflux.com?subject=Custom%20Euno%20Plan"
-                className="mt-8 block rounded border border-stone-300 px-4 py-2 text-center text-sm font-medium text-stone-700 hover:bg-stone-100"
-              >
-                Contact Sales
+                Start free, upgrade anytime
               </a>
             </div>
           </div>
+          <p className="mt-8 text-center">
+            <a
+              href="/pricing"
+              className="text-sm font-medium text-stone-600 hover:text-stone-900"
+            >
+              See full pricing &amp; FAQ →
+            </a>
+          </p>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-stone-300 bg-stone-200 px-6 py-8">
-        <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 text-sm text-stone-500 sm:flex-row sm:justify-between">
-          <div className="flex gap-6">
-            <a href="/terms" className="hover:text-stone-700">
-              Terms
-            </a>
-            <a href="/privacy" className="hover:text-stone-700">
-              Privacy
-            </a>
-            <a
-              href="mailto:support@euno.reactiflux.com"
-              className="hover:text-stone-700"
-            >
-              Support
-            </a>
-          </div>
-          <p>Built by the team behind Reactiflux.</p>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }
