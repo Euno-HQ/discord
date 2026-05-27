@@ -1,5 +1,7 @@
 import { data, redirect } from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
+import { syncGuildGroup } from "#~/effects/posthog";
 import { StripeService } from "#~/models/stripe.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
@@ -37,6 +39,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     status: "active",
     current_period_end: currentPeriodEnd.toISOString(),
   });
+  await runEffect(syncGuildGroup(guildId));
 
   return redirect(`/app/${guildId}/settings/upgrade?success`);
 }

@@ -22,6 +22,7 @@ import {
   interactionReply,
   sendMessage,
 } from "#~/effects/discordSdk.ts";
+import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
 import {
   quoteMessageContent,
@@ -157,6 +158,19 @@ export const Command = [
     command: { type: InteractionType.MessageComponent, name: "open-ticket" },
     handler: (interaction) =>
       Effect.gen(function* () {
+        const flags = yield* FeatureFlagService;
+        const enabled = yield* flags.isPostHogEnabled(
+          "ticketing",
+          interaction.guildId!,
+        );
+        if (!enabled) {
+          yield* interactionReply(interaction, {
+            content: "Ticketing isn't enabled on this server.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
         const modal = new ModalBuilder()
           .setCustomId("modal-open-ticket")
           .setTitle("What do you need from the moderators?");

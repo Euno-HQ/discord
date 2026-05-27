@@ -7,6 +7,7 @@ import type { GuildMember, Message } from "discord.js";
 import { Context, Effect, Layer } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
+import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
 import { getMessageContent } from "#~/helpers/discord.ts";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server.ts";
@@ -31,7 +32,8 @@ import {
   type SpamSignal,
   type SpamVerdict,
 } from "./spamScorer.ts";
-import { analyzeVelocity, getPriorDuplicates } from "./velocityAnalyzer.ts";
+import { getPriorDuplicates } from "./velocityAnalyzer.ts";
+import { gatedVelocitySignals } from "./velocityGate";
 
 export interface ISpamDetectionService {
   readonly checkMessage: (
@@ -67,6 +69,7 @@ export const SpamDetectionServiceLive = Layer.effect(
   SpamDetectionService,
   Effect.gen(function* () {
     const db = yield* DatabaseService;
+    const featureFlags = yield* FeatureFlagService;
 
     // In-memory state, lives for the bot's lifetime
     const tracker: ActivityMap = new Map();
@@ -212,7 +215,12 @@ export const SpamDetectionServiceLive = Layer.effect(
           const behaviorSignals = analyzeBehavior(message, member);
 
           const recentMessages = getRecentMessages(tracker, guildId, userId);
-          const velocitySignals = analyzeVelocity(recentMessages, contentHash);
+          const velocitySignals = yield* gatedVelocitySignals(
+            featureFlags,
+            guildId,
+            recentMessages,
+            contentHash,
+          );
 
           const allSignals = [
             ...contentSignals,

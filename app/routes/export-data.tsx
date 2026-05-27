@@ -1,4 +1,4 @@
-import { db, run, runTakeFirst } from "#~/AppRuntime";
+import { db, isFeatureEnabled, run, runTakeFirst } from "#~/AppRuntime";
 import { log, trackPerformance } from "#~/helpers/observability";
 import { requireUser } from "#~/models/session.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
@@ -24,16 +24,13 @@ export async function loader({ request }: Route.LoaderArgs) {
 
       // Check if user has premium access (data export is a paid feature)
       if (guildId) {
-        const hasAccess = await SubscriptionService.hasFeature(
-          guildId,
-          "data_export",
-        );
+        const hasAccess = await isFeatureEnabled("data-export", guildId);
 
         if (!hasAccess) {
           return new Response(
             JSON.stringify({
               error:
-                "Data export is a Pro feature. Please upgrade your subscription.",
+                "Data export is a paid feature. Please upgrade your subscription.",
             }),
             {
               status: 403,

@@ -1,15 +1,7 @@
 import { Context, Effect, Layer, Schema, type ParseResult } from "effect";
 
-import { DatabaseLayer, DatabaseService } from "#~/Database";
 import { FeatureDisabledError } from "#~/effects/errors";
-import { logEffect } from "#~/effects/observability";
 import { PostHogService, PostHogServiceLive } from "#~/effects/posthog";
-
-export const TierFlag = Schema.Literal(
-  "advanced_analytics",
-  "premium_moderation",
-);
-export type TierFlag = typeof TierFlag.Type;
 
 export const BooleanFlag = Schema.Literal(
   "mod-log",
@@ -18,10 +10,11 @@ export const BooleanFlag = Schema.Literal(
   "ticketing",
   "analytics",
   "deletion-log",
+  "velocity-spam",
+  "member-applications",
+  "data-export",
 );
 export type BooleanFlag = typeof BooleanFlag.Type;
-
-const PAID_FEATURES: ReadonlySet<TierFlag> = new Set(TierFlag.literals);
 
 export interface IFeatureFlagService {
   /** Check any PostHog flag by name. Never fails — returns false on error. */
@@ -36,18 +29,6 @@ export interface IFeatureFlagService {
     guildId: string,
     schema: Schema.Schema<A, I>,
   ) => Effect.Effect<A, ParseResult.ParseError>;
-
-  /** Check tier-based entitlement. Never fails — returns false on error. */
-  readonly isTierEnabled: (
-    flag: TierFlag,
-    guildId: string,
-  ) => Effect.Effect<boolean>;
-
-  /** Guard that fails with FeatureDisabledError if tier check fails. */
-  readonly requireTierFeature: (
-    flag: TierFlag,
-    guildId: string,
-  ) => Effect.Effect<void, FeatureDisabledError>;
 }
 
 export class FeatureFlagService extends Context.Tag("FeatureFlagService")<
@@ -58,37 +39,7 @@ export class FeatureFlagService extends Context.Tag("FeatureFlagService")<
 export const FeatureFlagServiceLive = Layer.scoped(
   FeatureFlagService,
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
     const posthog = yield* PostHogService;
-
-    const checkTier = (flag: TierFlag, guildId: string) =>
-      Effect.gen(function* () {
-        if (!PAID_FEATURES.has(flag)) return false;
-
-        const [row] = yield* db
-          .selectFrom("guild_subscriptions")
-          .select(["product_tier", "status"])
-          .where("guild_id", "=", guildId)
-          .where("status", "=", "active");
-
-        if (!row) return false;
-
-        // For now, any active subscription grants all paid features.
-        // Tier-specific gating can be added here later when multiple tiers exist.
-        return true;
-      }).pipe(
-        Effect.catchAll((e) =>
-          logEffect(
-            "warn",
-            "FeatureFlagService",
-            "Tier check failed, defaulting to disabled",
-            { flag, guildId, error: String(e) },
-          ).pipe(Effect.map(() => false)),
-        ),
-        Effect.withSpan("FeatureFlagService.checkTier", {
-          attributes: { flag, guildId },
-        }),
-      );
 
     return {
       isPostHogEnabled: (flag, guildId) => {
@@ -126,30 +77,9 @@ export const FeatureFlagServiceLive = Layer.scoped(
             attributes: { flag, guildId },
           }),
         ),
-
-      isTierEnabled: (flag: TierFlag, guildId: string) =>
-        checkTier(flag, guildId),
-
-      requireTierFeature: (flag, guildId) =>
-        Effect.gen(function* () {
-          const enabled = yield* checkTier(flag, guildId);
-          if (!enabled) {
-            return yield* Effect.fail(
-              new FeatureDisabledError({
-                feature: flag,
-                guildId,
-                reason: "tier_required",
-              }),
-            );
-          }
-        }).pipe(
-          Effect.withSpan("FeatureFlagService.requireTierFeature", {
-            attributes: { flag, guildId },
-          }),
-        ),
     };
   }),
-).pipe(Layer.provide(Layer.merge(DatabaseLayer, PostHogServiceLive)));
+).pipe(Layer.provide(PostHogServiceLive));
 
 /**
  * Soft gate for conditional behavior based on a boolean check.
