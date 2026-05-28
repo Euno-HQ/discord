@@ -50,27 +50,47 @@ export const recordReport = (data: {
       reason: data.reason,
     });
 
-    const result = yield* db.insertInto("reported_messages").values({
-      id: reportId,
-      reported_message_id: data.reportedMessageId,
-      reported_channel_id: data.reportedChannelId,
-      reported_user_id: data.reportedUserId,
-      guild_id: data.guildId,
-      log_message_id: data.logMessageId,
-      log_channel_id: data.logChannelId,
-      reason: data.reason,
-      staff_id: data.staffId,
-      staff_username: data.staffUsername,
-      extra: data.extra,
-      created_at: new Date().toISOString(),
-    });
+    // Idempotent insert: the unique index idx_unique_message_reason_guild on
+    // (reported_message_id, reason, guild_id) means a second attempt to record
+    // the same (message, reason) pair in the same guild would otherwise raise
+    // SQLITE_CONSTRAINT_UNIQUE. DO NOTHING preserves the first-written log
+    // pointer (so mods can still navigate to the original thread post).
+    const result = yield* db
+      .insertInto("reported_messages")
+      .values({
+        id: reportId,
+        reported_message_id: data.reportedMessageId,
+        reported_channel_id: data.reportedChannelId,
+        reported_user_id: data.reportedUserId,
+        guild_id: data.guildId,
+        log_message_id: data.logMessageId,
+        log_channel_id: data.logChannelId,
+        reason: data.reason,
+        staff_id: data.staffId,
+        staff_username: data.staffUsername,
+        extra: data.extra,
+        created_at: new Date().toISOString(),
+      })
+      .onConflict((oc) =>
+        oc.columns(["reported_message_id", "reason", "guild_id"]).doNothing(),
+      );
 
-    yield* logEffect("info", "ReportedMessage", "Report recorded", {
-      reportedUserId: data.reportedUserId,
-      guildId: data.guildId,
-    });
+    // SQLite returns a single InsertResult; numInsertedOrUpdatedRows is 0n on
+    // conflict-skip and 1n on actual insert.
+    const wasInserted = Number(result[0]?.numInsertedOrUpdatedRows ?? 0n) > 0;
 
-    return { wasInserted: true, result, reportId };
+    yield* logEffect(
+      "info",
+      "ReportedMessage",
+      wasInserted ? "Report recorded" : "Report already recorded — skipped",
+      {
+        reportedUserId: data.reportedUserId,
+        guildId: data.guildId,
+        wasInserted,
+      },
+    );
+
+    return { wasInserted, result, reportId };
   }).pipe(
     Effect.annotateSpans({ guildId: data.guildId, reason: data.reason }),
 
