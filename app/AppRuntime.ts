@@ -2,6 +2,7 @@ import { Effect, Layer, Logger, LogLevel, ManagedRuntime } from "effect";
 import type { PostHog } from "posthog-node";
 
 import { DatabaseLayer, DatabaseService, type EffectKysely } from "#~/Database";
+import { DiscordEventBusLive } from "#~/discord/eventBus";
 import { MessageCacheServiceLive } from "#~/discord/messageCacheService";
 import { NotFoundError } from "#~/effects/errors";
 import {
@@ -29,9 +30,13 @@ const AppLayer = Layer.mergeAll(
   DatabaseLayer,
   PostHogServiceLive,
   FeatureFlagServiceLive,
-  Layer.provide(SpamDetectionServiceLive, DatabaseLayer),
+  Layer.provide(
+    SpamDetectionServiceLive,
+    Layer.merge(DatabaseLayer, FeatureFlagServiceLive),
+  ),
   MessageCacheServiceLive,
   SupervisorServiceLive,
+  DiscordEventBusLive,
   InfraLayer,
 );
 
@@ -91,6 +96,17 @@ export const runTakeFirstOrThrow = <A>(
 export const runEffect = <A, E>(
   effect: Effect.Effect<A, E, RuntimeContext>,
 ): Promise<A> => runtime.runPromise(effect);
+
+/** Promise bridge: evaluate a PostHog flag for a guild from async/await code. */
+export const isFeatureEnabled = (
+  flag: BooleanFlag,
+  guildId: string,
+): Promise<boolean> =>
+  runEffect(
+    Effect.flatMap(FeatureFlagService, (flags) =>
+      flags.isPostHogEnabled(flag, guildId),
+    ),
+  );
 
 // Run an Effect through the ManagedRuntime, returning a Promise<Exit>.
 export const runEffectExit = <A, E>(

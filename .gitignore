@@ -22,3 +22,6 @@ vite.config.ts*
 /playwright/.cache/
 /.playwright-mcp/
 .claude/
+
+# Brainstorming visual companion
+.superpowers/

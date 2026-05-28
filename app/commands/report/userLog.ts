@@ -36,18 +36,10 @@ import { getOrCreateUserThread } from "#~/models/userThreads.ts";
 
 import {
   constructLog,
+  getMessageContent,
   isForwardedMessage,
   ReadableReasons,
 } from "./constructLog";
-
-const getMessageContent = (message: Message): string => {
-  if (isForwardedMessage(message)) {
-    // For forwards, content is in the snapshot
-    const snapshot = message.messageSnapshots.first();
-    return snapshot?.content ?? message.content;
-  }
-  return message.content;
-};
 
 interface Reported {
   message: Message;

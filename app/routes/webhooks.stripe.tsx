@@ -1,5 +1,7 @@
 import type Stripe from "stripe";
 
+import { runEffect } from "#~/AppRuntime";
+import { syncGuildGroup } from "#~/effects/posthog";
 import { log } from "#~/helpers/observability";
 import { StripeService } from "#~/models/stripe.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
@@ -129,6 +131,7 @@ async function handleCheckoutSessionCompleted(
     status: "active",
     current_period_end: currentPeriodEnd.toISOString(),
   });
+  await runEffect(syncGuildGroup(guildId));
 
   log("info", "Webhook", "Checkout session processed successfully", {
     sessionId: session.id,
@@ -180,6 +183,7 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
     status,
     current_period_end: currentPeriodEnd ?? undefined,
   });
+  await runEffect(syncGuildGroup(guildId));
 
   log("info", "Webhook", "Subscription update processed successfully", {
     subscriptionId: subscription.id,
@@ -219,6 +223,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
     status: "inactive",
     current_period_end: new Date().toISOString(),
   });
+  await runEffect(syncGuildGroup(guildId));
 
   log("info", "Webhook", "Subscription deletion processed successfully", {
     subscriptionId: subscription.id,

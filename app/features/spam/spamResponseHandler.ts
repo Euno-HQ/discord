@@ -8,7 +8,7 @@ import { Effect } from "effect";
 
 import { logUserMessage } from "#~/commands/report/userLog.ts";
 import { client } from "#~/discord/client.server.ts";
-import { deleteMessage } from "#~/effects/discordSdk.ts";
+import { deleteMessage, softbanMember } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import { featureStats } from "#~/helpers/metrics.ts";
 import { applyRestriction, timeout } from "#~/models/discord.server.ts";
@@ -114,12 +114,15 @@ export const executeResponse = (
       const { message: logMessage } = logResult;
       const spamCount = yield* getSpamReportCount(userId, guildId);
       if (spamCount >= AUTO_KICK_THRESHOLD) {
-        yield* Effect.tryPromise(() =>
-          member.kick("Autokicked for repeated spam"),
+        yield* softbanMember(
+          member,
+          "Autokicked for repeated spam (1h message cleanup)",
+          3600,
         ).pipe(
-          Effect.catchAll((error) =>
-            logEffect("warn", "SpamResponse", "Failed to kick spammer", {
-              error: String(error),
+          Effect.catchTag("DiscordApiError", (error) =>
+            logEffect("warn", "SpamResponse", "Failed to softban spammer", {
+              error: String(error.cause),
+              operation: error.operation,
             }),
           ),
         );
@@ -139,7 +142,7 @@ export const executeResponse = (
 
         yield* Effect.tryPromise(() =>
           logMessage.reply({
-            content: `Automatically kicked <@${userId}> for spam`,
+            content: `Automatically removed <@${userId}> for spam (last hour of messages also deleted)`,
             allowedMentions: {},
           }),
         ).pipe(Effect.catchAll(() => Effect.void));
@@ -307,32 +310,27 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
     return result;
   }).pipe(Effect.withSpan("SpamResponse.logSpamReport"));
 
-/** Execute a softban (ban + unban) for honeypot triggers */
+/** Execute a softban (ban + unban) for honeypot triggers — 7-day message wipe. */
 const executeSoftban = (
   message: Message,
   member: GuildMember,
   verdict: SpamVerdict,
 ) =>
   Effect.gen(function* () {
-    const guild = message.guild!;
-
-    yield* Effect.tryPromise(async () => {
-      await member.ban({
-        reason: "honeypot spam detected",
-        deleteMessageSeconds: 604800, // 7 days
-      });
-      await guild.members.unban(member);
-    }).pipe(
-      Effect.catchAll((error) =>
+    yield* softbanMember(member, "honeypot spam detected", 604800).pipe(
+      Effect.catchTag("DiscordApiError", (error) =>
         logEffect("error", "SpamResponse", "Failed to softban user", {
-          error: String(error),
+          error: String(error.cause),
+          operation: error.operation,
           userId: member.id,
-          guildId: guild.id,
+          guildId: message.guild!.id,
         }),
       ),
     );
-
     yield* logSpamReport(message, verdict);
-
-    featureStats.honeypotTriggered(guild.id, member.id, message.channelId);
+    featureStats.honeypotTriggered(
+      message.guild!.id,
+      member.id,
+      message.channelId,
+    );
   }).pipe(Effect.withSpan("SpamResponse.executeSoftban"));

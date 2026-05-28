@@ -1,8 +1,9 @@
-import { Effect, Exit } from "effect";
+import { Effect, Exit, Schema } from "effect";
 import { vi } from "vitest";
 
 import { FeatureDisabledError } from "./errors";
 import {
+  BooleanFlag,
   guardFeature,
   withFeatureFlag,
   type IFeatureFlagService,
@@ -57,8 +58,6 @@ describe("guardFeature", () => {
   const makeMockFlags = (enabled: boolean): IFeatureFlagService => ({
     isPostHogEnabled: (_flag, _guildId) => Effect.succeed(enabled),
     getPostHogValue: () => Effect.die("not implemented"),
-    isTierEnabled: () => Effect.succeed(false),
-    requireTierFeature: () => Effect.void,
   });
 
   test("succeeds when isPostHogEnabled returns true", async () => {
@@ -97,4 +96,13 @@ describe("guardFeature", () => {
       expect(result.reason).toBe("not_in_rollout");
     }
   });
+});
+
+describe("BooleanFlag", () => {
+  test.each(["velocity-spam", "member-applications", "data-export"])(
+    "accepts %s",
+    (key) => {
+      expect(Schema.decodeUnknownSync(BooleanFlag)(key)).toBe(key);
+    },
+  );
 });

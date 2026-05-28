@@ -7,7 +7,9 @@ import type { GuildMember, Message } from "discord.js";
 import { Context, Effect, Layer } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
+import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
+import { getMessageContent } from "#~/helpers/discord.ts";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server.ts";
 
 import { analyzeBehavior } from "./behaviorAnalyzer.ts";
@@ -30,7 +32,8 @@ import {
   type SpamSignal,
   type SpamVerdict,
 } from "./spamScorer.ts";
-import { analyzeVelocity, getPriorDuplicates } from "./velocityAnalyzer.ts";
+import { getPriorDuplicates } from "./velocityAnalyzer.ts";
+import { gatedVelocitySignals } from "./velocityGate";
 
 export interface ISpamDetectionService {
   readonly checkMessage: (
@@ -66,6 +69,7 @@ export const SpamDetectionServiceLive = Layer.effect(
   SpamDetectionService,
   Effect.gen(function* () {
     const db = yield* DatabaseService;
+    const featureFlags = yield* FeatureFlagService;
 
     // In-memory state, lives for the bot's lifetime
     const tracker: ActivityMap = new Map();
@@ -158,6 +162,13 @@ export const SpamDetectionServiceLive = Layer.effect(
         Effect.gen(function* () {
           const guildId = message.guild!.id;
 
+          // Correlate this trace with the message so spans can be looked up by
+          // messageId (the same correlation id used across the pipeline logs).
+          yield* Effect.annotateCurrentSpan({
+            messageId: message.id,
+            authorId: message.author.id,
+          });
+
           // Check if moderator — mods are exempt from honeypot
           const isMod = yield* isModeratorOrAdmin(member, guildId);
           if (isMod) {
@@ -170,7 +181,9 @@ export const SpamDetectionServiceLive = Layer.effect(
           }
 
           const userId = message.author.id;
-          const content = message.content;
+          // Use forwarding-aware extractor: cross-server forwards store the
+          // original text in messageSnapshots, not in message.content.
+          const content = getMessageContent(message);
 
           // Build a text representation of all embeds for hashing and analysis
           const embedText = buildEmbedText(message.embeds);
@@ -209,7 +222,12 @@ export const SpamDetectionServiceLive = Layer.effect(
           const behaviorSignals = analyzeBehavior(message, member);
 
           const recentMessages = getRecentMessages(tracker, guildId, userId);
-          const velocitySignals = analyzeVelocity(recentMessages, contentHash);
+          const velocitySignals = yield* gatedVelocitySignals(
+            featureFlags,
+            guildId,
+            recentMessages,
+            contentHash,
+          );
 
           const allSignals = [
             ...contentSignals,

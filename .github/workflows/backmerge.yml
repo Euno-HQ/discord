@@ -1,0 +1,111 @@
+name: Back-merge release into main
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: backmerge-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  backmerge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: Euno-HQ
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Determine back-merge ref
+        id: ref
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [ -n "${RELEASE_TAG}" ]; then
+            REF="${RELEASE_TAG}"
+          else
+            REF="manual-$(date -u +%Y%m%d%H%M%S)"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "branch=backmerge/${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether release is already merged into main
+        id: guard
+        run: |
+          git fetch origin main release
+          if git merge-base --is-ancestor origin/release origin/main; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+            echo "release is already an ancestor of main; nothing to back-merge."
+          else
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for an existing open back-merge PR
+        id: existing
+        if: steps.guard.outputs.merged == 'false'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          EXISTING=$(gh pr list --base main --state open \
+            --json number,headRefName \
+            --jq 'map(select(.headRefName | startswith("backmerge/"))) | .[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "number=${EXISTING}" >> "$GITHUB_OUTPUT"
+            echo "An open back-merge PR already exists: #${EXISTING}; skipping."
+          fi
+
+      - name: Create back-merge branch at release tip
+        if: steps.guard.outputs.merged == 'false' && steps.existing.outputs.number == ''
+        env:
+          BRANCH: ${{ steps.ref.outputs.branch }}
+        run: |
+          git push --force origin "origin/release:refs/heads/${BRANCH}"
+
+      - name: Open back-merge PR and enable auto-merge
+        if: steps.guard.outputs.merged == 'false' && steps.existing.outputs.number == ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: ${{ steps.ref.outputs.branch }}
+          REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          cat > /tmp/backmerge-body.md <<EOF
+          Automated back-merge of release into main after publishing ${REF}.
+
+          Brings release-only fixes (pushed to rc/* during UAT) back into the development line.
+
+          * Clean + CI-green: this PR auto-merges with no action needed.
+          * Conflicts or red CI: auto-merge stays pending. To resolve, run:
+
+              git fetch origin
+              git checkout ${BRANCH}
+              git merge origin/main
+              # resolve conflicts, commit, and push
+          EOF
+
+          gh label create backmerge --color BFD4F2 \
+            --description "Automated back-merge of release into main" 2>/dev/null || true
+
+          PR_URL=$(gh pr create \
+            --base main \
+            --head "${BRANCH}" \
+            --title "Back-merge release ${REF} into main" \
+            --label backmerge \
+            --body-file /tmp/backmerge-body.md)
+          echo "Opened ${PR_URL}"
+
+          gh pr merge "${PR_URL}" --auto --merge
