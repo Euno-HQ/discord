@@ -206,6 +206,12 @@ const startup = Effect.gen(function* () {
   // Pipeline (re)start — runs every reload for HMR support.
   // Interrupt stale fibers, fork fresh pipelines with updated handler code.
   // The event bus queue buffers events during the brief swap.
+  //
+  // forkDaemon (NOT fork): these fibers must outlive `startup`, the fiber
+  // running this code. Plain Effect.fork makes them children of `startup`, so
+  // they're interrupted the instant it completes — silently killing every
+  // pipeline before it drains a single event. HMR cleanup is handled by the
+  // explicit Fiber.interrupt above, not by parent-scope teardown.
   if (globalThis.__pipelineFibers) {
     yield* Effect.all(
       globalThis.__pipelineFibers.map((f) => Fiber.interrupt(f)),
@@ -213,12 +219,12 @@ const startup = Effect.gen(function* () {
     yield* logEffect("info", "Server", "Interrupted old pipeline fibers");
   }
   globalThis.__pipelineFibers = [
-    yield* deletionLoggerPipeline.pipe(Effect.fork),
-    yield* automodPipeline.pipe(Effect.fork),
-    yield* modActionLoggerPipeline.pipe(Effect.fork),
-    yield* activityTrackerPipeline.pipe(Effect.fork),
-    yield* onboardGuildPipeline.pipe(Effect.fork),
-    yield* reactjiChannelerPipeline.pipe(Effect.fork),
+    yield* deletionLoggerPipeline.pipe(Effect.forkDaemon),
+    yield* automodPipeline.pipe(Effect.forkDaemon),
+    yield* modActionLoggerPipeline.pipe(Effect.forkDaemon),
+    yield* activityTrackerPipeline.pipe(Effect.forkDaemon),
+    yield* onboardGuildPipeline.pipe(Effect.forkDaemon),
+    yield* reactjiChannelerPipeline.pipe(Effect.forkDaemon),
   ];
   yield* logEffect("info", "Server", "Pipeline fibers forked");
 });
