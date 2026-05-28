@@ -112,7 +112,31 @@ export const DiscordEventBusLive = Layer.scoped(
 
     client.on(Events.MessageCreate, (message) => {
       const event = enrichMessageCreate(message);
-      if (event) Effect.runFork(Queue.offer(queue, event));
+      if (event) {
+        Effect.runFork(Queue.offer(queue, event));
+        return;
+      }
+      // Diagnostic: a human, in-guild message whose member didn't resolve is
+      // dropped here and never reaches any pipeline. This is the one non-obvious
+      // drop reason — surface it so it isn't silent.
+      if (
+        !message.author.bot &&
+        !message.author.system &&
+        message.inGuild() &&
+        !message.member
+      ) {
+        log(
+          "debug",
+          "DiscordEventBus",
+          "MessageCreate dropped: member unresolved",
+          {
+            messageId: message.id,
+            authorId: message.author.id,
+            channelId: message.channelId,
+            guildId: message.guildId,
+          },
+        );
+      }
     });
 
     client.on(Events.MessageDelete, (message) => {

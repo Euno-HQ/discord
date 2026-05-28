@@ -154,3 +154,7 @@ const GUILD_MESSAGE_TYPES = new Set([
 export const isGuildMessageEvent = (
   event: DiscordEvent,
 ): event is GuildMessageEvent => GUILD_MESSAGE_TYPES.has(event.type);
+
+export const isGuildMemberMessage = (
+  event: DiscordEvent,
+): event is GuildMemberMessage => event.type === "GuildMemberMessage";

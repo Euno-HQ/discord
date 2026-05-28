@@ -162,6 +162,13 @@ export const SpamDetectionServiceLive = Layer.effect(
         Effect.gen(function* () {
           const guildId = message.guild!.id;
 
+          // Correlate this trace with the message so spans can be looked up by
+          // messageId (the same correlation id used across the pipeline logs).
+          yield* Effect.annotateCurrentSpan({
+            messageId: message.id,
+            authorId: message.author.id,
+          });
+
           // Check if moderator — mods are exempt from honeypot
           const isMod = yield* isModeratorOrAdmin(member, guildId);
           if (isMod) {
