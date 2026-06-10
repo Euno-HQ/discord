@@ -31,6 +31,7 @@ import {
   type SlashCommand,
 } from "#~/helpers/discord";
 import { featureStats } from "#~/helpers/metrics";
+import { createJobEffect } from "#~/jobs/jobRunner";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 
 export const DEFAULT_BUTTON_TEXT = "Open a private ticket with the moderators";
@@ -374,10 +375,19 @@ export const Command = [
         const { user } = interaction.member;
         const interactionUserId = user.id;
 
+        // Schedule member removal for 5 minutes from now
+        const scheduledFor = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
         yield* Effect.all([
-          Effect.tryPromise(() =>
-            rest.delete(Routes.threadMembers(threadId, ticketOpenerUserId)),
-          ),
+          createJobEffect({
+            guildId: interaction.guild.id,
+            jobType: "ticket_member_removal",
+            payload: {
+              threadId,
+              userId: ticketOpenerUserId,
+            },
+            scheduledFor,
+          }),
           Effect.tryPromise(() =>
             rest.post(Routes.channelMessages(modLog), {
               body: {
@@ -387,7 +397,7 @@ export const Command = [
             }),
           ),
           interactionReply(interaction, {
-            content: `The ticket was closed by <@${interactionUserId}>`,
+            content: `The ticket was closed by <@${interactionUserId}>. <@${ticketOpenerUserId}> will be removed from the thread in 5 minutes.`,
             allowedMentions: {},
           }),
         ]);

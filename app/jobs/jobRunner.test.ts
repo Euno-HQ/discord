@@ -85,6 +85,7 @@ beforeAll(async () => {
           error_count INTEGER NOT NULL DEFAULT 0,
           last_error TEXT,
           notify_channel_id TEXT,
+          scheduled_for TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           completed_at TEXT
@@ -127,6 +128,7 @@ const insertJob = (overrides: Partial<Job> = {}) => {
     error_count: 0,
     last_error: null,
     notify_channel_id: null,
+    scheduled_for: null,
     created_at: now,
     updated_at: now,
     completed_at: null,
@@ -206,6 +208,74 @@ describe("claimNextJobEffect", () => {
 
     const claimed = await runTest(claimNextJobEffect);
     expect(claimed!.id).toBe("processing-1");
+  });
+
+  it("skips jobs scheduled for the future", async () => {
+    const futureTime = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour from now
+    await runTest(
+      insertJob({
+        id: "future-job",
+        status: "pending",
+        scheduled_for: futureTime,
+      }),
+    );
+
+    const claimed = await runTest(claimNextJobEffect);
+    expect(claimed).toBeUndefined();
+  });
+
+  it("claims jobs scheduled for the past", async () => {
+    const pastTime = new Date(Date.now() - 60 * 1000).toISOString(); // 1 minute ago
+    await runTest(
+      insertJob({
+        id: "past-job",
+        status: "pending",
+        scheduled_for: pastTime,
+      }),
+    );
+
+    const claimed = await runTest(claimNextJobEffect);
+    expect(claimed).toBeDefined();
+    expect(claimed!.id).toBe("past-job");
+  });
+
+  it("claims jobs with null scheduled_for immediately", async () => {
+    await runTest(
+      insertJob({
+        id: "immediate-job",
+        status: "pending",
+        scheduled_for: null,
+      }),
+    );
+
+    const claimed = await runTest(claimNextJobEffect);
+    expect(claimed).toBeDefined();
+    expect(claimed!.id).toBe("immediate-job");
+  });
+
+  it("prefers earlier scheduled_for when multiple jobs are ready", async () => {
+    const earlier = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10 min ago
+    const later = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5 min ago
+
+    await runTest(
+      Effect.gen(function* () {
+        yield* insertJob({
+          id: "later-scheduled",
+          status: "pending",
+          scheduled_for: later,
+          created_at: "2026-03-22T00:00:00Z",
+        });
+        yield* insertJob({
+          id: "earlier-scheduled",
+          status: "pending",
+          scheduled_for: earlier,
+          created_at: "2026-03-22T00:01:00Z",
+        });
+      }),
+    );
+
+    const claimed = await runTest(claimNextJobEffect);
+    expect(claimed!.id).toBe("earlier-scheduled");
   });
 });
 
@@ -338,6 +408,25 @@ describe("createJobEffect", () => {
     // Completed job should remain completed
     const dbJob = await runTest(fetchJob(completedJob.id));
     expect(dbJob!.status).toBe("completed");
+  });
+
+  it("creates a job with scheduledFor", async () => {
+    const futureTime = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+    const job = await runTest(
+      createJobEffect({
+        guildId: "guild-1",
+        jobType: "bulk_role_assignment",
+        payload: { roleId: "role-1" },
+        scheduledFor: futureTime,
+      }),
+    );
+
+    expect(job.scheduled_for).toBe(futureTime);
+
+    // Verify it's in the DB
+    const dbJob = await runTest(fetchJob(job.id));
+    expect(dbJob!.scheduled_for).toBe(futureTime);
   });
 });
 

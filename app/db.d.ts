@@ -44,6 +44,7 @@ export interface BackgroundJobs {
   payload: string;
   phase: Generated<number>;
   progress_count: Generated<number>;
+  scheduled_for: string | null;
   status: Generated<string>;
   total_phases: Generated<number>;
   updated_at: string;

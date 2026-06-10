@@ -21,10 +21,12 @@ export type Job = Selectable<DB["background_jobs"]>;
  * (interrupted jobs that should be resumed) over "pending" jobs.
  *
  * For pending jobs, updates the status to "processing" before returning.
+ * Only claims jobs where scheduled_for is null or in the past.
  * Returns undefined when no jobs are available.
  */
 export const claimNextJobEffect = Effect.gen(function* () {
   const db = yield* DatabaseService;
+  const now = new Date().toISOString();
 
   // First, look for a job that's already processing (interrupted, needs resume)
   const [processingJob] = yield* db
@@ -38,11 +40,15 @@ export const claimNextJobEffect = Effect.gen(function* () {
     return processingJob as Job;
   }
 
-  // No in-progress jobs — pick the oldest pending job
+  // No in-progress jobs — pick the oldest pending job that's ready to run
   const [pendingJob] = yield* db
     .selectFrom("background_jobs")
     .selectAll()
     .where("status", "=", "pending")
+    .where((eb) =>
+      eb.or([eb("scheduled_for", "is", null), eb("scheduled_for", "<=", now)]),
+    )
+    .orderBy("scheduled_for", "asc")
     .orderBy("created_at", "asc")
     .limit(1);
 
@@ -163,6 +169,8 @@ interface CreateJobOptions {
   finalCursor?: Record<string, unknown>;
   totalPhases?: number;
   notifyChannelId?: string;
+  /** ISO timestamp for when the job should run. If omitted, runs immediately. */
+  scheduledFor?: string;
 }
 
 /**
@@ -214,6 +222,7 @@ export const createJobEffect = (options: CreateJobOptions) =>
       error_count: 0,
       last_error: null,
       notify_channel_id: options.notifyChannelId ?? null,
+      scheduled_for: options.scheduledFor ?? null,
       created_at: now,
       updated_at: now,
       completed_at: null,
@@ -225,9 +234,13 @@ export const createJobEffect = (options: CreateJobOptions) =>
       jobId: id,
       jobType: options.jobType,
       guildId: options.guildId,
+      scheduledFor: options.scheduledFor,
     });
 
-    yield* notifyJobAvailable;
+    // Only notify immediately if job is ready to run now
+    if (!options.scheduledFor || options.scheduledFor <= now) {
+      yield* notifyJobAvailable;
+    }
 
     return job;
   }).pipe(
@@ -396,6 +409,9 @@ const notifyJobAvailable = Effect.gen(function* () {
     yield* Deferred.succeed(jobSignal, void 0 as void);
   }
 });
+
+/** Public export for scheduler to wake up the job runner. */
+export const wakeJobRunner = () => notifyJobAvailable;
 
 /**
  * Runs forever, waiting for `notifyJobAvailable` signals.

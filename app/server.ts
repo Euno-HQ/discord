@@ -38,11 +38,13 @@ import { modActionLoggerPipeline } from "#~/discord/pipelines/modActionLogger";
 import { onboardGuildPipeline } from "#~/discord/pipelines/onboardGuild";
 import { reactjiChannelerPipeline } from "#~/discord/pipelines/reactjiChanneler";
 import { applicationKey } from "#~/helpers/env.server";
+import { scheduleTask } from "#~/helpers/schedule";
 
-// Side-effect import: registers job handler and notification builder
+// Side-effect imports: register job handlers and notification builders
 import "#~/jobs/bulkRoleAssignment";
+import "#~/jobs/ticketMemberRemoval";
 
-import { runJobRunner } from "#~/jobs/jobRunner";
+import { runJobRunner, wakeJobRunner } from "#~/jobs/jobRunner";
 
 import { runEffect, runtime } from "./AppRuntime";
 import { checkpointWal, runIntegrityCheck } from "./Database";
@@ -160,6 +162,11 @@ const startup = Effect.gen(function* () {
     // Start escalation resolver scheduler (must be after client is ready)
     startEscalationResolver(discordClient);
     runtime.runFork(runJobRunner);
+
+    // Wake the job runner every minute to check for scheduled jobs
+    scheduleTask("ScheduledJobPoller", 60 * 1000, () => {
+      runtime.runFork(wakeJobRunner());
+    });
 
     yield* logEffect("info", "Gateway", "Gateway initialization completed", {
       guildCount: discordClient.guilds.cache.size,
