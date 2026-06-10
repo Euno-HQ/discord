@@ -15,7 +15,10 @@ import {
   interactionEditReply,
 } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
-import { REQUIRED_PERMISSIONS } from "#~/helpers/botPermissions";
+import {
+  OPTIONAL_PERMISSIONS,
+  REQUIRED_PERMISSIONS,
+} from "#~/helpers/botPermissions";
 import type { SlashCommand } from "#~/helpers/discord";
 import { commandStats } from "#~/helpers/metrics";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
@@ -73,6 +76,27 @@ export function buildHoneypotResult(
         ? validChannelIds.map((id) => `<#${id}>`).join(", ")
         : "No honeypot channels found",
   };
+}
+
+/**
+ * Build CheckResults for optional permissions. A missing optional permission
+ * renders as 🔵 (informational) and never fails the overall check — it just
+ * names the feature that stays disabled without it.
+ */
+export function buildOptionalPermissionResults(
+  hasPermission: (flag: bigint) => boolean,
+): CheckResult[] {
+  return OPTIONAL_PERMISSIONS.map(({ flag, name, feature }) => {
+    const ok = hasPermission(flag);
+    return {
+      name,
+      ok,
+      optional: true,
+      detail: ok
+        ? `Granted — ${feature} enabled`
+        : `Not granted (optional) — ${feature} disabled`,
+    };
+  });
 }
 
 export const Command = {
@@ -412,6 +436,12 @@ export const Command = {
               ? "All required permissions granted"
               : `Missing: ${missing.map((p) => p.name).join(", ")}`,
         });
+
+        results.push(
+          ...buildOptionalPermissionResults((flag) =>
+            botMember.permissions.has(flag),
+          ),
+        );
       } else {
         results.push({
           name: "Bot Permissions",

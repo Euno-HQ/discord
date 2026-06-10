@@ -28,6 +28,19 @@ export const REQUIRED_PERMISSIONS = [
   { flag: PermissionFlagsBits.ViewAuditLog, name: "View Audit Log" },
 ] as const;
 
+/** Permissions that unlock specific features but are not required for core
+ *  operation. Excluded from invite URLs (BOT_PERMISSIONS); surfaced as
+ *  optional (🔵) by /check-requirements so the degraded feature is visible.
+ *  Discord only delivers AUTO_MODERATION_RULE_* gateway events to apps with
+ *  Manage Server, so automod rule logging silently no-ops without it. */
+export const OPTIONAL_PERMISSIONS = [
+  {
+    flag: PermissionFlagsBits.ManageGuild,
+    name: "Manage Server",
+    feature: "automod rule change logging",
+  },
+] as const;
+
 /** OR of all required permission flags — used in invite URLs. */
 export const BOT_PERMISSIONS = REQUIRED_PERMISSIONS.reduce(
   (acc, { flag }) => acc | flag,
