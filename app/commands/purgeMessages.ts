@@ -1,6 +1,7 @@
-import { ApplicationCommandType } from "discord-api-types/v10";
+import { ApplicationCommandType, ButtonStyle } from "discord-api-types/v10";
 import {
   ActionRowBuilder,
+  ButtonBuilder,
   ChannelType,
   ContextMenuCommandBuilder,
   InteractionType,
@@ -13,9 +14,9 @@ import {
 import { Effect } from "effect";
 
 import {
-  interactionDeferUpdate,
   interactionEditReply,
   interactionReply,
+  interactionUpdate,
 } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import type {
@@ -58,11 +59,45 @@ const DURATION_OPTIONS = [
   },
 ] as const;
 
+const DEFAULT_DURATION_VALUE = "86400"; // 24 hours
+
+/**
+ * Build the select + confirm button rows. The target user ID rides in both
+ * custom_ids; the currently selected duration rides in the button's custom_id
+ * so the confirm handler needs no state beyond the interaction itself.
+ */
+function buildPurgeComponents(targetUserId: string, selectedValue: string) {
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId(`purge-messages|${targetUserId}`)
+    .addOptions(
+      DURATION_OPTIONS.map((opt) =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(opt.label)
+          .setValue(opt.value)
+          .setDescription(opt.description)
+          .setDefault(opt.value === selectedValue),
+      ),
+    );
+
+  const confirmButton = new ButtonBuilder()
+    .setCustomId(`purge-messages-confirm|${targetUserId}|${selectedValue}`)
+    .setLabel("Delete messages")
+    .setStyle(ButtonStyle.Danger);
+
+  return [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(confirmButton),
+  ];
+}
+
+function durationLabelFor(value: string): string {
+  return DURATION_OPTIONS.find((o) => o.value === value)?.label ?? `${value}s`;
+}
+
 /**
  * "Purge recent messages" — User context menu command.
- * Responds with an ephemeral select menu asking how far back to purge.
- * The target user ID is embedded in the select menu's custom_id so the
- * follow-up handler knows who to purge without additional state.
+ * Responds with an ephemeral select menu (24 hours pre-selected) and a
+ * Delete confirm button. Nothing is deleted until the button is clicked.
  */
 export const PurgeMessagesCommand = {
   command: new ContextMenuCommandBuilder()
@@ -88,31 +123,12 @@ export const PurgeMessagesCommand = {
         return;
       }
 
-      const selectMenu = new StringSelectMenuBuilder()
-        // Embed the target user ID in the custom_id so the follow-up handler
-        // can identify who to purge. matchCommand() resolves "purge-messages|<id>"
-        // via the startsWith prefix match.
-        .setCustomId(`purge-messages|${targetUser.id}`)
-        .setPlaceholder("Select how far back to purge")
-        .addOptions(
-          DURATION_OPTIONS.map((opt) =>
-            new StringSelectMenuOptionBuilder()
-              .setLabel(opt.label)
-              .setValue(opt.value)
-              .setDescription(opt.description),
-          ),
-        );
-
-      const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-        selectMenu,
-      );
-
       commandStats.commandExecuted(interaction, "purge-messages", true);
 
       yield* interactionReply(interaction, {
         flags: MessageFlags.Ephemeral,
         content: `How far back should I purge messages from **${targetUser.username}**?`,
-        components: [row],
+        components: buildPurgeComponents(targetUser.id, DEFAULT_DURATION_VALUE),
       });
     }).pipe(
       Effect.catchAll((error) =>
@@ -148,9 +164,8 @@ export const PurgeMessagesCommand = {
 
 /**
  * Select menu handler for "purge-messages|<targetUserId>".
- * Defers the update immediately, then scans every text channel and active
- * thread in the guild, bulk-deleting messages authored by the target user
- * within the selected duration window. Edits the original reply on completion.
+ * Only re-renders the components with the chosen duration — the select is a
+ * picker, not a trigger. Deletion happens in the confirm button handler.
  */
 export const PurgeMessagesSelectHandler = {
   command: {
@@ -161,23 +176,79 @@ export const PurgeMessagesSelectHandler = {
     Effect.gen(function* () {
       if (!interaction.isStringSelectMenu()) return;
 
-      // Extract the target user ID that was embedded in the custom_id.
       const [, targetUserId] = interaction.customId.split("|");
-      const durationSeconds = parseInt(interaction.values[0], 10);
-      const durationLabel =
-        DURATION_OPTIONS.find((o) => o.value === String(durationSeconds))
-          ?.label ?? `${durationSeconds}s`;
+      const selectedValue = interaction.values[0];
+
+      yield* logEffect("info", "Commands", "Purge messages duration selected", {
+        guildId: interaction.guildId,
+        moderatorUserId: interaction.user.id,
+        targetUserId,
+        durationLabel: durationLabelFor(selectedValue),
+      });
+
+      yield* interactionUpdate(interaction, {
+        components: buildPurgeComponents(targetUserId, selectedValue),
+      });
+    }).pipe(
+      Effect.catchAll((error) =>
+        Effect.gen(function* () {
+          const err = error instanceof Error ? error : new Error(String(error));
+          yield* logEffect(
+            "error",
+            "Commands",
+            "Purge messages select handler failed",
+            {
+              guildId: interaction.guildId,
+              moderatorUserId: interaction.user.id,
+              error: err.message,
+            },
+          );
+        }),
+      ),
+      Effect.withSpan("purgeMessagesSelect", {
+        attributes: {
+          guildId: interaction.guildId,
+          moderatorUserId: interaction.user.id,
+        },
+      }),
+    ),
+} satisfies MessageComponentCommand;
+
+/**
+ * Confirm button handler for "purge-messages-confirm|<targetUserId>|<seconds>".
+ * Immediately swaps the message to a pending state (which also acks the
+ * interaction and removes the controls so it can't be double-clicked), then
+ * scans every text channel and active thread in the guild, bulk-deleting
+ * messages authored by the target user within the selected duration window.
+ * Edits the reply with a summary on completion.
+ */
+export const PurgeMessagesConfirmHandler = {
+  command: {
+    type: InteractionType.MessageComponent,
+    name: "purge-messages-confirm",
+  } as const,
+  handler: (interaction) =>
+    Effect.gen(function* () {
+      if (!interaction.isButton()) return;
+
+      const [, targetUserId, durationValue] = interaction.customId.split("|");
+      const durationSeconds = parseInt(durationValue, 10);
+      const durationLabel = durationLabelFor(durationValue);
       const since = Date.now() - durationSeconds * 1000;
 
-      yield* logEffect("info", "Commands", "Purge messages select submitted", {
+      yield* logEffect("info", "Commands", "Purge messages confirmed", {
         guildId: interaction.guildId,
         moderatorUserId: interaction.user.id,
         targetUserId,
         durationLabel,
       });
 
-      // Acknowledge the interaction immediately — the deletion loop may take time.
-      yield* interactionDeferUpdate(interaction);
+      // Ack within the 3s deadline AND show progress: swap to a pending state
+      // with the controls removed so the purge can't be triggered twice.
+      yield* interactionUpdate(interaction, {
+        content: `Purging messages from <@${targetUserId}> from the last ${durationLabel} — this may take a moment…`,
+        components: [],
+      });
 
       const guild = interaction.guild;
       if (!guild) {
@@ -273,7 +344,7 @@ export const PurgeMessagesSelectHandler = {
           yield* logEffect(
             "error",
             "Commands",
-            "Purge messages select handler failed",
+            "Purge messages confirm handler failed",
             {
               guildId: interaction.guildId,
               moderatorUserId: interaction.user.id,
@@ -286,7 +357,7 @@ export const PurgeMessagesSelectHandler = {
           }).pipe(Effect.catchAll(() => Effect.void));
         }),
       ),
-      Effect.withSpan("purgeMessagesSelect", {
+      Effect.withSpan("purgeMessagesConfirm", {
         attributes: {
           guildId: interaction.guildId,
           moderatorUserId: interaction.user.id,
@@ -298,4 +369,5 @@ export const PurgeMessagesSelectHandler = {
 export const PurgeMessagesCommands = [
   PurgeMessagesCommand,
   PurgeMessagesSelectHandler,
+  PurgeMessagesConfirmHandler,
 ];
