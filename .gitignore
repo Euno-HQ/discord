@@ -21,7 +21,11 @@ vite.config.ts*
 /playwright-report/
 /playwright/.cache/
 /.playwright-mcp/
-.claude/
+.claude/*
+!.claude/skills/
 
 # Brainstorming visual companion
 .superpowers/
+
+# QA session run logs (ephemeral, not committed)
+.claude/qa-runs/
