@@ -1,63 +1,20 @@
-import fs from "fs";
-import path from "path";
 import { useLoaderData } from "react-router";
 
-export async function loader() {
-  // Read the Privacy Policy markdown file
-  const privacyPath = path.join(process.cwd(), "PRIVACY_POLICY.md");
-  const privacyContent = fs.readFileSync(privacyPath, "utf-8");
+import { LegalErrorBoundary, LegalPage } from "#~/legal/LegalPage";
 
-  return { privacyContent };
+// Bundled at build time so the content ships inside the build artifact rather
+// than being read from disk at request time (see app/legal/LegalPage.tsx).
+import privacyMarkdown from "../../PRIVACY_POLICY.md?raw";
+
+export async function loader() {
+  return { markdown: privacyMarkdown };
 }
 
 export default function Privacy() {
-  const { privacyContent } = useLoaderData<typeof loader>();
+  const { markdown } = useLoaderData<typeof loader>();
+  return <LegalPage markdown={markdown} />;
+}
 
-  // Simple markdown to HTML conversion for basic formatting
-  const htmlContent = privacyContent
-    .split("\n")
-    .map((line) => {
-      // Headers
-      if (line.startsWith("### ")) {
-        return `<h3 class="text-lg font-semibold mt-6 mb-3 text-gray-900">${line.substring(4)}</h3>`;
-      }
-      if (line.startsWith("## ")) {
-        return `<h2 class="text-2xl font-bold mt-8 mb-4 text-gray-900">${line.substring(3)}</h2>`;
-      }
-      if (line.startsWith("# ")) {
-        return `<h1 class="text-3xl font-extrabold mb-6 text-gray-900">${line.substring(2)}</h1>`;
-      }
-      // Bold
-      if (line.startsWith("**") && line.endsWith("**")) {
-        return `<p class="font-semibold my-2 text-gray-700">${line.substring(2, line.length - 2)}</p>`;
-      }
-      // List items
-      if (line.startsWith("- ")) {
-        return `<li class="ml-4 my-1 text-gray-700">${line.substring(2)}</li>`;
-      }
-      // Regular paragraphs
-      if (line.trim()) {
-        return `<p class="my-2 text-gray-700">${line}</p>`;
-      }
-      return "";
-    })
-    .join("\n");
-
-  return (
-    <div className="min-h-screen bg-gray-50 py-12">
-      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-        <div className="rounded-lg bg-white px-6 py-8 shadow-sm sm:px-10">
-          <div
-            className="prose prose-sm max-w-none"
-            dangerouslySetInnerHTML={{ __html: htmlContent }}
-          />
-        </div>
-        <div className="mt-6 text-center">
-          <a href="/" className="text-sm text-indigo-600 hover:text-indigo-500">
-            ← Back to Home
-          </a>
-        </div>
-      </div>
-    </div>
-  );
+export function ErrorBoundary() {
+  return <LegalErrorBoundary />;
 }
