@@ -266,6 +266,11 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
     // We record them against the same mod-log thread post as the trigger message
     // so mods can see the full duplicate sequence, and so deleteAllReportedForUser
     // can clean them all up on kick.
+    //
+    // recordReport is idempotent (ON CONFLICT DO NOTHING on the unique index),
+    // so subsequent spam events for the same user re-presenting overlapping
+    // priorDuplicates is expected and not an error — we just count how many
+    // were genuinely new vs already on file.
     if (
       result &&
       verdict.priorDuplicates &&
@@ -277,8 +282,12 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
       const logChannelId = result.thread.id;
       const backfillExtra = `Back-filled prior duplicate. ${extra}`;
 
+      let backfilled = 0;
+      let alreadyRecorded = 0;
+      let failed = 0;
+
       for (const prior of verdict.priorDuplicates) {
-        yield* recordReport({
+        const outcome = yield* recordReport({
           reportedMessageId: prior.messageId,
           reportedChannelId: prior.channelId,
           reportedUserId: userId,
@@ -288,22 +297,49 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
           reason: ReportReasons.spam,
           extra: backfillExtra,
         }).pipe(
-          Effect.catchAll((error) =>
-            logEffect(
+          Effect.map((r): "inserted" | "skipped" =>
+            r.wasInserted ? "inserted" : "skipped",
+          ),
+          Effect.catchTag("SqlError", (e) => {
+            // Pull structured fields off the underlying sqlite error so the
+            // warn log carries the actual constraint name / sqlite code
+            // instead of an opaque "SqlError: Failed to execute statement".
+            const cause = e.cause as
+              | { code?: unknown; message?: unknown }
+              | null
+              | undefined;
+            return logEffect(
               "warn",
               "SpamResponse",
               "Failed to back-fill prior duplicate into reported_messages",
-              { messageId: prior.messageId, error: String(error) },
-            ),
-          ),
+              {
+                messageId: prior.messageId,
+                error: {
+                  _tag: "SqlError",
+                  code:
+                    typeof cause?.code === "string" ? cause.code : undefined,
+                  message:
+                    typeof cause?.message === "string"
+                      ? cause.message
+                      : undefined,
+                },
+              },
+            ).pipe(Effect.as("failed" as const));
+          }),
         );
+
+        if (outcome === "inserted") backfilled++;
+        else if (outcome === "skipped") alreadyRecorded++;
+        else failed++;
       }
 
       yield* logEffect(
         "info",
         "SpamResponse",
-        `Back-filled ${verdict.priorDuplicates.length} prior duplicate(s)`,
-        { userId, guildId },
+        `Back-fill complete: ${backfilled} new, ${alreadyRecorded} already recorded${
+          failed > 0 ? `, ${failed} failed` : ""
+        }`,
+        { userId, guildId, backfilled, alreadyRecorded, failed },
       );
     }
 
