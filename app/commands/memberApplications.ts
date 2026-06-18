@@ -25,6 +25,7 @@ import {
   interactionUpdate,
 } from "#~/effects/discordSdk.ts";
 import { DiscordApiError } from "#~/effects/errors.ts";
+import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
 import {
   hasModRole,
@@ -109,6 +110,19 @@ export const Command = [
     },
     handler: (interaction) =>
       Effect.gen(function* () {
+        const flags = yield* FeatureFlagService;
+        const enabled = yield* flags.isPostHogEnabled(
+          "member-applications",
+          interaction.guildId!,
+        );
+        if (!enabled) {
+          yield* interactionReply(interaction, {
+            content: "Applications aren't enabled on this server.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
         // Block duplicate applications before showing the modal
         const db = yield* DatabaseService;
         const existingApp = yield* db

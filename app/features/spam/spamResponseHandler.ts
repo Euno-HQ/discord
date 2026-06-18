@@ -8,7 +8,7 @@ import { Effect } from "effect";
 
 import { logUserMessage } from "#~/commands/report/userLog.ts";
 import { client } from "#~/discord/client.server.ts";
-import { deleteMessage } from "#~/effects/discordSdk.ts";
+import { deleteMessage, softbanMember } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import { featureStats } from "#~/helpers/metrics.ts";
 import { applyRestriction, timeout } from "#~/models/discord.server.ts";
@@ -114,12 +114,15 @@ export const executeResponse = (
       const { message: logMessage } = logResult;
       const spamCount = yield* getSpamReportCount(userId, guildId);
       if (spamCount >= AUTO_KICK_THRESHOLD) {
-        yield* Effect.tryPromise(() =>
-          member.kick("Autokicked for repeated spam"),
+        yield* softbanMember(
+          member,
+          "Autokicked for repeated spam (1h message cleanup)",
+          3600,
         ).pipe(
-          Effect.catchAll((error) =>
-            logEffect("warn", "SpamResponse", "Failed to kick spammer", {
-              error: String(error),
+          Effect.catchTag("DiscordApiError", (error) =>
+            logEffect("warn", "SpamResponse", "Failed to softban spammer", {
+              error: String(error.cause),
+              operation: error.operation,
             }),
           ),
         );
@@ -139,7 +142,7 @@ export const executeResponse = (
 
         yield* Effect.tryPromise(() =>
           logMessage.reply({
-            content: `Automatically kicked <@${userId}> for spam`,
+            content: `Automatically removed <@${userId}> for spam (last hour of messages also deleted)`,
             allowedMentions: {},
           }),
         ).pipe(Effect.catchAll(() => Effect.void));
@@ -263,6 +266,11 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
     // We record them against the same mod-log thread post as the trigger message
     // so mods can see the full duplicate sequence, and so deleteAllReportedForUser
     // can clean them all up on kick.
+    //
+    // recordReport is idempotent (ON CONFLICT DO NOTHING on the unique index),
+    // so subsequent spam events for the same user re-presenting overlapping
+    // priorDuplicates is expected and not an error — we just count how many
+    // were genuinely new vs already on file.
     if (
       result &&
       verdict.priorDuplicates &&
@@ -274,8 +282,12 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
       const logChannelId = result.thread.id;
       const backfillExtra = `Back-filled prior duplicate. ${extra}`;
 
+      let backfilled = 0;
+      let alreadyRecorded = 0;
+      let failed = 0;
+
       for (const prior of verdict.priorDuplicates) {
-        yield* recordReport({
+        const outcome = yield* recordReport({
           reportedMessageId: prior.messageId,
           reportedChannelId: prior.channelId,
           reportedUserId: userId,
@@ -285,54 +297,76 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
           reason: ReportReasons.spam,
           extra: backfillExtra,
         }).pipe(
-          Effect.catchAll((error) =>
-            logEffect(
+          Effect.map((r): "inserted" | "skipped" =>
+            r.wasInserted ? "inserted" : "skipped",
+          ),
+          Effect.catchTag("SqlError", (e) => {
+            // Pull structured fields off the underlying sqlite error so the
+            // warn log carries the actual constraint name / sqlite code
+            // instead of an opaque "SqlError: Failed to execute statement".
+            const cause = e.cause as
+              | { code?: unknown; message?: unknown }
+              | null
+              | undefined;
+            return logEffect(
               "warn",
               "SpamResponse",
               "Failed to back-fill prior duplicate into reported_messages",
-              { messageId: prior.messageId, error: String(error) },
-            ),
-          ),
+              {
+                messageId: prior.messageId,
+                error: {
+                  _tag: "SqlError",
+                  code:
+                    typeof cause?.code === "string" ? cause.code : undefined,
+                  message:
+                    typeof cause?.message === "string"
+                      ? cause.message
+                      : undefined,
+                },
+              },
+            ).pipe(Effect.as("failed" as const));
+          }),
         );
+
+        if (outcome === "inserted") backfilled++;
+        else if (outcome === "skipped") alreadyRecorded++;
+        else failed++;
       }
 
       yield* logEffect(
         "info",
         "SpamResponse",
-        `Back-filled ${verdict.priorDuplicates.length} prior duplicate(s)`,
-        { userId, guildId },
+        `Back-fill complete: ${backfilled} new, ${alreadyRecorded} already recorded${
+          failed > 0 ? `, ${failed} failed` : ""
+        }`,
+        { userId, guildId, backfilled, alreadyRecorded, failed },
       );
     }
 
     return result;
   }).pipe(Effect.withSpan("SpamResponse.logSpamReport"));
 
-/** Execute a softban (ban + unban) for honeypot triggers */
+/** Execute a softban (ban + unban) for honeypot triggers — 7-day message wipe. */
 const executeSoftban = (
   message: Message,
   member: GuildMember,
   verdict: SpamVerdict,
 ) =>
   Effect.gen(function* () {
-    const guild = message.guild!;
-
-    yield* Effect.tryPromise(async () => {
-      await member.ban({
-        reason: "honeypot spam detected",
-        deleteMessageSeconds: 604800, // 7 days
-      });
-      await guild.members.unban(member);
-    }).pipe(
-      Effect.catchAll((error) =>
+    yield* softbanMember(member, "honeypot spam detected", 604800).pipe(
+      Effect.catchTag("DiscordApiError", (error) =>
         logEffect("error", "SpamResponse", "Failed to softban user", {
-          error: String(error),
+          error: String(error.cause),
+          operation: error.operation,
           userId: member.id,
-          guildId: guild.id,
+          guildId: message.guild!.id,
         }),
       ),
     );
-
     yield* logSpamReport(message, verdict);
-
-    featureStats.honeypotTriggered(guild.id, member.id, message.channelId);
+    featureStats.honeypotTriggered(
+      message.guild!.id,
+      member.id,
+      message.channelId,
+    );
   }).pipe(Effect.withSpan("SpamResponse.executeSoftban"));

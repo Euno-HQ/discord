@@ -3,6 +3,8 @@
 
 @import "tailwindcss";
 
+@plugin "@tailwindcss/typography";
+
 /*
  * Euno Design System: The Magistrate's Desk
  *

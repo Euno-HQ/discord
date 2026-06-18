@@ -113,12 +113,6 @@ export async function setupAll(
       .select(["channel_id", "role_id"])
       .where("guild_id", "=", guildId),
   );
-  const existingHoneypot = await runTakeFirst(
-    db
-      .selectFrom("honeypot_config")
-      .select("channel_id")
-      .where("guild_id", "=", guildId),
-  );
   const existingTicket = await runTakeFirst(
     db.selectFrom("tickets_config").select("channel_id"),
   );

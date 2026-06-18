@@ -9,6 +9,9 @@ RUN npm install
 
 COPY vite.config.ts kysely.config.ts tsconfig.json .eslint* .prettierignore ./
 COPY app ./app
+# Legal content is imported via `?raw` and inlined into the build, so the
+# markdown only needs to exist in the build stage — not the runtime image.
+COPY PRIVACY_POLICY.md TERMS_OF_SERVICE.md ./
 
 RUN npm run build
 

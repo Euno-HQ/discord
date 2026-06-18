@@ -411,6 +411,104 @@ These are the best files to study when learning how Effect is used here:
 - **`app/effects/observability.ts`** — `logEffect` and `tapLog` utilities
 - **`app/effects/errors.ts`** — `Data.TaggedError` definitions
 
+## Unit Testing
+
+### When to write unit tests for Effect code
+
+Effect code that coordinates external services (Discord API, database) is hard
+to unit test and the mocking overhead often isn't worth it. Focus tests where
+they provide clear value:
+
+1. **Pure functions extracted from Effects** — like the `enrich*` functions in
+   `app/discord/eventBus.ts`. They take inputs, return outputs, no services
+   needed. Easy to test, high value.
+
+2. **Business logic decisions in handlers** — like the deletion log handlers in
+   `app/discord/pipelines/deletionLogHandlers.ts`. When a handler has meaningful
+   branching (cached vs. uncached, mod vs. self-deletion), test the decision
+   logic by mocking services.
+
+3. **Effect combinators and utilities** — like `withFeatureFlag` and
+   `guardFeature` in `app/effects/featureFlags.ts`. Pure Effect logic that
+   doesn't depend on external state.
+
+Don't bother testing:
+
+- Thin wrappers around Discord.js API calls (`app/effects/discordSdk.ts`)
+- Layer construction / service wiring (tested by the app starting)
+- Stream pipeline composition (tested via integration / manual testing)
+
+### Patterns
+
+**1. Pure function tests** — no Effect runtime needed, just call and assert:
+
+```typescript
+// app/discord/eventBus.test.ts
+it("returns null for bot messages", () => {
+  const msg = makeMessage({ author: { bot: true, system: false } });
+  expect(enrichMessageCreate(msg)).toBeNull();
+});
+```
+
+**2. Effect tests with mock services** — provide mock implementations via
+`Layer.succeed`, run with `Effect.runPromise`:
+
+```typescript
+// app/effects/featureFlags.test.ts — mock the service interface directly
+const makeMockFlags = (enabled: boolean): IFeatureFlagService => ({
+  isPostHogEnabled: (_flag, _guildId) => Effect.succeed(enabled),
+  // ...
+});
+const exit = await Effect.runPromiseExit(guardFeature(flags, "analytics", "guild-1"));
+expect(Exit.isSuccess(exit)).toBe(true);
+
+// app/discord/pipelines/deletionLogHandlers.test.ts — Layer.succeed for tag-based injection
+const runHandler = (effect, cache = makeMockCache()) =>
+  Effect.runPromise(
+    // @ts-expect-error - test mock
+    effect.pipe(Effect.provide(Layer.succeed(MessageCacheService, cache))),
+  );
+```
+
+**3. Mocking heavy transitive deps** — use `vi.mock()` for modules the test
+file doesn't directly use but its imports pull in:
+
+```typescript
+// app/effects/featureFlags.test.ts
+vi.mock("#~/Database", () => ({
+  DatabaseService: { key: "DatabaseService" },
+  DatabaseLayer: {},
+}));
+vi.mock("#~/effects/posthog", () => ({
+  PostHogService: { key: "PostHogService" },
+  PostHogServiceLive: {},
+}));
+
+// app/discord/pipelines/deletionLogHandlers.test.ts
+vi.mock("#~/Database", () => ({
+  DatabaseService: Context.GenericTag("DatabaseService"),
+  DatabaseLayer: Layer.empty,
+}));
+vi.mock("#~/AppRuntime", () => ({
+  runEffect: vi.fn(),
+  RuntimeContext: {},
+}));
+// Per-test control via vi.mocked():
+vi.mocked(fetchSettingsEffect).mockReturnValue(Effect.succeed(null) as any);
+```
+
+### Tips
+
+- The global test setup (`test/setup-test-env.ts`) already mocks
+  `#~/helpers/observability` — you don't need to mock `log()` in every test
+  file. Mock `#~/effects/observability` separately if the code under test calls
+  `logEffect`.
+- For handler tests that need `RuntimeContext`, mock all service modules with
+  `vi.mock()` and provide only the service the handler actually `yield*`s via
+  `Layer.succeed` (see `deletionLogHandlers.test.ts` for the full pattern).
+- Use `@ts-expect-error` on `Effect.provide(...)` calls when the mocked services
+  don't fully satisfy the `RuntimeContext` type — this is acceptable in tests.
+
 ## Further Reading
 
 Much of the Effect-TS docs are

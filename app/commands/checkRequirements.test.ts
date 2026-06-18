@@ -1,6 +1,9 @@
+import { PermissionFlagsBits } from "discord-api-types/v10";
+
 import {
   buildHoneypotResult,
   buildLogChannelResult,
+  buildOptionalPermissionResults,
 } from "./checkRequirements";
 
 describe("buildLogChannelResult", () => {
@@ -98,5 +101,38 @@ describe("buildHoneypotResult", () => {
     expect(result.ok).toBe(true);
     expect(result.detail).toBe("<#555>");
     expect(result.detail).not.toContain("missing");
+  });
+});
+
+describe("buildOptionalPermissionResults", () => {
+  it("reports the enabled feature when the permission is granted", () => {
+    const results = buildOptionalPermissionResults(() => true);
+    const manageServer = results.find((r) => r.name === "Manage Server");
+    expect(manageServer).toEqual({
+      name: "Manage Server",
+      ok: true,
+      optional: true,
+      detail: "Granted — automod rule change logging enabled",
+    });
+  });
+
+  it("reports the disabled feature as optional when the permission is missing", () => {
+    const results = buildOptionalPermissionResults(() => false);
+    const manageServer = results.find((r) => r.name === "Manage Server");
+    expect(manageServer).toEqual({
+      name: "Manage Server",
+      ok: false,
+      optional: true,
+      detail: "Not granted (optional) — automod rule change logging disabled",
+    });
+  });
+
+  it("checks the ManageGuild flag specifically", () => {
+    const checked: bigint[] = [];
+    buildOptionalPermissionResults((flag) => {
+      checked.push(flag);
+      return true;
+    });
+    expect(checked).toContain(PermissionFlagsBits.ManageGuild);
   });
 });

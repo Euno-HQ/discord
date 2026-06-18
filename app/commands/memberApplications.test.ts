@@ -23,6 +23,17 @@ vi.mock("#~/models/guilds.server", () => ({
   fetchSettingsEffect: () => Effect.succeed({ modLog: "fake-mod-log-channel" }),
 }));
 
+// The apply-to-join handler now imports FeatureFlagService, so loading this
+// module pulls in featureFlags → posthog → subscriptions.server → AppRuntime,
+// whose top-level await eagerly builds the whole app layer mid-import-cycle.
+// Stubbing subscriptions.server cuts that chain at the AppRuntime edge so
+// featureFlags finishes loading before AppRuntime is built (via the unrelated
+// bulkRoleAssignment → jobRunner path). resolveApplicationsForDeparture — the
+// only thing tested here — never touches subscriptions, so a stub is safe.
+vi.mock("#~/models/subscriptions.server", () => ({
+  SubscriptionService: {},
+}));
+
 let runtime: ManagedRuntime.ManagedRuntime<
   DatabaseService | SqlClient.SqlClient,
   never

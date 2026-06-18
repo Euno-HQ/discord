@@ -41,29 +41,57 @@ export const PostHogServiceLive = Layer.scoped(
   ),
 );
 
+/** Re-project one guild's subscription state onto its PostHog group so flag
+ *  evaluation reflects the current tier without waiting for a bot restart. */
+export const syncGuildGroup = (guildId: string, guild?: Guild) =>
+  Effect.gen(function* () {
+    const posthog = yield* PostHogService;
+    if (!posthog) return;
+
+    const sub = yield* Effect.tryPromise(() =>
+      SubscriptionService.getGuildSubscription(guildId),
+    ).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+
+    // Best-effort projection: a PostHog failure must never reject the caller.
+    // syncGuildGroup runs inside Stripe webhook handlers and the payment-success
+    // loader; a thrown groupIdentify becoming an Effect defect would reject
+    // runEffect, 400 the webhook (→ Stripe retries → duplicate writes) or 500
+    // the redirect after the user already paid. Swallow and log instead.
+    yield* Effect.try(() =>
+      posthog.groupIdentify({
+        groupType: "guild",
+        groupKey: guildId,
+        properties: {
+          id: guildId,
+          ...(guild
+            ? { name: guild.name, member_count: guild.memberCount }
+            : {}),
+          subscription_tier: sub?.product_tier ?? "free",
+          subscription_status: sub?.status ?? "none",
+        },
+      }),
+    ).pipe(
+      Effect.catchAll((error) =>
+        Effect.sync(() =>
+          log("warn", "PostHogService", "Failed to sync guild group", {
+            guildId,
+            error: String(error),
+          }),
+        ),
+      ),
+    );
+  });
+
 export const initializeGroups = (guilds: Collection<string, Guild>) =>
   Effect.gen(function* () {
     const posthog = yield* PostHogService;
     if (!posthog) return;
 
-    const subscriptions = yield* Effect.tryPromise(() =>
-      SubscriptionService.getAllSubscriptions(),
-    );
-    const subByGuild = new Map(subscriptions.map((s) => [s.guild_id, s]));
-
+    // One getGuildSubscription query per guild (vs. the previous single batched
+    // getAllSubscriptions). Startup-only path on local SQLite — accepted so
+    // syncGuildGroup stays the single source of truth for the group projection.
     for (const [guildId, guild] of guilds) {
-      const sub = subByGuild.get(guildId);
-      posthog.groupIdentify({
-        groupType: "guild",
-        groupKey: guildId,
-        properties: {
-          id: guild.id,
-          name: guild.name,
-          member_count: guild.memberCount,
-          subscription_tier: sub?.product_tier ?? "free",
-          subscription_status: sub?.status ?? "none",
-        },
-      });
+      yield* syncGuildGroup(guildId, guild);
     }
 
     log(

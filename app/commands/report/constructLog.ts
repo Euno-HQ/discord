@@ -1,13 +1,13 @@
 import { formatDistanceToNowStrict } from "date-fns";
-import {
-  MessageReferenceType,
-  type Message,
-  type MessageCreateOptions,
-} from "discord.js";
+import { type Message, type MessageCreateOptions } from "discord.js";
 import { Effect } from "effect";
 
 import { DiscordApiError } from "#~/effects/errors";
-import { constructDiscordLink } from "#~/helpers/discord";
+import {
+  constructDiscordLink,
+  isForwardedMessage,
+  getMessageContent,
+} from "#~/helpers/discord";
 import { truncateMessage } from "#~/helpers/string";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 import { ReportReasons, type Report } from "#~/models/reportedMessages";
@@ -71,6 +71,4 @@ ${preface}
     } satisfies MessageCreateOptions;
   }).pipe(Effect.withSpan("constructLog"));
 
-export const isForwardedMessage = (message: Message): boolean => {
-  return message.reference?.type === MessageReferenceType.Forward;
-};
+export { isForwardedMessage, getMessageContent };
