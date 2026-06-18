@@ -70,6 +70,7 @@ const {
   cookie: {
     name: "__session",
     sameSite: "lax",
+    secrets: [sessionSecret],
   },
   async createData(data, expires) {
     const result = await runTakeFirstOrThrow(

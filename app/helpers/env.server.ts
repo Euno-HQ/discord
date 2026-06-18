@@ -19,15 +19,20 @@ const getEnv = (key: string, optional = false) => {
 };
 
 export const isProd = () => process.env.NODE_ENV === ENVIRONMENTS.production;
-console.log(
-  "Running as",
-  isProd() ? "PRODUCTION" : "TEST",
-  `environment: '${process.env.NODE_ENV}'`,
-);
-
-console.log("");
+if (process.env.NODE_ENV !== "test") {
+  console.log(
+    "Running as",
+    isProd() ? "PRODUCTION" : "TEST",
+    `environment: '${process.env.NODE_ENV}'`,
+  );
+  console.log("");
+}
 export const databaseUrl = getEnv("DATABASE_URL");
-export const sessionSecret = getEnv("SESSION_SECRET", true);
+export const sessionSecret =
+  getEnv("SESSION_SECRET", true) ||
+  // Tests force every env value to "", which leaves session cookies unsigned
+  // and triggers a react-router warning. A fixed dummy keeps them signed.
+  (process.env.NODE_ENV === "test" ? "test-session-secret" : "");
 
 export const emergencyWebhook = getEnv("EMERGENCY_WEBHOOK", true);
 export const applicationKey = getEnv("DISCORD_PUBLIC_KEY");
@@ -46,4 +51,3 @@ export const posthogHost = getEnv("POSTHOG_HOST", true);
 export const webBaseUrl = getEnv("WEB_BASE_URL", true);
 
 if (!ok) throw new Error("Environment misconfigured");
-console.log("");
