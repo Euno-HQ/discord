@@ -10,6 +10,7 @@ import { Effect } from "effect";
 import { DatabaseService } from "#~/Database";
 import { ssrDiscordSdk } from "#~/discord/api";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
+import { withRetry } from "#~/effects/errorHandling";
 import { logEffect } from "#~/effects/observability";
 
 import {
@@ -123,11 +124,26 @@ export const processBatchEffect = (options: ProcessBatchOptions) =>
 
       if (member.user.bot) continue;
 
+      // Decision: do NOT escalateExhausted per-member. One member's outage must
+      // not abort a 100k-member migration. withRetry handles transient blips
+      // (RateLimit/Transient) with capped backoff. ResourceMissingError (member
+      // already left) is recovered silently as success-equivalent — assigning a
+      // role to a departed member is a no-op outcome, not a failure.
+      // ForbiddenError, ClientError, and exhausted-Transient fall through to
+      // the else branch below, where they are counted and logged with their full
+      // typed payload. The batch-level failJobEffect (called when totalErrors > 0)
+      // handles job-level abort. escalateExhausted is reserved for command
+      // handlers (Task 9) where a single failure IS the whole outcome.
       const exit = yield* tryDiscord("addMemberRole", () =>
         ssrDiscordSdk.put(
           Routes.guildMemberRole(guildId, member.user.id, roleId),
         ),
-      ).pipe(Effect.exit);
+      ).pipe(
+        withRetry, // RateLimit/Transient retried with capped backoff
+        // member already gone → success-equivalent, drop silently
+        Effect.catchTag("ResourceMissingError", () => Effect.void),
+        Effect.exit,
+      );
 
       if (exit._tag === "Success") {
         assigned++;
