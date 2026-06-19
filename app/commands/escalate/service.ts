@@ -12,6 +12,7 @@ import {
 } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { calculateScheduledFor } from "#~/helpers/escalationVotes";
+import { formatError } from "#~/helpers/formatError";
 import type { Resolution, VotingStrategy } from "#~/helpers/modResponse";
 import { applyRestriction, ban, kick, timeout } from "#~/models/discord.server";
 
@@ -352,11 +353,14 @@ export const EscalationServiceLive = Layer.effect(
                   break;
               }
             },
-            catch: (error) =>
+            catch: (caught) =>
               new ResolutionExecutionError({
                 escalationId: escalation.id,
                 resolution,
-                cause: error,
+                cause:
+                  caught instanceof Error
+                    ? caught
+                    : new Error(formatError(caught)),
               }),
           });
 
