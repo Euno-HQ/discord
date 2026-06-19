@@ -1,7 +1,12 @@
-import { PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
+import {
+  MessageFlags,
+  PermissionFlagsBits,
+  SlashCommandBuilder,
+} from "discord.js";
 import { Effect } from "effect";
 
 import { interactionReply } from "#~/effects/discordSdk.ts";
+import { toUserResponse } from "#~/effects/errorHandling";
 import { logEffect } from "#~/effects/observability.ts";
 import type { SlashCommand } from "#~/helpers/discord";
 import { formatError } from "#~/helpers/formatError";
@@ -18,8 +23,11 @@ export const Command = {
   handler: (interaction) =>
     Effect.gen(function* () {
       if (!interaction.guild || !interaction.guildId) {
-        // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-        return yield* Effect.fail(new Error("Interaction has no guild"));
+        yield* interactionReply(interaction, {
+          content: "This command can only be used in a server.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
       }
 
       yield* logEffect("info", "Commands", "Setup command executed", {
@@ -56,10 +64,11 @@ export const Command = {
 
           commandStats.commandFailed(interaction, "setup", formatError(error));
 
-          yield* interactionReply(
-            interaction,
-            "Something broke while running setup. Please try again.",
-          ).pipe(Effect.catchAll(() => Effect.void));
+          const reply = toUserResponse(error);
+          yield* interactionReply(interaction, {
+            content: reply.content,
+            flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
+          }).pipe(Effect.catchAll(() => Effect.void));
         }),
       ),
       Effect.withSpan("setupCommand", {

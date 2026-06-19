@@ -13,7 +13,9 @@ import {
   fetchChannel,
   interactionDeferReply,
   interactionEditReply,
+  interactionReply,
 } from "#~/effects/discordSdk.ts";
+import { toUserResponse } from "#~/effects/errorHandling";
 import { logEffect } from "#~/effects/observability.ts";
 import {
   OPTIONAL_PERMISSIONS,
@@ -111,7 +113,10 @@ export const Command = {
   handler: (interaction) =>
     Effect.gen(function* () {
       if (!interaction.guild || !interaction.guildId) {
-        yield* Effect.fail(new Error("This command must be used in a server."));
+        yield* interactionReply(interaction, {
+          content: "This command can only be used in a server.",
+          flags: MessageFlags.Ephemeral,
+        });
         return;
       }
 
@@ -512,9 +517,9 @@ export const Command = {
             formatError(error),
           );
 
+          const reply = toUserResponse(error);
           yield* interactionEditReply(interaction, {
-            content:
-              "Something broke while checking requirements. Please try again.",
+            content: reply.content,
           }).pipe(Effect.catchAll(() => Effect.void));
         }),
       ),

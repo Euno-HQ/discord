@@ -1,4 +1,4 @@
-import { Data } from "effect";
+import { Data, type Cause } from "effect";
 
 import type { SqlError as SqlErrorType } from "@effect/sql/SqlError";
 
@@ -144,4 +144,7 @@ export type AppError =
   | NoLeaderError
   | ResolutionExecutionError
   | FeatureDisabledError
-  | SqlErrorType;
+  | SqlErrorType
+  /** Effect.tryPromise wraps thrown exceptions in UnknownException; command-level
+   *  catchAll blocks see this whenever a raw promise rejects with an untyped error. */
+  | Cause.UnknownException;

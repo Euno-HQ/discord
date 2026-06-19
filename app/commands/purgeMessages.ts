@@ -18,6 +18,7 @@ import {
   interactionReply,
   interactionUpdate,
 } from "#~/effects/discordSdk.ts";
+import { toUserResponse } from "#~/effects/errorHandling";
 import { logEffect } from "#~/effects/observability.ts";
 import type {
   MessageComponentCommand,
@@ -349,8 +350,9 @@ export const PurgeMessagesConfirmHandler = {
               error,
             },
           );
+          const reply = toUserResponse(error);
           yield* interactionEditReply(interaction, {
-            content: "Something went wrong while purging messages.",
+            content: reply.content,
             components: [],
           }).pipe(Effect.catchAll(() => Effect.void));
         }),

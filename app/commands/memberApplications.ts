@@ -25,6 +25,7 @@ import {
   interactionReply,
   interactionUpdate,
 } from "#~/effects/discordSdk.ts";
+import { toUserResponse } from "#~/effects/errorHandling";
 import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
 import {
@@ -394,9 +395,10 @@ export const Command = [
               { error },
             );
 
+            const reply = toUserResponse(error);
             yield* interactionReply(interaction, {
-              content: "Something went wrong while submitting your application",
-              flags: MessageFlags.Ephemeral,
+              content: reply.content,
+              flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
             }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
@@ -522,9 +524,10 @@ export const Command = [
               { error },
             );
 
+            const reply = toUserResponse(error);
             yield* interactionReply(interaction, {
-              content: "Something went wrong while approving the application",
-              flags: MessageFlags.Ephemeral,
+              content: reply.content,
+              flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
             }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
@@ -647,9 +650,10 @@ export const Command = [
               { error },
             );
 
+            const reply = toUserResponse(error);
             yield* interactionReply(interaction, {
-              content: "Something went wrong while denying the application",
-              flags: MessageFlags.Ephemeral,
+              content: reply.content,
+              flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
             }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
@@ -819,9 +823,10 @@ export const Command = [
               { error },
             );
 
+            const reply = toUserResponse(error);
             yield* interactionReply(interaction, {
-              content: "Something went wrong while retracting the application",
-              flags: MessageFlags.Ephemeral,
+              content: reply.content,
+              flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
             }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
@@ -972,10 +977,10 @@ export const Command = [
                 error,
               },
             );
+            const reply = toUserResponse(error);
             yield* interactionReply(interaction, {
-              content:
-                "Gate activation failed. The button is still active — you can try again.",
-              flags: MessageFlags.Ephemeral,
+              content: reply.content,
+              flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
             }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
