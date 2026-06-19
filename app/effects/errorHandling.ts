@@ -58,6 +58,17 @@ export const toUserResponse = (
 ): { content: string; ephemeral: boolean } => {
   switch (e._tag) {
     case "ForbiddenError":
+      // Permission failures on member-ban operations are almost always a role-
+      // hierarchy problem; give the actionable hint. Other ForbiddenError
+      // operations fall through to the generic permission message. Add more
+      // operation-specific copy here as outcomes need more precise articulation.
+      if (e.operation === "forceBan" || e.operation === "softbanMember.ban") {
+        return {
+          content:
+            "Failed to ban user, try checking the bot's permissions. If they look okay, make sure that the bot's role is near the top of the roles list — bots can't ban users with roles above their own.",
+          ephemeral: true,
+        };
+      }
       return {
         content:
           "I don't have permission to do that. Check my role permissions and try again.",

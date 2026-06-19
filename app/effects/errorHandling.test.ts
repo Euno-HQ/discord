@@ -114,6 +114,32 @@ describe("toUserResponse", () => {
     expect(r.content.toLowerCase()).toContain("permission");
   });
 
+  test("ForbiddenError on forceBan → role-hierarchy hint, ephemeral", () => {
+    const r = toUserResponse(
+      new ForbiddenError({
+        source: "discord",
+        operation: "forceBan",
+        cause: new Error("403"),
+      }),
+    );
+    expect(r.ephemeral).toBe(true);
+    expect(r.content.toLowerCase()).toContain("role");
+  });
+
+  test("ForbiddenError on non-ban operation → generic permission message, no hierarchy hint", () => {
+    const r = toUserResponse(
+      new ForbiddenError({
+        source: "discord",
+        operation: "createChannel",
+        cause: new Error("403"),
+      }),
+    );
+    expect(r.ephemeral).toBe(true);
+    expect(r.content.toLowerCase()).toContain("permission");
+    // The role-hierarchy hint ("roles list", "roles above their own") must NOT appear
+    expect(r.content.toLowerCase()).not.toContain("roles list");
+  });
+
   test("ValidationError surfaces the field message", () => {
     const r = toUserResponse(
       new ValidationError({ field: "reason", message: "Reason is required" }),

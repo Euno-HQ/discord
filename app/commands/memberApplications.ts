@@ -977,10 +977,10 @@ export const Command = [
                 error,
               },
             );
-            const reply = toUserResponse(error);
             yield* interactionReply(interaction, {
-              content: reply.content,
-              flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
+              content:
+                "Gate activation failed. The button is still active — you can try again.",
+              flags: MessageFlags.Ephemeral,
             }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),

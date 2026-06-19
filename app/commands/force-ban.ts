@@ -6,6 +6,7 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { interactionReply } from "#~/effects/discordSdk.ts";
 import { toUserResponse } from "#~/effects/errorHandling";
 import { logEffect } from "#~/effects/observability.ts";
@@ -50,7 +51,7 @@ export const Command = {
         return;
       }
 
-      yield* Effect.tryPromise(() =>
+      yield* tryDiscord("forceBan", () =>
         guild.bans.create(targetUser, {
           reason: "Force banned by staff",
         }),
