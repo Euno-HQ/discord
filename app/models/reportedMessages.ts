@@ -574,7 +574,7 @@ const deleteSingleMessage = (
           "Failed to delete message",
           {
             messageId,
-            error: error instanceof Error ? error.message : String(error),
+            error,
           },
         );
         return { success: false as const, messageId, error };

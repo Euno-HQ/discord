@@ -154,7 +154,7 @@ export const logAutomodRuleCreate = (rule: AutoModerationRule) =>
     }),
     Effect.catchAll((error) =>
       logEffect("error", "AutomodRuleLog", "Failed to log rule create", {
-        error: String(error),
+        error,
         ruleId: rule.id,
         guildId: rule.guild.id,
       }),
@@ -187,7 +187,7 @@ export const logAutomodRuleDelete = (rule: AutoModerationRule) =>
     }),
     Effect.catchAll((error) =>
       logEffect("error", "AutomodRuleLog", "Failed to log rule delete", {
-        error: String(error),
+        error,
         ruleId: rule.id,
         guildId: rule.guild.id,
       }),
@@ -225,7 +225,7 @@ export const logAutomodRuleUpdate = (
     }),
     Effect.catchAll((error) =>
       logEffect("error", "AutomodRuleLog", "Failed to log rule update", {
-        error: String(error),
+        error,
         ruleId: newRule.id,
         guildId: newRule.guild.id,
       }),

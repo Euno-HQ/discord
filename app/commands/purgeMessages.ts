@@ -23,6 +23,7 @@ import type {
   MessageComponentCommand,
   UserContextCommand,
 } from "#~/helpers/discord";
+import { formatError } from "#~/helpers/formatError";
 import { commandStats } from "#~/helpers/metrics";
 
 // Duration options mirror Discord's "delete messages on ban" increments.
@@ -133,7 +134,6 @@ export const PurgeMessagesCommand = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
           yield* logEffect(
             "error",
             "Commands",
@@ -142,13 +142,13 @@ export const PurgeMessagesCommand = {
               guildId: interaction.guildId,
               moderatorUserId: interaction.user.id,
               targetUserId: interaction.targetUser.id,
-              error: err.message,
+              error,
             },
           );
           commandStats.commandFailed(
             interaction,
             "purge-messages",
-            err.message,
+            formatError(error),
           );
         }),
       ),
@@ -192,7 +192,6 @@ export const PurgeMessagesSelectHandler = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
           yield* logEffect(
             "error",
             "Commands",
@@ -200,7 +199,7 @@ export const PurgeMessagesSelectHandler = {
             {
               guildId: interaction.guildId,
               moderatorUserId: interaction.user.id,
-              error: err.message,
+              error,
             },
           );
         }),
@@ -340,7 +339,6 @@ export const PurgeMessagesConfirmHandler = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
           yield* logEffect(
             "error",
             "Commands",
@@ -348,7 +346,7 @@ export const PurgeMessagesConfirmHandler = {
             {
               guildId: interaction.guildId,
               moderatorUserId: interaction.user.id,
-              error: err.message,
+              error,
             },
           );
           yield* interactionEditReply(interaction, {

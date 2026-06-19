@@ -9,6 +9,7 @@ import { ssrDiscordSdk } from "#~/discord/api";
 import { DiscordApiError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { jobMetaRef, type ActiveJobMeta } from "#~/effects/supervisor";
+import { formatError } from "#~/helpers/formatError";
 
 export type Job = Selectable<DB["background_jobs"]>;
 
@@ -323,7 +324,7 @@ const notifyChannelEffect = (channelId: string, job: Job) =>
       Effect.catchAll((err) =>
         logEffect("warn", "JobRunner", "Failed to send progress notification", {
           channelId,
-          error: String(err),
+          error: err,
         }),
       ),
     );
@@ -358,10 +359,10 @@ export const pollAndExecuteEffect = Effect.gen(function* () {
           "Unhandled error in job execution",
           {
             jobId: job.id,
-            error: String(err),
+            error: err,
           },
         );
-        yield* failJobEffect(job.id, `Unhandled: ${String(err)}`);
+        yield* failJobEffect(job.id, `Unhandled: ${formatError(err)}`);
       }),
     ),
     Effect.fork, // Fork as child fiber — visible to Supervisor
@@ -378,7 +379,7 @@ export const pollAndExecuteEffect = Effect.gen(function* () {
   // Catch errors from claimNextJob (e.g., SqlError) so the loop continues
   Effect.catchAll((err) =>
     logEffect("error", "JobRunner", "Poll cycle failed", {
-      error: String(err),
+      error: err,
     }),
   ),
   Effect.withSpan("pollAndExecute"),

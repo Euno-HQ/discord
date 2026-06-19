@@ -149,7 +149,7 @@ export const processBatchEffect = (options: ProcessBatchOptions) =>
           {
             guildId,
             userId: member.user.id,
-            error: String(exit.cause),
+            error: exit.cause,
           },
         );
       }
@@ -243,7 +243,7 @@ export const activateMembershipGateEffect = (
       "Failed to deny @everyone ViewChannel — rolling back member role to original permissions. " +
         "Server is in original state; no members lost access. " +
         "Re-run /setup or manually update @everyone permissions.",
-      { guildId, error: String(denyExit.cause) },
+      { guildId, error: denyExit.cause },
     );
 
     const rollbackExit = yield* Effect.tryPromise({
@@ -261,7 +261,7 @@ export const activateMembershipGateEffect = (
         "BulkRoleAssignment",
         "Rollback also failed — member role has extra ViewChannel but @everyone unchanged. " +
           "This is safe (extra access, not lost access).",
-        { guildId, error: String(rollbackExit.cause) },
+        { guildId, error: rollbackExit.cause },
       );
     }
 

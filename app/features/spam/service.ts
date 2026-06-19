@@ -268,7 +268,7 @@ export const SpamDetectionServiceLive = Layer.effect(
                 "error",
                 "SpamDetection",
                 "Spam check failed, falling through",
-                { error: String(error) },
+                { error },
               );
               // Spam detection failure should never block message processing
               return computeVerdict([]);
@@ -282,7 +282,7 @@ export const SpamDetectionServiceLive = Layer.effect(
           Effect.provide(Layer.succeed(DatabaseService, db)),
           Effect.catchAll((error) =>
             logEffect("error", "SpamDetection", "Response execution failed", {
-              error: String(error),
+              error,
             }),
           ),
           Effect.withSpan("SpamDetection.executeResponse"),

@@ -10,6 +10,7 @@ import type { DB } from "./db";
 import { DatabaseCorruptionError } from "./effects/errors";
 import { logEffect } from "./effects/observability";
 import { databaseUrl, emergencyWebhook } from "./helpers/env.server";
+import { formatError } from "./helpers/formatError";
 import { log } from "./helpers/observability";
 
 // Re-export SQL errors and DB type for consumers
@@ -64,7 +65,7 @@ const sendWebhookAlert = (message: string) =>
     Effect.tapError((e) =>
       Effect.sync(() =>
         log("error", "IntegrityCheck", "Failed to send webhook alert", {
-          error: String(e),
+          error: e,
         }),
       ),
     ),
@@ -101,7 +102,7 @@ export const runIntegrityCheck = Effect.gen(function* () {
         error,
       }),
       sendWebhookAlert(
-        `🚨 **Database Integrity Check Failed**\n\`\`\`\n${error.message}\n${String(error.cause)}\n${error.stack}\n\`\`\``,
+        `🚨 **Database Integrity Check Failed**\n\`\`\`\n${error.message}\n${formatError(error.cause)}\n${error.stack}\n\`\`\``,
       ),
     ]),
   ),

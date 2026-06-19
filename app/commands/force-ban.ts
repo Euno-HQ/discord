@@ -9,6 +9,7 @@ import { Effect } from "effect";
 import { interactionReply } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import type { UserContextCommand } from "#~/helpers/discord";
+import { formatError } from "#~/helpers/formatError";
 import { commandStats } from "#~/helpers/metrics";
 
 export const Command = {
@@ -71,18 +72,19 @@ export const Command = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
-
           yield* logEffect("error", "Commands", "Force ban failed", {
             guildId: interaction.guildId,
             moderatorUserId: interaction.user.id,
             targetUserId: interaction.targetUser.id,
             targetUsername: interaction.targetUser.username,
-            error: err.message,
-            stack: err.stack,
+            error,
           });
 
-          commandStats.commandFailed(interaction, "force-ban", err.message);
+          commandStats.commandFailed(
+            interaction,
+            "force-ban",
+            formatError(error),
+          );
 
           yield* interactionReply(interaction, {
             flags: [MessageFlags.Ephemeral],

@@ -75,7 +75,7 @@ export const syncGuildGroup = (guildId: string, guild?: Guild) =>
         Effect.sync(() =>
           log("warn", "PostHogService", "Failed to sync guild group", {
             guildId,
-            error: String(error),
+            error,
           }),
         ),
       ),

@@ -149,7 +149,7 @@ const startup = Effect.gen(function* () {
               "MessageCacheExpiration",
               "Expiration run failed",
               {
-                error: String(e),
+                error: e,
               },
             ),
           ),

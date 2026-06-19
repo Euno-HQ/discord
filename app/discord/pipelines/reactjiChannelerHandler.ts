@@ -157,7 +157,7 @@ export const handleReactionAdd = (
     Effect.catchAll((err) =>
       logEffect("warn", "ReactjiChanneler", "Pipeline handler failed", {
         messageId: e.reaction.message.id,
-        error: String(err),
+        error: err,
       }),
     ),
     Effect.withSpan("ReactjiChanneler.reactionAdd"),

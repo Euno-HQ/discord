@@ -180,7 +180,7 @@ export const forwardMessageSafe = (message: Message, targetChannelId: string) =>
   }).pipe(
     Effect.catchAll((error) =>
       logEffect("error", "Discord SDK", "failed to forward to modLog", {
-        error: String(error),
+        error,
         messageId: message.id,
         targetChannelId,
       }),
@@ -377,7 +377,7 @@ export const softbanMember = (
           "Discord",
           "Softban: ban succeeded but unban failed — user is BANNED",
           {
-            error: String(error.cause),
+            error,
             userId: member.id,
             guildId: member.guild.id,
           },

@@ -977,7 +977,7 @@ export const Command = [
               "Failed to activate gate",
               {
                 guildId: interaction.guildId,
-                error: String(error),
+                error,
               },
             );
             yield* interactionReply(interaction, {

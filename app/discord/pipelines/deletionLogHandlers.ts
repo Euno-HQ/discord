@@ -69,7 +69,7 @@ function flushUncachedBatch(key: string, client: Client) {
       Effect.catchAll((e) =>
         logEffect("warn", "DeletionLogger", "Failed to flush uncached batch", {
           key,
-          error: String(e),
+          error: e,
         }),
       ),
     ),
@@ -150,7 +150,7 @@ export const handleDelete = (
           "warn",
           "DeletionLogger",
           "Failed to get/create deletion log thread",
-          { guildId: guild.id, userId: user.id, error: String(error) },
+          { guildId: guild.id, userId: user.id, error },
         ),
       ),
     );
@@ -196,7 +196,7 @@ export const handleDelete = (
           "warn",
           "DeletionLogger",
           "Failed to post deletion log embed",
-          { guildId: guild.id, error: String(error) },
+          { guildId: guild.id, error },
         ),
     }).pipe(Effect.catchAll((e) => e));
 
@@ -208,7 +208,7 @@ export const handleDelete = (
             "warn",
             "DeletionLogger",
             "Failed to get/create moderation thread for mod deletion",
-            { guildId: guild.id, userId: user.id, error: String(error) },
+            { guildId: guild.id, userId: user.id, error },
           ),
         ),
       );
@@ -225,7 +225,7 @@ export const handleDelete = (
               "warn",
               "DeletionLogger",
               "Failed to post mod deletion to moderation thread",
-              { guildId: guild.id, error: String(error) },
+              { guildId: guild.id, error },
             ),
         }).pipe(Effect.catchAll((e) => e));
       }
@@ -234,7 +234,7 @@ export const handleDelete = (
     Effect.catchAll((err) =>
       logEffect("warn", "DeletionLogger", "Failed to log message deletion", {
         messageId: e.message.id,
-        error: String(err),
+        error: err,
       }),
     ),
     Effect.withSpan("DeletionLogger.messageDelete", {
@@ -280,7 +280,7 @@ export const handleEdit = (
           "warn",
           "DeletionLogger",
           "Failed to get/create deletion log thread for edit",
-          { guildId: guild.id, userId: author.id, error: String(error) },
+          { guildId: guild.id, userId: author.id, error },
         ),
       ),
     );
@@ -310,14 +310,14 @@ export const handleEdit = (
       catch: (error) =>
         logEffect("warn", "DeletionLogger", "Failed to post edit log embed", {
           guildId: guild.id,
-          error: String(error),
+          error,
         }),
     }).pipe(Effect.catchAll((e) => e));
   }).pipe(
     Effect.catchAll((err) =>
       logEffect("warn", "DeletionLogger", "Failed to log message edit", {
         messageId: e.newMessage.id,
-        error: String(err),
+        error: err,
       }),
     ),
     Effect.withSpan("DeletionLogger.messageUpdate", {
@@ -414,14 +414,14 @@ export const handleBulkDelete = (
       catch: (error) =>
         logEffect("warn", "DeletionLogger", "Failed to post bulk delete log", {
           guildId: guild.id,
-          error: String(error),
+          error,
         }),
     }).pipe(Effect.catchAll((e) => e));
   }).pipe(
     Effect.catchAll((err) =>
       logEffect("warn", "DeletionLogger", "Failed to log bulk message delete", {
         guildId: e.guildId,
-        error: String(err),
+        error: err,
       }),
     ),
     Effect.withSpan("DeletionLogger.messageBulkDelete", {

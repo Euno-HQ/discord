@@ -59,7 +59,7 @@ export const FeatureFlagServiceLive = Layer.scoped(
               "warn",
               "FeatureFlagService",
               "PostHog flag check failed, defaulting to disabled",
-              { flag, guildId, error: String(error) },
+              { flag, guildId, error },
             ).pipe(Effect.as(false as boolean)),
           ),
           Effect.tap((enabled) => Effect.annotateCurrentSpan({ enabled })),

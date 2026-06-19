@@ -75,7 +75,7 @@ export const executeResponse = (
       Effect.tap(() => markMessageAsDeleted(message.id, guildId)),
       Effect.catchTag("DiscordApiError", (e) =>
         logEffect("warn", "SpamResponse", "Failed to delete spam message", {
-          error: String(e.cause),
+          error: e,
         }),
       ),
     );
@@ -85,7 +85,7 @@ export const executeResponse = (
       yield* Effect.tryPromise(() => applyRestriction(member)).pipe(
         Effect.catchAll((error) =>
           logEffect("warn", "SpamResponse", "Failed to apply restriction", {
-            error: String(error),
+            error,
           }),
         ),
       );
@@ -99,7 +99,7 @@ export const executeResponse = (
       ).pipe(
         Effect.catchAll((error) =>
           logEffect("warn", "SpamResponse", "Failed to timeout user", {
-            error: String(error),
+            error,
           }),
         ),
       );
@@ -121,7 +121,7 @@ export const executeResponse = (
         ).pipe(
           Effect.catchTag("DiscordApiError", (error) =>
             logEffect("warn", "SpamResponse", "Failed to softban spammer", {
-              error: String(error.cause),
+              error,
               operation: error.operation,
             }),
           ),
@@ -135,7 +135,7 @@ export const executeResponse = (
               "warn",
               "SpamResponse",
               "Failed to delete reported messages after autokick",
-              { error: String(error), userId, guildId },
+              { error, userId, guildId },
             ),
           ),
         );
@@ -201,7 +201,7 @@ const checkCrossGuildSpam = (userId: string) =>
               "warn",
               "SpamResponse",
               "Failed to apply cross-guild timeout",
-              { error: String(error), guildId: guild.id, userId },
+              { error, guildId: guild.id, userId },
             ),
           ),
         ),
@@ -228,7 +228,7 @@ const checkCrossGuildSpam = (userId: string) =>
             "warn",
             "SpamResponse",
             "Failed to send cross-guild DM to user",
-            { error: String(error), userId },
+            { error, userId },
           ),
         ),
       );
@@ -253,7 +253,7 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
             "SpamResponse",
             "Failed to log spam report",
             {
-              error: String(error),
+              error,
             },
           );
           return null;
@@ -356,7 +356,7 @@ const executeSoftban = (
     yield* softbanMember(member, "honeypot spam detected", 604800).pipe(
       Effect.catchTag("DiscordApiError", (error) =>
         logEffect("error", "SpamResponse", "Failed to softban user", {
-          error: String(error.cause),
+          error,
           operation: error.operation,
           userId: member.id,
           guildId: message.guild!.id,

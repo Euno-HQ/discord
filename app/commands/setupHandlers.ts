@@ -640,7 +640,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         Effect.catchAll((error) =>
           Effect.gen(function* () {
             yield* logEffect("error", "Commands", "setup-sel handler failed", {
-              error: String(error),
+              error,
             });
           }),
         ),

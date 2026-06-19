@@ -20,6 +20,7 @@ import {
   REQUIRED_PERMISSIONS,
 } from "#~/helpers/botPermissions";
 import type { SlashCommand } from "#~/helpers/discord";
+import { formatError } from "#~/helpers/formatError";
 import { commandStats } from "#~/helpers/metrics";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 
@@ -494,8 +495,6 @@ export const Command = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
-
           yield* logEffect(
             "error",
             "Commands",
@@ -503,18 +502,19 @@ export const Command = {
             {
               guildId: interaction.guildId,
               userId: interaction.user.id,
-              error: err,
+              error,
             },
           );
 
           commandStats.commandFailed(
             interaction,
             "check-requirements",
-            err.message,
+            formatError(error),
           );
 
           yield* interactionEditReply(interaction, {
-            content: `Something broke:\n\`\`\`\n${err.toString()}\n\`\`\``,
+            content:
+              "Something broke while checking requirements. Please try again.",
           }).pipe(Effect.catchAll(() => Effect.void));
         }),
       ),

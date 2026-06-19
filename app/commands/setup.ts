@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { interactionReply } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import type { SlashCommand } from "#~/helpers/discord";
+import { formatError } from "#~/helpers/formatError";
 import { commandStats } from "#~/helpers/metrics";
 
 import { initSetupForm } from "./setupHandlers.ts";
@@ -47,19 +48,17 @@ export const Command = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
-
           yield* logEffect("error", "Commands", "Setup command failed", {
             guildId: interaction.guildId,
             userId: interaction.user.id,
-            error: err,
+            error,
           });
 
-          commandStats.commandFailed(interaction, "setup", err.message);
+          commandStats.commandFailed(interaction, "setup", formatError(error));
 
           yield* interactionReply(
             interaction,
-            `Something broke:\n\`\`\`\n${err.toString()}\n\`\`\``,
+            "Something broke while running setup. Please try again.",
           ).pipe(Effect.catchAll(() => Effect.void));
         }),
       ),
