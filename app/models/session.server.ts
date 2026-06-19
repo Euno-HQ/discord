@@ -169,11 +169,15 @@ export async function getUser(request: Request) {
 
 export async function requireUserId(
   request: Request,
-  redirectTo: string = new URL(request.url).pathname,
+  redirectTo?: string,
 ): Promise<string> {
   const userId = await getUserId(request);
   if (!userId) {
-    const searchParams = new URLSearchParams([["redirectTo", redirectTo]]);
+    // Capture the full path (incl. query) so login returns the user exactly
+    // where they were, not just the bare pathname (#373).
+    const url = new URL(request.url);
+    const target = redirectTo ?? `${url.pathname}${url.search}`;
+    const searchParams = new URLSearchParams([["redirectTo", target]]);
     throw redirect(`/login?${searchParams}`);
   }
   return userId;

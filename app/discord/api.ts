@@ -14,7 +14,11 @@ export async function userDiscordSdkFromRequest(request: Request) {
   const userToken = await retrieveDiscordToken(request);
 
   if (userToken.expired()) {
-    log("info", "api", "Discord OAuth token expired, refreshing and persisting");
+    log(
+      "info",
+      "api",
+      "Discord OAuth token expired, refreshing and persisting",
+    );
     try {
       // Persist the refreshed token to the DB session and get the new cookie.
       // We redirect back to the same URL so the next request reads the new token
@@ -37,7 +41,12 @@ export async function userDiscordSdkFromRequest(request: Request) {
               : String(refreshError),
         },
       );
-      throw redirect("/login");
+      // Preserve where the user was so login returns them there (#373).
+      const url = new URL(request.url);
+      const searchParams = new URLSearchParams([
+        ["redirectTo", `${url.pathname}${url.search}`],
+      ]);
+      throw redirect(`/login?${searchParams}`);
     }
   }
 

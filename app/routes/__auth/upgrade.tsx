@@ -317,7 +317,7 @@ export default function Upgrade({ actionData }: Route.ComponentProps) {
             </div>
           ) : (
             <a
-              href="mailto:support@euno.reactiflux.com?subject=Custom%20Euno%20Plan"
+              href="mailto:hello+eunosales@reactiflux.com?subject=Custom%20Euno%20Plan"
               className="inline-block rounded-md border border-stone-600 bg-transparent px-6 py-2 text-lg font-medium text-stone-200 shadow-sm hover:bg-stone-800 focus:ring-2 focus:ring-stone-500 focus:ring-offset-2 focus:outline-none"
             >
               Contact Sales

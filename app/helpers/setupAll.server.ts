@@ -11,7 +11,7 @@ import {
   type RESTPostAPIGuildChannelJSONBody,
 } from "discord-api-types/v10";
 
-import { db, run, runTakeFirst } from "#~/AppRuntime";
+import { db, isFeatureEnabled, run, runTakeFirst } from "#~/AppRuntime";
 import { DEFAULT_MESSAGE_TEXT } from "#~/commands/setupHoneypot";
 import { DEFAULT_BUTTON_TEXT } from "#~/commands/setupTickets";
 import { ssrDiscordSdk } from "#~/discord/api";
@@ -365,8 +365,20 @@ export async function setupAll(
   }
 
   // --- Ticket channel (optional) ---
+  // Gate at setup, not at button-press: provisioning a ticket button while the
+  // `ticketing` flag is off gives a false success here and fails for the end
+  // user who later clicks it (#370). Skip the whole section when disabled.
   let ticketChannelId: string | undefined;
-  if (ticketChannel === CREATE_SENTINEL) {
+  const ticketRequested = ticketChannel !== undefined;
+  const ticketingEnabled = ticketRequested
+    ? await isFeatureEnabled("ticketing", guildId)
+    : false;
+
+  if (ticketRequested && !ticketingEnabled) {
+    log("warn", "setupAll", "Skipped ticket setup: ticketing flag disabled", {
+      guildId,
+    });
+  } else if (ticketChannel === CREATE_SENTINEL) {
     const ch = await createGuildChannel(guildId, {
       name: "contact-mods",
       type: ChannelType.GuildText,

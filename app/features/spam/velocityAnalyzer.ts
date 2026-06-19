@@ -11,7 +11,16 @@ const FIVE_MINUTES_MS = 5 * ONE_MINUTE_MS;
 const THIRTY_SECONDS_MS = 30 * 1000;
 
 export const VELOCITY_TUNING = {
-  channelHopFast: { base: 4, threshold: 3, perUnit: 1, bonusCap: 8 }, // range 4–12
+  // distinctBase applies when channel-hopping carries no duplicate-content
+  // signal — legitimate onboarding looks like this, so it can't clear the low
+  // tier on tenure alone. Full base applies when duplicate content co-occurs.
+  channelHopFast: {
+    base: 4,
+    distinctBase: 2,
+    threshold: 3,
+    perUnit: 1,
+    bonusCap: 8,
+  }, // range 2–12
   rapidFire: { base: 3, threshold: 5, perUnit: 1, bonusCap: 5 }, // range 3–8
   channelHopSlow: { base: 3, threshold: 5, perUnit: 1, bonusCap: 4 }, // range 3–7
   attachmentBurst: { perUnit: 1, bonusCap: 4 }, // 0–4
@@ -115,12 +124,19 @@ export function analyzeVelocity(
     return signals;
   }
 
-  // Channel-hopping: 3+ channels in 60 seconds
+  // Channel-hopping: 3+ channels in 60 seconds.
+  // Down-weight when content is distinct (no duplicate signal in the window):
+  // legitimate new members hop channels with distinct messages, and tenure +
+  // full-weight hopping alone would otherwise clear the low tier (see #369).
   if (channelsIn60s >= 3) {
+    const hopBase =
+      duplicatesIn60s >= 2
+        ? VELOCITY_TUNING.channelHopFast.base
+        : VELOCITY_TUNING.channelHopFast.distinctBase;
     signals.push({
       name: "channel_hop_fast",
       score: scaledScore(
-        VELOCITY_TUNING.channelHopFast.base,
+        hopBase,
         channelsIn60s,
         VELOCITY_TUNING.channelHopFast.threshold,
         VELOCITY_TUNING.channelHopFast.perUnit,

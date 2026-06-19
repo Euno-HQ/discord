@@ -75,6 +75,23 @@ export const Command = [
           return;
         }
 
+        // Gate at setup, not at button-press: provisioning a button that the
+        // open-ticket handler will reject gives the admin a false success and
+        // surfaces the failure to an end user later (#370).
+        const flags = yield* FeatureFlagService;
+        const ticketingEnabled = yield* flags.isPostHogEnabled(
+          "ticketing",
+          interaction.guild.id,
+        );
+        if (!ticketingEnabled) {
+          yield* interactionReply(interaction, {
+            content:
+              "Ticketing isn't enabled on this server, so the button can't be created. Contact the Euno team to enable it.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
         const pingableRole = interaction.options.getRole("role");
         const ticketChannel = interaction.options.getChannel("channel");
         const buttonText =
