@@ -1,5 +1,6 @@
 import {
   analyzeContent,
+  buildContentHash,
   buildEmbedBody,
   buildEmbedText,
   hasLinkInContentOrEmbeds,
@@ -148,4 +149,52 @@ test("hasLink is false when content has no http and embeds have no url", () => {
   const embeds = [{ url: null, title: "No link here", description: null }];
 
   expect(hasLinkInContentOrEmbeds(content, embeds)).toBe(false);
+});
+
+// ── buildContentHash tests ──
+
+describe("buildContentHash", () => {
+  test("re-upload stability: same text and same fingerprint produce identical hash", () => {
+    const fingerprint = "pic.png:12345:image/png";
+    const hash1 = buildContentHash("hello", "", [fingerprint]);
+    const hash2 = buildContentHash("hello", "", [fingerprint]);
+    expect(hash1).toBe(hash2);
+  });
+
+  test("different filename produces different hash", () => {
+    const hash1 = buildContentHash("hello", "", ["pic.png:12345:image/png"]);
+    const hash2 = buildContentHash("hello", "", ["pic2.png:12345:image/png"]);
+    expect(hash1).not.toBe(hash2);
+  });
+
+  test("different size produces different hash", () => {
+    const hash1 = buildContentHash("hello", "", ["pic.png:12345:image/png"]);
+    const hash2 = buildContentHash("hello", "", ["pic.png:99999:image/png"]);
+    expect(hash1).not.toBe(hash2);
+  });
+
+  test("different contentType produces different hash", () => {
+    const hash1 = buildContentHash("hello", "", ["pic.png:12345:image/png"]);
+    const hash2 = buildContentHash("hello", "", ["pic.png:12345:image/jpeg"]);
+    expect(hash1).not.toBe(hash2);
+  });
+
+  test("order independence: reversed attachment list hashes the same", () => {
+    const fps = ["a.png:1:image/png", "b.png:2:image/png"];
+    const hash1 = buildContentHash("hello", "", fps);
+    const hash2 = buildContentHash("hello", "", [...fps].reverse());
+    expect(hash1).toBe(hash2);
+  });
+
+  test("no attachments: empty array returns text-only hash (no ::attachments: suffix)", () => {
+    const hash = buildContentHash("hello world", "", []);
+    expect(hash).toBe("hello world");
+    expect(hash).not.toContain("::attachments:");
+  });
+
+  test("text normalization: differing case and whitespace produce the same base hash", () => {
+    const hash1 = buildContentHash("Hello World", "", []);
+    const hash2 = buildContentHash("  hello world  ", "", []);
+    expect(hash1).toBe(hash2);
+  });
 });

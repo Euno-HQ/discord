@@ -104,17 +104,19 @@ export function buildEmbedBody(embeds: EmbedLike[]): string {
 
 /**
  * Build a content hash for duplicate detection.
- * Combines normalized message text, embed text, and attachment IDs.
+ * Combines normalized message text, embed text, and attachment fingerprints
+ * (filename + byte size + content type — stable across re-uploads, unlike the
+ * per-upload attachment ID).
  */
 export function buildContentHash(
   content: string,
   embedText: string,
-  attachmentIds: string[],
+  attachmentFingerprints: string[],
 ): string {
   const baseContent = [content.toLowerCase().trim(), embedText]
     .filter(Boolean)
     .join(" ");
-  const sortedIds = [...attachmentIds].sort().join(",");
+  const sortedIds = [...attachmentFingerprints].sort().join(",");
   return sortedIds ? `${baseContent}::attachments:${sortedIds}` : baseContent;
 }
 
