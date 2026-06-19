@@ -30,6 +30,7 @@ import {
   type ModalCommand,
   type SlashCommand,
 } from "#~/helpers/discord";
+import { webBaseUrl } from "#~/helpers/env.server";
 import { featureStats } from "#~/helpers/metrics";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 
@@ -72,6 +73,22 @@ export const Command = [
       Effect.gen(function* () {
         if (!interaction.guild) {
           yield* Effect.fail(new Error("Interaction has no guild"));
+          return;
+        }
+
+        // Gate at setup, not at button-press: provisioning a button that the
+        // open-ticket handler will reject gives the admin a false success and
+        // surfaces the failure to an end user later (#370).
+        const flags = yield* FeatureFlagService;
+        const ticketingEnabled = yield* flags.isPostHogEnabled(
+          "ticketing",
+          interaction.guild.id,
+        );
+        if (!ticketingEnabled) {
+          yield* interactionReply(interaction, {
+            content: `Ticketing isn't enabled on this server, so the button can't be created. [Upgrade your plan](${webBaseUrl}/app/${interaction.guild.id}/settings/upgrade) to enable ticketing.`,
+            flags: MessageFlags.Ephemeral,
+          });
           return;
         }
 

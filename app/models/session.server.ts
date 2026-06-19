@@ -16,6 +16,7 @@ import {
   isProd,
   sessionSecret,
 } from "#~/helpers/env.server";
+import { requestOrigin } from "#~/helpers/request.server";
 import { fetchUser } from "#~/models/discord.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 import {
@@ -169,11 +170,15 @@ export async function getUser(request: Request) {
 
 export async function requireUserId(
   request: Request,
-  redirectTo: string = new URL(request.url).pathname,
+  redirectTo?: string,
 ): Promise<string> {
   const userId = await getUserId(request);
   if (!userId) {
-    const searchParams = new URLSearchParams([["redirectTo", redirectTo]]);
+    // Capture the full path (incl. query) so login returns the user exactly
+    // where they were, not just the bare pathname (#373).
+    const url = new URL(request.url);
+    const target = redirectTo ?? `${url.pathname}${url.search}`;
+    const searchParams = new URLSearchParams([["redirectTo", target]]);
     throw redirect(`/login?${searchParams}`);
   }
   return userId;
@@ -201,11 +206,7 @@ export async function initOauthLogin({
   flow?: "user" | "signup" | "add-bot";
   guildId?: string;
 }) {
-  const url = new URL(request.url);
-  const proto =
-    request.headers.get("X-Forwarded-Proto") ?? url.protocol.replace(":", "");
-  const host = request.headers.get("X-Forwarded-Host") ?? url.host;
-  const origin = `${proto}://${host}`;
+  const origin = requestOrigin(request);
   const cookieSession = await getCookieSession(request.headers.get("Cookie"));
 
   const state = JSON.stringify({
@@ -259,10 +260,7 @@ export async function completeOauthLogin(request: Request) {
     throw redirect("/login", 500);
   }
 
-  const proto =
-    request.headers.get("X-Forwarded-Proto") ?? url.protocol.replace(":", "");
-  const host = request.headers.get("X-Forwarded-Host") ?? url.host;
-  const origin = `${proto}://${host}`;
+  const origin = requestOrigin(request);
   const reqCookie: string = cookie;
   const state: string | undefined = url.searchParams.get("state") ?? undefined;
 

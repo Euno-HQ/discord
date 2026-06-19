@@ -12,6 +12,8 @@ import { logEffect } from "#~/effects/observability.ts";
 import type { SlashCommand } from "#~/helpers/discord";
 import { featureStats } from "#~/helpers/metrics";
 
+import { resolveReactjiEmoji } from "./reactjiEmoji.ts";
+
 export const Command = {
   command: new SlashCommandBuilder()
     .setName("setup-reactji-channel")
@@ -55,20 +57,26 @@ export const Command = {
       const guildId = interaction.guild.id;
       const configuredById = interaction.user.id;
 
-      // Parse the emoji - handle both unicode and custom emoji formats
-      // Custom emojis come in as <:name:id> or <a:name:id> for animated
-      const customEmojiRegex = /^<a?:(\w+):(\d+)>$/;
-      const emoji = customEmojiRegex.exec(emojiInput)
-        ? emojiInput
-        : emojiInput.trim();
+      // Resolve the emoji to a value the channeler can actually match against:
+      // a custom-emoji mention or a unicode character. Reject shortcodes/text
+      // that could never match a real reaction (#371).
+      const resolution = resolveReactjiEmoji(
+        emojiInput,
+        interaction.guild.emojis.cache.map((e) => ({
+          name: e.name,
+          id: e.id,
+          animated: e.animated ?? false,
+        })),
+      );
 
-      if (!emoji) {
+      if (!resolution.ok) {
         yield* interactionReply(interaction, {
-          content: "Please provide a valid emoji.",
+          content: resolution.error,
           flags: [MessageFlags.Ephemeral],
         });
         return;
       }
+      const emoji = resolution.value;
 
       // Upsert: update if exists, insert if not
       const db = yield* DatabaseService;

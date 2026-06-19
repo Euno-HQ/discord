@@ -48,6 +48,10 @@ export const stripeWebhookSecret = getEnv("STRIPE_WEBHOOK_SECRET");
 export const posthogApiKey = getEnv("POSTHOG_KEY", true);
 export const posthogHost = getEnv("POSTHOG_HOST", true);
 
-export const webBaseUrl = getEnv("WEB_BASE_URL", true);
+// Defaults to localhost on purpose: any non-local environment MUST set
+// WEB_BASE_URL, and if it forgets, links point at localhost — an obvious,
+// surfaceable bug rather than a plausible-looking wrong URL.
+export const webBaseUrl =
+  getEnv("WEB_BASE_URL", true) || "http://localhost:3000";
 
 if (!ok) throw new Error("Environment misconfigured");

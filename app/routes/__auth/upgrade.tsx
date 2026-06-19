@@ -8,6 +8,7 @@ import {
 } from "react-router";
 
 import { log } from "#~/helpers/observability";
+import { requestOrigin } from "#~/helpers/request.server";
 import { requireUser } from "#~/models/session.server";
 import { StripeService } from "#~/models/stripe.server";
 import {
@@ -105,9 +106,9 @@ export async function action({ request }: Route.ActionArgs) {
     });
 
     try {
-      // Get base URL from request
-      const url = new URL(request.url);
-      const baseUrl = `${url.protocol}//${url.host}`;
+      // Honor reverse-proxy forwarded headers so Stripe return URLs point at
+      // the public origin, not the pod's internal host.
+      const baseUrl = requestOrigin(request);
 
       // Create Stripe checkout session
       const checkoutUrl = await StripeService.createCheckoutSession(
@@ -317,7 +318,7 @@ export default function Upgrade({ actionData }: Route.ComponentProps) {
             </div>
           ) : (
             <a
-              href="mailto:support@euno.reactiflux.com?subject=Custom%20Euno%20Plan"
+              href="mailto:hello+eunosales@reactiflux.com?subject=Custom%20Euno%20Plan"
               className="inline-block rounded-md border border-stone-600 bg-transparent px-6 py-2 text-lg font-medium text-stone-200 shadow-sm hover:bg-stone-800 focus:ring-2 focus:ring-stone-500 focus:ring-offset-2 focus:outline-none"
             >
               Contact Sales
