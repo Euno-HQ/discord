@@ -10,6 +10,7 @@ import {
   FeatureFlagServiceLive,
   type BooleanFlag,
 } from "#~/effects/featureFlags";
+import { JsonLoggerLayer } from "#~/effects/logger";
 import { PostHogService, PostHogServiceLive } from "#~/effects/posthog";
 import { SupervisorServiceLive } from "#~/effects/supervisor";
 import { TracingLive } from "#~/effects/tracing.js";
@@ -19,7 +20,7 @@ import { isProd } from "#~/helpers/env.server.js";
 // Infrastructure layer: tracing + structured logging + prod log level
 const InfraLayer = Layer.mergeAll(
   TracingLive,
-  Logger.json,
+  JsonLoggerLayer,
   isProd()
     ? Logger.minimumLogLevel(LogLevel.Info)
     : Logger.minimumLogLevel(LogLevel.All),
