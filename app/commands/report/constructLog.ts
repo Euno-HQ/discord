@@ -1,12 +1,12 @@
 import { formatDistanceToNowStrict } from "date-fns";
-import { type Message, type MessageCreateOptions } from "discord.js";
+import { type MessageCreateOptions } from "discord.js";
 import { Effect } from "effect";
 
 import { DiscordApiError } from "#~/effects/errors";
 import {
   constructDiscordLink,
-  isForwardedMessage,
   getMessageContent,
+  isForwardedMessage,
 } from "#~/helpers/discord";
 import { truncateMessage } from "#~/helpers/string";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
