@@ -11,12 +11,6 @@ export class NotAuthorizedError extends Data.TaggedError("NotAuthorizedError")<{
   requiredRole?: string;
 }> {}
 
-// TODO: refine
-export class DiscordApiError extends Data.TaggedError("DiscordApiError")<{
-  operation: string;
-  cause: unknown;
-}> {}
-
 export class NotFoundError extends Data.TaggedError("NotFoundError")<{
   resource: string;
   id: string;

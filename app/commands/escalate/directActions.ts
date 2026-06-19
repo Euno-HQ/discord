@@ -4,8 +4,9 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { fetchMember } from "#~/effects/discordSdk";
-import { DiscordApiError, NotAuthorizedError } from "#~/effects/errors";
+import { NotAuthorizedError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { hasModRole } from "#~/helpers/discord";
 import { applyRestriction, ban, kick, timeout } from "#~/models/discord.server";
@@ -98,11 +99,9 @@ export const kickUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute kick
-    yield* Effect.tryPromise({
-      try: () => kick(reportedMember, "single moderator decision"),
-      catch: (error) =>
-        new DiscordApiError({ operation: "kick", cause: error }),
-    });
+    yield* tryDiscord("kick", () =>
+      kick(reportedMember, "single moderator decision"),
+    );
 
     yield* logEffect("info", "DirectActions", "Kicked user", {
       reportedUserId,
@@ -151,10 +150,9 @@ export const banUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute ban
-    yield* Effect.tryPromise({
-      try: () => ban(reportedMember, "single moderator decision"),
-      catch: (error) => new DiscordApiError({ operation: "ban", cause: error }),
-    });
+    yield* tryDiscord("ban", () =>
+      ban(reportedMember, "single moderator decision"),
+    );
 
     yield* logEffect("info", "DirectActions", "Banned user", {
       reportedUserId,
@@ -207,15 +205,9 @@ export const banUserAndDeleteMessages = (
     );
 
     // Execute ban with message deletion
-    yield* Effect.tryPromise({
-      try: () =>
-        ban(
-          reportedMember,
-          "single moderator decision",
-          DELETE_MESSAGE_SECONDS,
-        ),
-      catch: (error) => new DiscordApiError({ operation: "ban", cause: error }),
-    }).pipe(
+    yield* tryDiscord("ban", () =>
+      ban(reportedMember, "single moderator decision", DELETE_MESSAGE_SECONDS),
+    ).pipe(
       Effect.withSpan("discord.ban", {
         attributes: {
           userId: reportedUserId,
@@ -277,14 +269,9 @@ export const restrictUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute restriction
-    yield* Effect.tryPromise({
-      try: () => applyRestriction(reportedMember),
-      catch: (error) =>
-        new DiscordApiError({
-          operation: "applyRestriction",
-          cause: error,
-        }),
-    });
+    yield* tryDiscord("applyRestriction", () =>
+      applyRestriction(reportedMember),
+    );
 
     yield* logEffect("info", "DirectActions", "Restricted user", {
       reportedUserId,
@@ -333,11 +320,9 @@ export const timeoutUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute timeout
-    yield* Effect.tryPromise({
-      try: () => timeout(reportedMember, "single moderator decision"),
-      catch: (error) =>
-        new DiscordApiError({ operation: "timeout", cause: error }),
-    });
+    yield* tryDiscord("timeout", () =>
+      timeout(reportedMember, "single moderator decision"),
+    );
 
     yield* logEffect("info", "DirectActions", "Timed out user", {
       reportedUserId,

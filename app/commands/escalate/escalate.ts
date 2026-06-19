@@ -13,7 +13,7 @@ import {
   fetchMessage,
   sendMessage,
 } from "#~/effects/discordSdk";
-import { DiscordApiError } from "#~/effects/errors";
+import { TransientError } from "#~/effects/errors";
 import { FeatureFlagService, guardFeature } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability";
 import { calculateScheduledFor } from "#~/helpers/escalationVotes";
@@ -69,7 +69,8 @@ export const createEscalationEffect = (
 
     if (!channel || !("send" in channel)) {
       return yield* Effect.fail(
-        new DiscordApiError({
+        new TransientError({
+          source: "discord",
           operation: "validateChannel",
           cause: new Error("Invalid channel - cannot send messages"),
         }),

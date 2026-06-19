@@ -14,7 +14,11 @@ import {
   messageReply,
   sendMessage,
 } from "#~/effects/discordSdk.ts";
-import { DiscordApiError, type NotFoundError } from "#~/effects/errors";
+import {
+  TransientError,
+  type DiscordError,
+  type NotFoundError,
+} from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import {
   describeAttachments,
@@ -63,14 +67,15 @@ export function logUserMessage({
     allReportedMessages: Report[];
     reportId: string;
   },
-  DiscordApiError | SqlError | NotFoundError,
+  DiscordError | SqlError | NotFoundError,
   DatabaseService
 > {
   return Effect.gen(function* () {
     const { guild, author } = message;
     if (!guild) {
       return yield* Effect.fail(
-        new DiscordApiError({
+        new TransientError({
+          source: "discord",
           operation: "logUserMessage",
           cause: new Error("Tried to log a message without a guild"),
         }),

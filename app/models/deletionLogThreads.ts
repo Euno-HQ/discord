@@ -10,12 +10,17 @@ import type { Selectable } from "kysely";
 
 import { DatabaseService, type SqlError } from "#~/Database";
 import type { DB } from "#~/db";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { fetchChannel } from "#~/effects/discordSdk.ts";
-import { DiscordApiError, type NotFoundError } from "#~/effects/errors";
+import {
+  TransientError,
+  type DiscordError,
+  type NotFoundError,
+} from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 
-type ThreadError = DiscordApiError | SqlError | NotFoundError;
+type ThreadError = DiscordError | SqlError | NotFoundError;
 
 export type DeletionLogThread = Selectable<DB["deletion_log_threads"]>;
 
@@ -93,11 +98,9 @@ export const upsertDeletionLogThread = (
   );
 
 const makeDeletionLogThread = (channel: TextChannel, user: User) =>
-  Effect.tryPromise({
-    try: () => channel.threads.create({ name: `${user.username} messages` }),
-    catch: (error) =>
-      new DiscordApiError({ operation: "createThread", cause: error }),
-  });
+  tryDiscord("createThread", () =>
+    channel.threads.create({ name: `${user.username} messages` }),
+  );
 
 type InflightResult =
   | {
@@ -193,7 +196,8 @@ const doGetOrCreateDeletionLogThread = (guild: Guild, user: User) =>
 
     if (!deletionLogId) {
       return yield* Effect.fail(
-        new DiscordApiError({
+        new TransientError({
+          source: "discord",
           operation: "getOrCreateDeletionLogThread",
           cause: new Error("Deletion log channel not configured"),
         }),
@@ -204,7 +208,8 @@ const doGetOrCreateDeletionLogThread = (guild: Guild, user: User) =>
 
     if (!deletionLog || deletionLog.type !== ChannelType.GuildText) {
       return yield* Effect.fail(
-        new DiscordApiError({
+        new TransientError({
+          source: "discord",
           operation: "getOrCreateDeletionLogThread",
           cause: new Error("Invalid deletion log channel"),
         }),

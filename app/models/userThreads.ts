@@ -10,13 +10,18 @@ import type { Selectable } from "kysely";
 
 import { DatabaseService, type SqlError } from "#~/Database";
 import type { DB } from "#~/db";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { fetchChannel } from "#~/effects/discordSdk.ts";
-import { DiscordApiError, type NotFoundError } from "#~/effects/errors";
+import {
+  TransientError,
+  type DiscordError,
+  type NotFoundError,
+} from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { escalationControls } from "#~/helpers/escalate";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 
-type ThreadError = DiscordApiError | SqlError | NotFoundError;
+type ThreadError = DiscordError | SqlError | NotFoundError;
 
 // Use Selectable to get the type that Kysely returns from queries
 export type UserThread = Selectable<DB["user_threads"]>;
@@ -90,11 +95,9 @@ export const upsertUserThread = (
   );
 
 const makeUserThread = (channel: TextChannel, user: User) =>
-  Effect.tryPromise({
-    try: () => channel.threads.create({ name: `${user.username} logs` }),
-    catch: (error) =>
-      new DiscordApiError({ operation: "createThread", cause: error }),
-  });
+  tryDiscord("createThread", () =>
+    channel.threads.create({ name: `${user.username} logs` }),
+  );
 
 /**
  * Get or create a user thread with singleflight deduplication.
@@ -199,7 +202,8 @@ const doGetOrCreateUserThread = (guild: Guild, user: User) =>
 
     if (!modLog || modLog.type !== ChannelType.GuildText) {
       return yield* Effect.fail(
-        new DiscordApiError({
+        new TransientError({
+          source: "discord",
           operation: "getOrCreateUserThread",
           cause: new Error("Invalid mod log channel"),
         }),
@@ -209,11 +213,9 @@ const doGetOrCreateUserThread = (guild: Guild, user: User) =>
     // Create freestanding private thread
     const thread = yield* makeUserThread(modLog, user);
 
-    yield* Effect.tryPromise({
-      try: () => escalationControls(user.id, thread),
-      catch: (error) =>
-        new DiscordApiError({ operation: "escalationControls", cause: error }),
-    });
+    yield* tryDiscord("escalationControls", () =>
+      escalationControls(user.id, thread),
+    );
 
     // Store or update the thread reference
     yield* upsertUserThread(user.id, guild.id, thread.id);

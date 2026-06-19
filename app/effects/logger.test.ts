@@ -1,7 +1,7 @@
 import { Cause, Effect, Logger } from "effect";
 import { describe, expect, test, vi } from "vitest";
 
-import { DiscordApiError } from "#~/effects/errors";
+import { ForbiddenError } from "#~/effects/errors";
 import { JsonLoggerWithCause } from "#~/effects/logger";
 
 const runAndCapture = async (effect: Effect.Effect<void>): Promise<string> => {
@@ -40,14 +40,15 @@ describe("JsonLoggerWithCause", () => {
       Effect.logError("failed").pipe(
         Effect.annotateLogs({
           service: "Test",
-          error: new DiscordApiError({
+          error: new ForbiddenError({
+            source: "discord",
             operation: "addMemberRole",
             cause: new Error("403 Forbidden"),
           }),
         }),
       ),
     );
-    expect(out).toContain("DiscordApiError");
+    expect(out).toContain("ForbiddenError");
     expect(out).toContain("addMemberRole");
     expect(out).toContain("403 Forbidden");
   });
@@ -56,7 +57,8 @@ describe("JsonLoggerWithCause", () => {
   // This test documents that limitation: the tag name appears in the string but
   // the cause field is NOT a structured object.
   test("fiber-level cause (Cause.pretty) renders tagged error as a string containing its tag", async () => {
-    const taggedError = new DiscordApiError({
+    const taggedError = new ForbiddenError({
+      source: "discord",
       operation: "testOp",
       cause: new Error("underlying"),
     });
@@ -68,7 +70,7 @@ describe("JsonLoggerWithCause", () => {
     );
     const parsed = JSON.parse(out);
     expect(typeof parsed.cause).toBe("string");
-    expect(parsed.cause).toContain("DiscordApiError");
+    expect(parsed.cause).toContain("ForbiddenError");
   });
 
   test("emits the structured envelope keys", async () => {

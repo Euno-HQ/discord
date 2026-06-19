@@ -9,7 +9,7 @@ import { Effect } from "effect";
 
 import { DatabaseService } from "#~/Database";
 import { ssrDiscordSdk } from "#~/discord/api";
-import { DiscordApiError } from "#~/effects/errors";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { logEffect } from "#~/effects/observability";
 
 import {
@@ -63,14 +63,11 @@ export const scanFinalCursorEffect = (guildId: string) =>
     let after = "0";
     let memberCount = 0;
     while (true) {
-      const page = (yield* Effect.tryPromise({
-        try: () =>
-          ssrDiscordSdk.get(Routes.guildMembers(guildId), {
-            query: new URLSearchParams({ limit: "1000", after }),
-          }),
-        catch: (error) =>
-          new DiscordApiError({ operation: "listGuildMembers", cause: error }),
-      })) as APIGuildMember[];
+      const page = (yield* tryDiscord("listGuildMembers", () =>
+        ssrDiscordSdk.get(Routes.guildMembers(guildId), {
+          query: new URLSearchParams({ limit: "1000", after }),
+        }),
+      )) as APIGuildMember[];
       if (page.length === 0) break;
       memberCount += page.length;
       const lastUser = page[page.length - 1].user;
@@ -91,17 +88,14 @@ export const processBatchEffect = (options: ProcessBatchOptions) =>
   Effect.gen(function* () {
     const { guildId, roleId, cursor, finalCursor, batchSize } = options;
 
-    const members = (yield* Effect.tryPromise({
-      try: () =>
-        ssrDiscordSdk.get(Routes.guildMembers(guildId), {
-          query: new URLSearchParams({
-            limit: String(batchSize),
-            after: cursor.after,
-          }),
+    const members = (yield* tryDiscord("listGuildMembers", () =>
+      ssrDiscordSdk.get(Routes.guildMembers(guildId), {
+        query: new URLSearchParams({
+          limit: String(batchSize),
+          after: cursor.after,
         }),
-      catch: (error) =>
-        new DiscordApiError({ operation: "listGuildMembers", cause: error }),
-    })) as APIGuildMember[];
+      }),
+    )) as APIGuildMember[];
 
     if (members.length === 0) {
       return {
@@ -129,14 +123,11 @@ export const processBatchEffect = (options: ProcessBatchOptions) =>
 
       if (member.user.bot) continue;
 
-      const exit = yield* Effect.tryPromise({
-        try: () =>
-          ssrDiscordSdk.put(
-            Routes.guildMemberRole(guildId, member.user.id, roleId),
-          ),
-        catch: (error) =>
-          new DiscordApiError({ operation: "addMemberRole", cause: error }),
-      }).pipe(Effect.exit);
+      const exit = yield* tryDiscord("addMemberRole", () =>
+        ssrDiscordSdk.put(
+          Routes.guildMemberRole(guildId, member.user.id, roleId),
+        ),
+      ).pipe(Effect.exit);
 
       if (exit._tag === "Success") {
         assigned++;
@@ -186,19 +177,13 @@ export const activateMembershipGateEffect = (
     const everyonePerms = BigInt(everyonePermissions);
 
     // Step 1: Grant ViewChannel on @member role (safe — adds access)
-    yield* Effect.tryPromise({
-      try: () =>
-        ssrDiscordSdk.patch(Routes.guildRole(guildId, roleId), {
-          body: {
-            permissions: String(memberPerms | PermissionFlagsBits.ViewChannel),
-          },
-        }),
-      catch: (error) =>
-        new DiscordApiError({
-          operation: "grantMemberViewChannel",
-          cause: error,
-        }),
-    });
+    yield* tryDiscord("grantMemberViewChannel", () =>
+      ssrDiscordSdk.patch(Routes.guildRole(guildId, roleId), {
+        body: {
+          permissions: String(memberPerms | PermissionFlagsBits.ViewChannel),
+        },
+      }),
+    );
 
     yield* logEffect(
       "info",
@@ -208,23 +193,17 @@ export const activateMembershipGateEffect = (
     );
 
     // Step 2: Deny ViewChannel on @everyone (dangerous — removes access)
-    const denyExit = yield* Effect.tryPromise({
-      try: () =>
-        ssrDiscordSdk.patch(Routes.guildRole(guildId, guildId), {
-          body: {
-            permissions: String(
-              everyonePerms &
-                ~PermissionFlagsBits.ViewChannel &
-                ~PermissionFlagsBits.MentionEveryone,
-            ),
-          },
-        }),
-      catch: (error) =>
-        new DiscordApiError({
-          operation: "denyEveryoneViewChannel",
-          cause: error,
-        }),
-    }).pipe(Effect.exit);
+    const denyExit = yield* tryDiscord("denyEveryoneViewChannel", () =>
+      ssrDiscordSdk.patch(Routes.guildRole(guildId, guildId), {
+        body: {
+          permissions: String(
+            everyonePerms &
+              ~PermissionFlagsBits.ViewChannel &
+              ~PermissionFlagsBits.MentionEveryone,
+          ),
+        },
+      }),
+    ).pipe(Effect.exit);
 
     if (denyExit._tag === "Success") {
       yield* logEffect(
@@ -246,14 +225,11 @@ export const activateMembershipGateEffect = (
       { guildId, error: denyExit.cause },
     );
 
-    const rollbackExit = yield* Effect.tryPromise({
-      try: () =>
-        ssrDiscordSdk.patch(Routes.guildRole(guildId, roleId), {
-          body: { permissions: String(memberPerms) },
-        }),
-      catch: (error) =>
-        new DiscordApiError({ operation: "rollbackMemberRole", cause: error }),
-    }).pipe(Effect.exit);
+    const rollbackExit = yield* tryDiscord("rollbackMemberRole", () =>
+      ssrDiscordSdk.patch(Routes.guildRole(guildId, roleId), {
+        body: { permissions: String(memberPerms) },
+      }),
+    ).pipe(Effect.exit);
 
     if (rollbackExit._tag === "Failure") {
       yield* logEffect(
@@ -323,22 +299,16 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
             ? `~${estimatedHours}h ${remainingMinutes}m`
             : `~${estimatedMinutes}m`;
 
-        yield* Effect.tryPromise({
-          try: () =>
-            ssrDiscordSdk.post(Routes.channelMessages(job.notify_channel_id!), {
-              body: {
-                content:
-                  `**Member role migration started**\n` +
-                  `Assigning <@&${payload.roleId}> to ~${finalCursor.memberCount.toLocaleString()} existing members.\n` +
-                  `Estimated time: ${timeEstimate}. Progress updates will be posted every 30 minutes.`,
-              },
-            }),
-          catch: (error) =>
-            new DiscordApiError({
-              operation: "notifyMigrationStart",
-              cause: error,
-            }),
-        }).pipe(Effect.catchAll(() => Effect.void));
+        yield* tryDiscord("notifyMigrationStart", () =>
+          ssrDiscordSdk.post(Routes.channelMessages(job.notify_channel_id!), {
+            body: {
+              content:
+                `**Member role migration started**\n` +
+                `Assigning <@&${payload.roleId}> to ~${finalCursor.memberCount.toLocaleString()} existing members.\n` +
+                `Estimated time: ${timeEstimate}. Progress updates will be posted every 30 minutes.`,
+            },
+          }),
+        ).pipe(Effect.catchAll(() => Effect.void));
       }
     }
 
@@ -393,22 +363,16 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
             ? Math.round((totalAssigned / totalMembers) * 100)
             : 0;
 
-        yield* Effect.tryPromise({
-          try: () =>
-            ssrDiscordSdk.post(Routes.channelMessages(job.notify_channel_id!), {
-              body: {
-                content:
-                  `**Member role migration progress**\n` +
-                  `${totalAssigned.toLocaleString()} / ~${totalMembers.toLocaleString()} members (${pct}%)\n` +
-                  `Estimated time remaining: ${eta}`,
-              },
-            }),
-          catch: (error) =>
-            new DiscordApiError({
-              operation: "notifyProgress",
-              cause: error,
-            }),
-        }).pipe(Effect.catchAll(() => Effect.void));
+        yield* tryDiscord("notifyProgress", () =>
+          ssrDiscordSdk.post(Routes.channelMessages(job.notify_channel_id!), {
+            body: {
+              content:
+                `**Member role migration progress**\n` +
+                `${totalAssigned.toLocaleString()} / ~${totalMembers.toLocaleString()} members (${pct}%)\n` +
+                `Estimated time remaining: ${eta}`,
+            },
+          }),
+        ).pipe(Effect.catchAll(() => Effect.void));
       }
 
       if (result.errors > 0) {

@@ -14,7 +14,7 @@ import {
   fetchGuild,
   fetchUserOrNull,
 } from "#~/effects/discordSdk";
-import { DiscordApiError } from "#~/effects/errors";
+import { TransientError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { quoteMessageContent } from "#~/helpers/discord";
 import { getOrCreateDeletionLogThread } from "#~/models/deletionLogThreads";
@@ -349,7 +349,8 @@ export const handleBulkDelete = (
     ).pipe(
       Effect.catchAll(() =>
         Effect.fail(
-          new DiscordApiError({
+          new TransientError({
+            source: "discord",
             operation: "fetchDeletionLogChannel",
             cause: new Error("Deletion log channel not found"),
           }),

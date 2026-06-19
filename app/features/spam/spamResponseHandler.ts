@@ -9,6 +9,7 @@ import { Effect } from "effect";
 import { logUserMessage } from "#~/commands/report/userLog.ts";
 import { client } from "#~/discord/client.server.ts";
 import { deleteMessage, softbanMember } from "#~/effects/discordSdk.ts";
+import { isDiscordError } from "#~/effects/errorHandling.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import { featureStats } from "#~/helpers/metrics.ts";
 import { applyRestriction, timeout } from "#~/models/discord.server.ts";
@@ -73,7 +74,7 @@ export const executeResponse = (
     // Medium and high: delete the message first
     yield* deleteMessage(message).pipe(
       Effect.tap(() => markMessageAsDeleted(message.id, guildId)),
-      Effect.catchTag("DiscordApiError", (e) =>
+      Effect.catchIf(isDiscordError, (e) =>
         logEffect("warn", "SpamResponse", "Failed to delete spam message", {
           error: e,
         }),
@@ -119,7 +120,7 @@ export const executeResponse = (
           "Autokicked for repeated spam (1h message cleanup)",
           3600,
         ).pipe(
-          Effect.catchTag("DiscordApiError", (error) =>
+          Effect.catchIf(isDiscordError, (error) =>
             logEffect("warn", "SpamResponse", "Failed to softban spammer", {
               error,
               operation: error.operation,
@@ -354,7 +355,7 @@ const executeSoftban = (
 ) =>
   Effect.gen(function* () {
     yield* softbanMember(member, "honeypot spam detected", 604800).pipe(
-      Effect.catchTag("DiscordApiError", (error) =>
+      Effect.catchIf(isDiscordError, (error) =>
         logEffect("error", "SpamResponse", "Failed to softban user", {
           error,
           operation: error.operation,

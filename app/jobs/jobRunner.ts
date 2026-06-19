@@ -6,7 +6,8 @@ import { runEffect } from "#~/AppRuntime";
 import { DatabaseService, type SqlError } from "#~/Database";
 import type { DB } from "#~/db";
 import { ssrDiscordSdk } from "#~/discord/api";
-import { DiscordApiError } from "#~/effects/errors";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
+import { type DiscordError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { jobMetaRef, type ActiveJobMeta } from "#~/effects/supervisor";
 import { formatError } from "#~/helpers/formatError";
@@ -266,7 +267,7 @@ export const createJob = (options: CreateJobOptions): Promise<Job> =>
 
 type JobHandler = (
   job: Job,
-) => Effect.Effect<void, DiscordApiError | SqlError, DatabaseService>;
+) => Effect.Effect<void, DiscordError | SqlError, DatabaseService>;
 
 const handlers: Record<string, JobHandler> = {};
 
@@ -313,14 +314,11 @@ const notifyChannelEffect = (channelId: string, job: Job) =>
 
     if (!body) return;
 
-    yield* Effect.tryPromise({
-      try: () =>
-        ssrDiscordSdk.post(Routes.channelMessages(channelId), {
-          body,
-        }),
-      catch: (error) =>
-        new DiscordApiError({ operation: "notifyChannel", cause: error }),
-    }).pipe(
+    yield* tryDiscord("notifyChannel", () =>
+      ssrDiscordSdk.post(Routes.channelMessages(channelId), {
+        body,
+      }),
+    ).pipe(
       Effect.catchAll((err) =>
         logEffect("warn", "JobRunner", "Failed to send progress notification", {
           channelId,
