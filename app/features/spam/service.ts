@@ -229,6 +229,7 @@ export const SpamDetectionServiceLive = Layer.effect(
             guildId,
             recentMessages,
             contentHash,
+            attachmentFingerprints.length,
           );
 
           const allSignals = [
