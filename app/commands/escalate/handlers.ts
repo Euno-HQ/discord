@@ -17,6 +17,7 @@ import {
   interactionUpdate,
 } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
+import { webBaseUrl } from "#~/helpers/env.server";
 import {
   humanReadableResolutions,
   type Resolution,
@@ -226,7 +227,7 @@ const escalate = (interaction: MessageComponentInteraction) =>
     Effect.provide(EscalationServiceLive),
     Effect.catchTag("FeatureDisabledError", () =>
       interactionEditReply(interaction, {
-        content: "This is a paid feature. Upgrade with `/upgrade`",
+        content: `This is a paid feature. [Upgrade your plan](${webBaseUrl}/app/${interaction.guildId}/settings/upgrade) to enable it.`,
       }).pipe(Effect.catchAll(() => Effect.void)),
     ),
     Effect.catchTag("NotFoundError", () =>

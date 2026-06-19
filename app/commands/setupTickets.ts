@@ -30,6 +30,7 @@ import {
   type ModalCommand,
   type SlashCommand,
 } from "#~/helpers/discord";
+import { webBaseUrl } from "#~/helpers/env.server";
 import { featureStats } from "#~/helpers/metrics";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 
@@ -85,8 +86,7 @@ export const Command = [
         );
         if (!ticketingEnabled) {
           yield* interactionReply(interaction, {
-            content:
-              "Ticketing isn't enabled on this server, so the button can't be created. Contact the Euno team to enable it.",
+            content: `Ticketing isn't enabled on this server, so the button can't be created. [Upgrade your plan](${webBaseUrl}/app/${interaction.guild.id}/settings/upgrade) to enable ticketing.`,
             flags: MessageFlags.Ephemeral,
           });
           return;

@@ -8,6 +8,7 @@ import {
 } from "react-router";
 
 import { log } from "#~/helpers/observability";
+import { requestOrigin } from "#~/helpers/request.server";
 import { requireUser } from "#~/models/session.server";
 import { StripeService } from "#~/models/stripe.server";
 import {
@@ -105,9 +106,9 @@ export async function action({ request }: Route.ActionArgs) {
     });
 
     try {
-      // Get base URL from request
-      const url = new URL(request.url);
-      const baseUrl = `${url.protocol}//${url.host}`;
+      // Honor reverse-proxy forwarded headers so Stripe return URLs point at
+      // the public origin, not the pod's internal host.
+      const baseUrl = requestOrigin(request);
 
       // Create Stripe checkout session
       const checkoutUrl = await StripeService.createCheckoutSession(
