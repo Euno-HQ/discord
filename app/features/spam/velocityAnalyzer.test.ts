@@ -264,10 +264,12 @@ test("getPriorDuplicates respects a custom window", () => {
 // ── Scaled velocity signal tests ──
 
 describe("channel_hop_fast scaling", () => {
+  // Space messages 3000ms apart so all 15 fit inside the 60s window
+  // (furthest message: 15 * 3000 = 45000ms ago, well under 60s)
   function makeHopMessages(channelCount: number): RecentMessage[] {
     const now = Date.now();
     return Array.from({ length: channelCount }, (_, i) =>
-      makeMessage({ channelId: `ch-${i}`, timestamp: now - (i + 1) * 5000 }),
+      makeMessage({ channelId: `ch-${i}`, timestamp: now - (i + 1) * 3000 }),
     );
   }
 

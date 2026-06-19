@@ -102,33 +102,35 @@ describe("gatedVelocitySignals", () => {
 
   test("forwards attachmentCount — channel-hop + attachments yields attachment_burst", async () => {
     const flags = makeFlags(true);
-    const now = Date.now();
+    const testNow = Date.now();
     // 3 different channels in 60s triggers channel_hop_fast
     const hopMessages = [
       {
         messageId: "a",
         channelId: "ch-1",
         contentHash: "x",
-        timestamp: now - 10000,
+        timestamp: testNow - 10000,
         hasLink: false,
       },
       {
         messageId: "b",
         channelId: "ch-2",
         contentHash: "x",
-        timestamp: now - 5000,
+        timestamp: testNow - 5000,
         hasLink: false,
       },
       {
         messageId: "c",
         channelId: "ch-3",
         contentHash: "x",
-        timestamp: now - 1000,
+        timestamp: testNow - 1000,
         hasLink: false,
       },
     ];
     const result = await Effect.runPromise(
-      gatedVelocitySignals(flags, "g1", hopMessages, "new-content", 2),
+      gatedVelocitySignals(flags, "g1", hopMessages, "new-content", 2, {
+        now: () => testNow,
+      }),
     );
     expect(result.find((s) => s.name === "channel_hop_fast")).toBeDefined();
     expect(result.find((s) => s.name === "attachment_burst")).toBeDefined();
@@ -137,32 +139,34 @@ describe("gatedVelocitySignals", () => {
 
   test("gate-disabled returns [] even with attachments and velocity-triggering messages", async () => {
     const flags = makeFlags(false);
-    const now = Date.now();
+    const testNow = Date.now();
     const hopMessages = [
       {
         messageId: "a",
         channelId: "ch-1",
         contentHash: "x",
-        timestamp: now - 10000,
+        timestamp: testNow - 10000,
         hasLink: false,
       },
       {
         messageId: "b",
         channelId: "ch-2",
         contentHash: "x",
-        timestamp: now - 5000,
+        timestamp: testNow - 5000,
         hasLink: false,
       },
       {
         messageId: "c",
         channelId: "ch-3",
         contentHash: "x",
-        timestamp: now - 1000,
+        timestamp: testNow - 1000,
         hasLink: false,
       },
     ];
     const result = await Effect.runPromise(
-      gatedVelocitySignals(flags, "g1", hopMessages, "new-content", 3),
+      gatedVelocitySignals(flags, "g1", hopMessages, "new-content", 3, {
+        now: () => testNow,
+      }),
     );
     expect(result).toEqual([]);
   });
