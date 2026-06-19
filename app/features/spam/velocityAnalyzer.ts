@@ -10,6 +10,24 @@ const ONE_MINUTE_MS = 60 * 1000;
 const FIVE_MINUTES_MS = 5 * ONE_MINUTE_MS;
 const THIRTY_SECONDS_MS = 30 * 1000;
 
+export const VELOCITY_TUNING = {
+  channelHopFast: { base: 4, threshold: 3, perUnit: 1, bonusCap: 8 }, // range 4–12
+  rapidFire: { base: 3, threshold: 5, perUnit: 1, bonusCap: 5 }, // range 3–8
+  channelHopSlow: { base: 3, threshold: 5, perUnit: 1, bonusCap: 4 }, // range 3–7
+  attachmentBurst: { perUnit: 1, bonusCap: 4 }, // 0–4
+} as const;
+
+/** base + min((count - threshold) * perUnit, bonusCap) — never below base. */
+function scaledScore(
+  base: number,
+  count: number,
+  threshold: number,
+  perUnit: number,
+  bonusCap: number,
+): number {
+  return base + Math.min(Math.max(count - threshold, 0) * perUnit, bonusCap);
+}
+
 /** Count unique channels used within a time window */
 function countChannelsInWindow(
   messages: RecentMessage[],
@@ -63,10 +81,12 @@ function countMessagesInWindow(
  * Analyze velocity signals from recent message history.
  * @param recentMessages - All recent messages for this user in this guild
  * @param currentContentHash - Content hash of the current message being checked
+ * @param attachmentCount - Number of attachments on the current message
  */
 export function analyzeVelocity(
   recentMessages: RecentMessage[],
   currentContentHash: string,
+  attachmentCount = 0,
 ): SpamSignal[] {
   const signals: SpamSignal[] = [];
   const now = Date.now();
@@ -99,7 +119,13 @@ export function analyzeVelocity(
   if (channelsIn60s >= 3) {
     signals.push({
       name: "channel_hop_fast",
-      score: 4,
+      score: scaledScore(
+        VELOCITY_TUNING.channelHopFast.base,
+        channelsIn60s,
+        VELOCITY_TUNING.channelHopFast.threshold,
+        VELOCITY_TUNING.channelHopFast.perUnit,
+        VELOCITY_TUNING.channelHopFast.bonusCap,
+      ),
       description: `${channelsIn60s} channels in 60 seconds`,
     });
   }
@@ -114,7 +140,13 @@ export function analyzeVelocity(
   if (channelsIn5m >= 5 && channelsIn60s < 3) {
     signals.push({
       name: "channel_hop_slow",
-      score: 3,
+      score: scaledScore(
+        VELOCITY_TUNING.channelHopSlow.base,
+        channelsIn5m,
+        VELOCITY_TUNING.channelHopSlow.threshold,
+        VELOCITY_TUNING.channelHopSlow.perUnit,
+        VELOCITY_TUNING.channelHopSlow.bonusCap,
+      ),
       description: `${channelsIn5m} channels in 5 minutes`,
     });
   }
@@ -143,11 +175,27 @@ export function analyzeVelocity(
   if (messagesIn30s >= 5) {
     signals.push({
       name: "rapid_fire",
-      score: 3,
+      score: scaledScore(
+        VELOCITY_TUNING.rapidFire.base,
+        messagesIn30s,
+        VELOCITY_TUNING.rapidFire.threshold,
+        VELOCITY_TUNING.rapidFire.perUnit,
+        VELOCITY_TUNING.rapidFire.bonusCap,
+      ),
       description: `${messagesIn30s} messages in 30 seconds`,
     });
   }
 
+  if (attachmentCount > 0 && signals.length > 0) {
+    signals.push({
+      name: "attachment_burst",
+      score: Math.min(
+        attachmentCount * VELOCITY_TUNING.attachmentBurst.perUnit,
+        VELOCITY_TUNING.attachmentBurst.bonusCap,
+      ),
+      description: `${attachmentCount} attachment(s) on flagged message`,
+    });
+  }
   return signals;
 }
 

@@ -191,11 +191,13 @@ export const SpamDetectionServiceLive = Layer.effect(
           const hasLink = hasLinkInContentOrEmbeds(content, message.embeds);
 
           // Record in activity tracker
-          const attachmentIds = Array.from(message.attachments.keys());
+          const attachmentFingerprints = [...message.attachments.values()].map(
+            (a) => `${a.name}:${a.size}:${a.contentType ?? ""}`,
+          );
           const contentHash = buildContentHash(
             content,
             embedText,
-            attachmentIds,
+            attachmentFingerprints,
           );
           recordMessage(tracker, guildId, userId, {
             messageId: message.id,
@@ -227,6 +229,7 @@ export const SpamDetectionServiceLive = Layer.effect(
             guildId,
             recentMessages,
             contentHash,
+            attachmentFingerprints.length,
           );
 
           const allSignals = [
