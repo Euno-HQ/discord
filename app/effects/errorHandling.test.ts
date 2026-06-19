@@ -4,12 +4,14 @@ import { describe, expect, test } from "vitest";
 import {
   escalateExhausted,
   isRetriable,
+  toUserResponse,
   withRetry,
 } from "#~/effects/errorHandling";
 import {
   ForbiddenError,
   RateLimitError,
   TransientError,
+  ValidationError,
 } from "#~/effects/errors";
 
 const transient = () =>
@@ -96,5 +98,39 @@ describe("escalateExhausted", () => {
         expect(maybeFailure.value._tag).toBe("ForbiddenError");
       }
     }
+  });
+});
+
+describe("toUserResponse", () => {
+  test("ForbiddenError → permission guidance, ephemeral", () => {
+    const r = toUserResponse(
+      new ForbiddenError({
+        source: "discord",
+        operation: "ban",
+        cause: new Error("403"),
+      }),
+    );
+    expect(r.ephemeral).toBe(true);
+    expect(r.content.toLowerCase()).toContain("permission");
+  });
+
+  test("ValidationError surfaces the field message", () => {
+    const r = toUserResponse(
+      new ValidationError({ field: "reason", message: "Reason is required" }),
+    );
+    expect(r.content).toContain("Reason is required");
+  });
+
+  test("unknown infra error → generic safe message, never leaks a cause", () => {
+    const r = toUserResponse(
+      new TransientError({
+        source: "discord",
+        operation: "op",
+        status: 500,
+        cause: new Error("secret internal detail"),
+      }),
+    );
+    expect(r.content).not.toContain("secret internal detail");
+    expect(r.content.length).toBeGreaterThan(0);
   });
 });

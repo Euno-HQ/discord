@@ -2,6 +2,7 @@ import { Effect, Schedule } from "effect";
 
 import {
   ServiceUnavailableError,
+  type AppError,
   type DiscordError,
   type RateLimitError,
   type TransientError,
@@ -46,3 +47,50 @@ export const escalateExhausted = <A, R>(
       new ServiceUnavailableError({ source: "discord", lastCause: e }),
     ),
   );
+
+const GENERIC = {
+  content: "Something went wrong handling that. The team has been notified.",
+  ephemeral: true,
+};
+
+export const toUserResponse = (
+  e: AppError,
+): { content: string; ephemeral: boolean } => {
+  switch (e._tag) {
+    case "ForbiddenError":
+      return {
+        content:
+          "I don't have permission to do that. Check my role permissions and try again.",
+        ephemeral: true,
+      };
+    case "ResourceMissingError":
+      return {
+        content: "That target no longer exists.",
+        ephemeral: true,
+      };
+    case "NotAuthorizedError":
+      return {
+        content: "You're not authorized to use that command.",
+        ephemeral: true,
+      };
+    case "ValidationError":
+      return { content: e.message, ephemeral: true };
+    case "FeatureDisabledError":
+      return {
+        content: "That feature isn't enabled for this server.",
+        ephemeral: true,
+      };
+    case "RateLimitError":
+    case "TransientError":
+    case "ServiceUnavailableError":
+      return {
+        content:
+          "Discord is having trouble right now — please try again shortly.",
+        ephemeral: true,
+      };
+    // ClientError, ServerError, ConfigError, SqlError, DatabaseCorruptionError,
+    // NotFoundError, AlreadyResolvedError, NoLeaderError, ResolutionExecutionError
+    default:
+      return GENERIC;
+  }
+};
