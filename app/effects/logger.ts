@@ -3,12 +3,21 @@ import { Cause, FiberId, Logger } from "effect";
 import { errorReplacer } from "#~/helpers/formatError";
 
 /**
- * JSON logger that preserves Error causes. Effect's built-in `Logger.json`
- * pre-collapses each annotation value through `Inspectable.toJSON`, which turns
- * a native Error into `{}` before serialization — losing message/stack/cause.
+ * JSON logger that preserves Error causes in annotation values. Effect's
+ * built-in `Logger.json` pre-collapses each annotation value through
+ * `Inspectable.toJSON`, which turns a native Error into `{}` before
+ * serialization — losing message/stack/cause.
  *
  * This logger keeps annotation values raw and serializes the whole record with
- * `errorReplacer`, so native Errors and tagged-error causes serialize fully.
+ * `errorReplacer`, so native Errors and tagged errors passed as annotation
+ * values (e.g. `Effect.annotateLogs({ error })`) serialize fully with their
+ * `_tag`, fields, and nested cause.
+ *
+ * The fiber-level `cause` field (from a failed effect surfacing in
+ * `options.cause`) is rendered as a human-readable string via
+ * `Cause.pretty(cause, { renderErrorCause: true })`, matching `Logger.json`'s
+ * behavior — it is NOT run through `errorReplacer`.
+ *
  * Output shape matches `Logger.json` (message/logLevel/timestamp/cause/
  * annotations/spans/fiberId) so log consumers are unaffected.
  */
