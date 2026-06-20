@@ -58,24 +58,11 @@ export const toUserResponse = (
 ): { content: string; ephemeral: boolean } => {
   switch (e._tag) {
     case "ForbiddenError":
-      // Permission failures on member-ban operations are almost always a role-
-      // hierarchy problem; give the actionable hint. Other ForbiddenError
-      // operations fall through to the generic permission message. Add more
-      // operation-specific copy here as outcomes need more precise articulation.
-      if (
-        e.operation === "forceBan" ||
-        e.operation === "ban" ||
-        e.operation === "softbanMember.ban"
-      ) {
-        return {
-          content:
-            "Failed to ban user, try checking the bot's permissions. If they look okay, make sure that the bot's role is near the top of the roles list — bots can't ban users with roles above their own.",
-          ephemeral: true,
-        };
-      }
+      // Any permission failure: point at /check-requirements and the most common
+      // cause (the bot's role sitting below the target in the role hierarchy).
       return {
         content:
-          "I don't have permission to do that. Check my role permissions and try again.",
+          "This failed because of a permissions error, please use the `/check-requirements` command to verify permissions.\n\nIf requirements are met, make sure that the bot's role is near the top of the roles list — [bots can't ban users with roles above their own](https://support.discord.com/hc/en-us/articles/214836687-Discord-Roles-and-Permissions#h_01JJ7FF0ES91KDVXNT9MQ6FQTC).",
         ephemeral: true,
       };
     case "ResourceMissingError":

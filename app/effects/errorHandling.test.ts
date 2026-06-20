@@ -102,7 +102,7 @@ describe("escalateExhausted", () => {
 });
 
 describe("toUserResponse", () => {
-  test("ForbiddenError on ban → role-hierarchy hint, ephemeral", () => {
+  test("ForbiddenError → permission guidance with hierarchy hint, ephemeral", () => {
     const r = toUserResponse(
       new ForbiddenError({
         source: "discord",
@@ -111,58 +111,27 @@ describe("toUserResponse", () => {
       }),
     );
     expect(r.ephemeral).toBe(true);
-    expect(r.content.toLowerCase()).toContain("roles list");
-  });
-
-  test("ForbiddenError on forceBan → role-hierarchy hint, ephemeral", () => {
-    const r = toUserResponse(
-      new ForbiddenError({
-        source: "discord",
-        operation: "forceBan",
-        cause: new Error("403"),
-      }),
-    );
-    expect(r.ephemeral).toBe(true);
-    expect(r.content.toLowerCase()).toContain("roles list");
-  });
-
-  test("ForbiddenError on softbanMember.ban → role-hierarchy hint, ephemeral", () => {
-    const r = toUserResponse(
-      new ForbiddenError({
-        source: "discord",
-        operation: "softbanMember.ban",
-        cause: new Error("403"),
-      }),
-    );
-    expect(r.ephemeral).toBe(true);
-    expect(r.content.toLowerCase()).toContain("roles list");
-  });
-
-  test("ForbiddenError → generic permission guidance, ephemeral", () => {
-    const r = toUserResponse(
-      new ForbiddenError({
-        source: "discord",
-        operation: "kick",
-        cause: new Error("403"),
-      }),
-    );
-    expect(r.ephemeral).toBe(true);
     expect(r.content.toLowerCase()).toContain("permission");
-    expect(r.content.toLowerCase()).not.toContain("roles list");
+    expect(r.content.toLowerCase()).toContain("roles list");
+    expect(r.content).toContain("/check-requirements");
   });
 
-  test("ForbiddenError on non-ban operation → generic permission message, no hierarchy hint", () => {
-    const r = toUserResponse(
+  test("ForbiddenError message is operation-agnostic (same copy for every operation)", () => {
+    const ban = toUserResponse(
+      new ForbiddenError({
+        source: "discord",
+        operation: "ban",
+        cause: new Error("403"),
+      }),
+    );
+    const nonBan = toUserResponse(
       new ForbiddenError({
         source: "discord",
         operation: "createChannel",
         cause: new Error("403"),
       }),
     );
-    expect(r.ephemeral).toBe(true);
-    expect(r.content.toLowerCase()).toContain("permission");
-    // The role-hierarchy hint ("roles list", "roles above their own") must NOT appear
-    expect(r.content.toLowerCase()).not.toContain("roles list");
+    expect(nonBan.content).toBe(ban.content);
   });
 
   test("ValidationError surfaces the field message", () => {
