@@ -47,9 +47,9 @@ export async function action({ request }: Route.ActionArgs) {
 
   return initOauthLogin({
     request,
-    // redirectTo is FormDataEntryValue (string | File); File has no meaningful
-    // toString, but in practice this field is always a string from the form.
-    // eslint-disable-next-line @typescript-eslint/no-base-to-string
-    redirectTo: redirectTo?.toString() ?? "/app",
+    // redirectTo is FormDataEntryValue (string | File); in practice this field is
+    // always a string from the form. Narrow rather than stringify so a stray File
+    // falls back to "/app" instead of "[object File]".
+    redirectTo: typeof redirectTo === "string" ? redirectTo : "/app",
   });
 }
