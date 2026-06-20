@@ -122,6 +122,8 @@ effect.pipe(
 Discord transport errors live in `app/effects/errors.ts` and are named by the
 decision they drive, not by HTTP family:
 
+`type DiscordError` is the union of the six transport/classifier outputs below (excludes `ServiceUnavailableError`, which is an escalation product):
+
 | Tag | Decision |
 |---|---|
 | `RateLimitError` | Retriable — carries `retryAfterMs` for observability |
@@ -130,9 +132,13 @@ decision they drive, not by HTTP family:
 | `ResourceMissingError` | Non-retriable — target gone; frequently recover-as-success |
 | `ClientError` | Non-retriable — other 4xx |
 | `ServerError` | Non-retriable, permanent 5xx — named slot, no classifier branch emits it yet |
+
+`ServiceUnavailableError` is separate — an escalation product from `escalateExhausted`, NOT emitted by `classifyDiscordError`, NOT a member of `DiscordError`:
+
+| Tag | Decision |
+|---|---|
 | `ServiceUnavailableError` | Escalated outage — exhausted retriable failure, carries `lastCause` |
 
-`type DiscordError` is the union of the six transport errors.
 `type AppError` is the app-wide union (DiscordError + domain errors + SqlError +
 `Cause.UnknownException`) used for `toUserResponse` exhaustiveness.
 
@@ -160,7 +166,8 @@ if (isDiscordError(e)) { ... }
 if (isRetriable(e)) { ... }
 
 // Retry transient failures with capped exponential backoff (base 200ms, ×2,
-// jittered, 4 total attempts) — uses Schedule.exponential + jittered + recurs:
+// jittered) — Schedule.exponential("200 millis", 2) |> jittered |>
+// compose(recurs(3)) = 1 initial attempt + 3 retries = 4 total:
 yield* tryDiscord("op", fn).pipe(withRetry);
 
 // Map a surviving retriable failure to ServiceUnavailableError (alert path):
