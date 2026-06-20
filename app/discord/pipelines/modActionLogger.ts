@@ -2,6 +2,11 @@
 import { Effect, Stream } from "effect";
 
 import type { RuntimeContext } from "#~/AppRuntime";
+import {
+  logAutomodRuleCreate,
+  logAutomodRuleDelete,
+  logAutomodRuleUpdate,
+} from "#~/commands/report/automodRuleLog";
 // Import the existing Effect builders from the old file
 import {
   automodActionEffect,
@@ -10,11 +15,6 @@ import {
   memberRemoveEffect,
   memberUpdateEffect,
 } from "#~/commands/report/modActionLogger";
-import {
-  logAutomodRuleCreate,
-  logAutomodRuleDelete,
-  logAutomodRuleUpdate,
-} from "#~/commands/report/automodRuleLog";
 import { DiscordEventBus } from "#~/discord/eventBus";
 import { logEffect } from "#~/effects/observability";
 
@@ -65,7 +65,7 @@ export const modActionLoggerPipeline: Effect.Effect<
         Effect.catchAll((err) =>
           logEffect("warn", "ModActionLogger", "Pipeline handler failed", {
             eventType: e.type,
-            error: String(err),
+            error: err,
           }),
         ),
       );

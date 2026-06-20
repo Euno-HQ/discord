@@ -2,7 +2,7 @@ import { formatDistanceToNowStrict } from "date-fns";
 import { type MessageCreateOptions } from "discord.js";
 import { Effect } from "effect";
 
-import { DiscordApiError } from "#~/effects/errors";
+import { TransientError } from "#~/effects/errors";
 import {
   constructDiscordLink,
   getMessageContent,
@@ -30,7 +30,8 @@ export const constructLog = ({
     const lastReport = logs.at(-1);
     if (!lastReport?.message.guild) {
       return yield* Effect.fail(
-        new DiscordApiError({
+        new TransientError({
+          source: "discord",
           operation: "constructLog",
           cause: new Error(
             "Something went wrong when trying to retrieve last report",
@@ -48,7 +49,8 @@ export const constructLog = ({
     // This should never be possible but we gotta satisfy types
     if (!moderator) {
       return yield* Effect.fail(
-        new DiscordApiError({
+        new TransientError({
+          source: "discord",
           operation: "constructLog",
           cause: new Error("No role configured to be used as moderator"),
         }),

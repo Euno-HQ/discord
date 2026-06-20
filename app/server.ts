@@ -46,7 +46,7 @@ import { runJobRunner } from "#~/jobs/jobRunner";
 
 import { runEffect, runtime } from "./AppRuntime";
 import { checkpointWal, runIntegrityCheck } from "./Database";
-import { DiscordApiError } from "./effects/errors";
+import { tryDiscord } from "./effects/classifyDiscordError";
 import { logEffect } from "./effects/observability";
 import { initializeGroups } from "./effects/posthog";
 import { botStats } from "./helpers/metrics";
@@ -129,11 +129,7 @@ const startup = Effect.gen(function* () {
   if (!globalThis.__discordOneTimeSetupDone) {
     globalThis.__discordOneTimeSetupDone = true;
 
-    yield* Effect.tryPromise({
-      try: () => deployCommands(discordClient),
-      catch: (error) =>
-        new DiscordApiError({ operation: "init", cause: error }),
-    });
+    yield* tryDiscord("init", () => deployCommands(discordClient));
 
     // Message cache expiration (was inside startDeletionLogging, now standalone)
     startMessageCacheExpiration(() =>
@@ -149,7 +145,7 @@ const startup = Effect.gen(function* () {
               "MessageCacheExpiration",
               "Expiration run failed",
               {
-                error: String(e),
+                error: e,
               },
             ),
           ),

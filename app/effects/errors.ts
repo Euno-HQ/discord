@@ -1,4 +1,6 @@
-import { Data } from "effect";
+import { Data, type Cause } from "effect";
+
+import type { SqlError as SqlErrorType } from "@effect/sql/SqlError";
 
 // Re-export SQL errors from @effect/sql for convenience
 export { SqlError, ResultLengthMismatch } from "@effect/sql/SqlError";
@@ -7,18 +9,6 @@ export class NotAuthorizedError extends Data.TaggedError("NotAuthorizedError")<{
   operation: string;
   userId: string;
   requiredRole?: string;
-}> {}
-
-// TODO: refine
-export class DiscordApiError extends Data.TaggedError("DiscordApiError")<{
-  operation: string;
-  cause: unknown;
-}> {}
-
-// TODO: refine
-export class StripeApiError extends Data.TaggedError("StripeApiError")<{
-  operation: string;
-  cause: unknown;
 }> {}
 
 export class NotFoundError extends Data.TaggedError("NotFoundError")<{
@@ -61,7 +51,7 @@ export class ResolutionExecutionError extends Data.TaggedError(
 )<{
   escalationId: string;
   resolution: string;
-  cause: unknown;
+  cause: Error;
 }> {}
 
 export class FeatureDisabledError extends Data.TaggedError(
@@ -71,3 +61,90 @@ export class FeatureDisabledError extends Data.TaggedError(
   guildId: string;
   reason: "not_in_rollout" | "tier_required" | "flag_unavailable";
 }> {}
+
+// --- Infra error taxonomy (named by the decision each drives) -------------
+// `cause` is always a serializable Error (narrowed at the classifier boundary).
+
+/** Retriable: rate-limited. Carries the suggested delay for observability. */
+export class RateLimitError extends Data.TaggedError("RateLimitError")<{
+  source: "discord";
+  operation: string;
+  retryAfterMs: number;
+  cause: Error;
+}> {}
+
+/** Retriable: transient 5xx / network fault. */
+export class TransientError extends Data.TaggedError("TransientError")<{
+  source: "discord";
+  operation: string;
+  status?: number;
+  cause: Error;
+}> {}
+
+/** Non-retriable 403: the bot lacks a Discord permission. */
+export class ForbiddenError extends Data.TaggedError("ForbiddenError")<{
+  source: "discord";
+  operation: string;
+  cause: Error;
+}> {}
+
+/** Non-retriable 404: target gone — frequently recover-as-success. */
+export class ResourceMissingError extends Data.TaggedError(
+  "ResourceMissingError",
+)<{
+  source: "discord";
+  operation: string;
+  cause: Error;
+}> {}
+
+/** Non-retriable, generic 4xx (not 403/404). */
+export class ClientError extends Data.TaggedError("ClientError")<{
+  source: "discord";
+  operation: string;
+  status: number;
+  code?: number | string;
+  cause: Error;
+}> {}
+
+/** Non-retriable, permanent 5xx. Named slot — no classifier branch emits it yet. */
+export class ServerError extends Data.TaggedError("ServerError")<{
+  source: "discord";
+  operation: string;
+  status: number;
+  cause: Error;
+}> {}
+
+/** Escalated outage: exhausted retriable failure → alert path. */
+export class ServiceUnavailableError extends Data.TaggedError(
+  "ServiceUnavailableError",
+)<{
+  source: "discord";
+  lastCause: DiscordError;
+}> {}
+
+/** Union of transport errors the classifier can produce. */
+export type DiscordError =
+  | RateLimitError
+  | TransientError
+  | ForbiddenError
+  | ResourceMissingError
+  | ClientError
+  | ServerError;
+
+/** App-wide union for `toUserResponse` exhaustiveness. */
+export type AppError =
+  | DiscordError
+  | ServiceUnavailableError
+  | NotAuthorizedError
+  | NotFoundError
+  | ValidationError
+  | ConfigError
+  | DatabaseCorruptionError
+  | AlreadyResolvedError
+  | NoLeaderError
+  | ResolutionExecutionError
+  | FeatureDisabledError
+  | SqlErrorType
+  /** Effect.tryPromise wraps thrown exceptions in UnknownException; command-level
+   *  catchAll blocks see this whenever a raw promise rejects with an untyped error. */
+  | Cause.UnknownException;

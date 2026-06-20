@@ -31,7 +31,7 @@ export const onboardGuildPipeline: Effect.Effect<void, never, RuntimeContext> =
           Effect.catchAll((err) =>
             logEffect("warn", "OnboardGuild", "Pipeline handler failed", {
               eventType: e.type,
-              error: String(err),
+              error: err,
             }),
           ),
         );

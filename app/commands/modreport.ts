@@ -12,8 +12,10 @@ import {
   interactionDeferReply,
   interactionEditReply,
 } from "#~/effects/discordSdk.ts";
+import { toUserResponse } from "#~/effects/errorHandling";
 import { logEffect } from "#~/effects/observability.ts";
 import type { SlashCommand } from "#~/helpers/discord";
+import { formatError } from "#~/helpers/formatError";
 import { commandStats } from "#~/helpers/metrics";
 import { truncateMessage } from "#~/helpers/string";
 import { getDeletionLogThread } from "#~/models/deletionLogThreads";
@@ -296,18 +298,21 @@ export const Command = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
-
           yield* logEffect("error", "Commands", "Modreport command failed", {
             guildId: interaction.guildId,
             userId: interaction.user.id,
-            error: err,
+            error,
           });
 
-          commandStats.commandFailed(interaction, "modreport", err.message);
+          commandStats.commandFailed(
+            interaction,
+            "modreport",
+            formatError(error),
+          );
 
+          const reply = toUserResponse(error);
           yield* interactionEditReply(interaction, {
-            content: "Failed to fetch moderation summary.",
+            content: reply.content,
           }).pipe(Effect.catchAll(() => Effect.void));
         }),
       ),

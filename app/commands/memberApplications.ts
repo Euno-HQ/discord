@@ -19,12 +19,13 @@ import { Effect } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
 import { ssrDiscordSdk as rest } from "#~/discord/api";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import {
   fetchChannel,
   interactionReply,
   interactionUpdate,
 } from "#~/effects/discordSdk.ts";
-import { DiscordApiError } from "#~/effects/errors.ts";
+import { toUserResponse } from "#~/effects/errorHandling";
 import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
 import {
@@ -394,9 +395,10 @@ export const Command = [
               { error },
             );
 
+            const reply = toUserResponse(error);
             yield* interactionReply(interaction, {
-              content: "Something went wrong while submitting your application",
-              flags: MessageFlags.Ephemeral,
+              content: reply.content,
+              flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
             }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
@@ -522,9 +524,10 @@ export const Command = [
               { error },
             );
 
+            const reply = toUserResponse(error);
             yield* interactionReply(interaction, {
-              content: "Something went wrong while approving the application",
-              flags: MessageFlags.Ephemeral,
+              content: reply.content,
+              flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
             }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
@@ -647,9 +650,10 @@ export const Command = [
               { error },
             );
 
+            const reply = toUserResponse(error);
             yield* interactionReply(interaction, {
-              content: "Something went wrong while denying the application",
-              flags: MessageFlags.Ephemeral,
+              content: reply.content,
+              flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
             }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
@@ -819,9 +823,10 @@ export const Command = [
               { error },
             );
 
+            const reply = toUserResponse(error);
             yield* interactionReply(interaction, {
-              content: "Something went wrong while retracting the application",
-              flags: MessageFlags.Ephemeral,
+              content: reply.content,
+              flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
             }).pipe(Effect.catchAll(() => Effect.void));
           }),
         ),
@@ -881,11 +886,9 @@ export const Command = [
         }
 
         // Fetch current role permissions from Discord API
-        const roles = (yield* Effect.tryPromise({
-          try: () => rest.get(Routes.guildRoles(guildId)),
-          catch: (error) =>
-            new DiscordApiError({ operation: "fetchGuildRoles", cause: error }),
-        })) as APIRole[];
+        const roles = (yield* tryDiscord("fetchGuildRoles", () =>
+          rest.get(Routes.guildRoles(guildId)),
+        )) as APIRole[];
 
         const everyoneRole = roles.find((r) => r.id === guildId);
         const memberRole = roles.find((r) => r.id === config.role_id);
@@ -929,28 +932,22 @@ export const Command = [
         });
 
         // Reveal #apply-here to @everyone now that the gate is active
-        yield* Effect.tryPromise({
-          try: () =>
-            rest.put(Routes.channelPermission(config.channel_id, guildId), {
-              body: {
-                type: OverwriteType.Role,
-                allow: String(
-                  PermissionFlagsBits.ViewChannel |
-                    PermissionFlagsBits.ReadMessageHistory,
-                ),
-                deny: String(
-                  PermissionFlagsBits.SendMessages |
-                    PermissionFlagsBits.CreatePublicThreads |
-                    PermissionFlagsBits.CreatePrivateThreads,
-                ),
-              },
-            }),
-          catch: (error) =>
-            new DiscordApiError({
-              operation: "revealApplyHere",
-              cause: error,
-            }),
-        });
+        yield* tryDiscord("revealApplyHere", () =>
+          rest.put(Routes.channelPermission(config.channel_id, guildId), {
+            body: {
+              type: OverwriteType.Role,
+              allow: String(
+                PermissionFlagsBits.ViewChannel |
+                  PermissionFlagsBits.ReadMessageHistory,
+              ),
+              deny: String(
+                PermissionFlagsBits.SendMessages |
+                  PermissionFlagsBits.CreatePublicThreads |
+                  PermissionFlagsBits.CreatePrivateThreads,
+              ),
+            },
+          }),
+        );
 
         // On success: replace the message with confirmation
         yield* interactionUpdate(interaction, {
@@ -977,7 +974,7 @@ export const Command = [
               "Failed to activate gate",
               {
                 guildId: interaction.guildId,
-                error: String(error),
+                error,
               },
             );
             yield* interactionReply(interaction, {

@@ -109,13 +109,105 @@ Catch all errors uniformly:
 effect.pipe(
   Effect.catchAll((error) =>
     logEffect("error", "Handler", "Operation failed", {
-      error: String(error),
+      error,
     }),
   ),
 );
 ```
 
 **See:** `app/effects/errors.ts` for all error types
+
+#### Decision-oriented errors (infra taxonomy)
+
+Discord transport errors live in `app/effects/errors.ts` and are named by the
+decision they drive, not by HTTP family:
+
+`type DiscordError` is the union of the six transport/classifier outputs below (excludes `ServiceUnavailableError`, which is an escalation product):
+
+| Tag | Decision |
+|---|---|
+| `RateLimitError` | Retriable — carries `retryAfterMs` for observability |
+| `TransientError` | Retriable — 5xx/network fault, optional `status` |
+| `ForbiddenError` | Non-retriable — bot lacks a Discord permission; give guidance |
+| `ResourceMissingError` | Non-retriable — target gone; frequently recover-as-success |
+| `ClientError` | Non-retriable — other 4xx |
+| `ServerError` | Non-retriable, permanent 5xx — named slot, no classifier branch emits it yet |
+
+`ServiceUnavailableError` is separate — an escalation product from `escalateExhausted`, NOT emitted by `classifyDiscordError`, NOT a member of `DiscordError`:
+
+| Tag | Decision |
+|---|---|
+| `ServiceUnavailableError` | Escalated outage — exhausted retriable failure, carries `lastCause` |
+
+`type AppError` is the app-wide union (DiscordError + domain errors + SqlError +
+`Cause.UnknownException`) used for `toUserResponse` exhaustiveness.
+
+**Classifier boundary** (`app/effects/classifyDiscordError.ts`): the only place
+`instanceof` against `@discordjs/rest` SDK errors is allowed. Converts an
+unknown rejection to a typed `DiscordError`:
+
+```typescript
+// Only place SDK instanceof checks live — the unknown→typed boundary:
+const e: DiscordError = classifyDiscordError("addRole", rejection);
+
+// DRY replacement for Effect.tryPromise({ try, catch }) at every Discord call site:
+yield* tryDiscord("addMemberRole", () =>
+  ssrDiscordSdk.put(Routes.guildMemberRole(guildId, userId, roleId)),
+);
+```
+
+**Decision helpers** (`app/effects/errorHandling.ts`):
+
+```typescript
+// Membership guard over the six DiscordError tags:
+if (isDiscordError(e)) { ... }
+
+// Retriable predicate (RateLimitError | TransientError):
+if (isRetriable(e)) { ... }
+
+// Retry transient failures with capped exponential backoff (base 200ms, ×2,
+// jittered) — Schedule.exponential("200 millis", 2) |> jittered |>
+// compose(recurs(3)) = 1 initial attempt + 3 retries = 4 total:
+yield* tryDiscord("op", fn).pipe(withRetry);
+
+// Map a surviving retriable failure to ServiceUnavailableError (alert path):
+yield* tryDiscord("op", fn).pipe(withRetry, escalateExhausted);
+
+// Pure, total mapper from any AppError tag to safe user copy:
+const reply = toUserResponse(e); // { content: string; ephemeral: boolean }
+```
+
+**Before / after — job: retry transient, drop member-gone**
+(`app/jobs/bulkRoleAssignment.ts`)
+
+```typescript
+// before: log-and-drop every failure, no distinction
+// after:
+yield* tryDiscord("addMemberRole", () => ssrDiscordSdk.put(...)).pipe(
+  withRetry,                                            // RateLimit/Transient retried
+  Effect.catchTag("ResourceMissingError", () => Effect.void), // member gone → fine
+  Effect.exit,
+);
+// NOTE: escalateExhausted is NOT used here — one member's outage must not abort
+// a 100k-member migration. escalateExhausted suits command handlers where a
+// single failure IS the whole outcome.
+```
+
+**Before / after — command handler: structured error → user reply**
+
+```typescript
+// before: ad-hoc generic string
+// after:
+Effect.catchAll((e) =>
+  Effect.all([
+    logEffect("error", "Commands", "Operation failed", { error: e }), // full structured payload
+    interactionReply(interaction, toUserResponse(e)),                  // safe, specific-where-known
+  ]),
+)
+```
+
+**See:** `app/effects/errors.ts` (taxonomy), `app/effects/classifyDiscordError.ts`
+(boundary), `app/effects/errorHandling.ts` (helpers)
 
 ### Parallel Operations
 
@@ -143,7 +235,7 @@ const results = yield* Effect.forEach(due, (escalation) =>
     Effect.catchAll((error) =>
       logEffect("error", "EscalationResolver", "Error processing escalation", {
         escalationId: escalation.id,
-        error: String(error),
+        error,
       }),
     ),
   ),
@@ -294,7 +386,7 @@ export const handleMyCommand = (input: Input) =>
     // DatabaseLayer is provided by the ManagedRuntime — no need to provide it here
     Effect.catchAll((error) =>
       logEffect("error", "MyCommand", "Command failed", {
-        error: String(error),
+        error,
       }),
     ),
     Effect.withSpan("handleMyCommand"),
@@ -517,5 +609,5 @@ unabridged versions of the documentation are
 [indexed here](https://effect.website/llms.txt); you can retrieve a URL with
 more detailed information from there.
 
-For patterns not used in this codebase (Streams, Schedules, etc.), see
+For patterns not used in this codebase (Streams, etc.), see
 [EFFECT_ADVANCED.md](./EFFECT_ADVANCED.md).

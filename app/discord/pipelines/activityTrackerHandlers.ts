@@ -72,7 +72,7 @@ export const handleMessageCreate = (
     Effect.catchAll((err) =>
       logEffect("warn", "ActivityTracker", "Failed to track message", {
         messageId: msg.id,
-        error: String(err),
+        error: err,
       }),
     ),
     Effect.withSpan("ActivityTracker.trackMessage", {
@@ -105,7 +105,7 @@ export const handleMessageUpdate = (
     Effect.catchAll((err) =>
       logEffect("warn", "ActivityTracker", "Failed to update message stats", {
         messageId: e.newMessage.id,
-        error: String(err),
+        error: err,
       }),
     ),
     Effect.withSpan("ActivityTracker.updateMessage", {
@@ -132,7 +132,7 @@ export const handleMessageDelete = (
     Effect.catchAll((err) =>
       logEffect("warn", "ActivityTracker", "Failed to delete message stats", {
         messageId: e.message.id,
-        error: String(err),
+        error: err,
       }),
     ),
     Effect.withSpan("ActivityTracker.deleteMessage", {
@@ -155,7 +155,7 @@ export const handleReactionAdd = (
     Effect.catchAll((err) =>
       logEffect("warn", "ActivityTracker", "Failed to track reaction add", {
         messageId: e.reaction.message.id,
-        error: String(err),
+        error: err,
       }),
     ),
     Effect.withSpan("ActivityTracker.reactionAdd", {
@@ -190,7 +190,7 @@ export const handleReactionRemove = (
     Effect.catchAll((err) =>
       logEffect("warn", "ActivityTracker", "Failed to track reaction remove", {
         messageId: e.reaction.message.id,
-        error: String(err),
+        error: err,
       }),
     ),
     Effect.withSpan("ActivityTracker.reactionRemove", {

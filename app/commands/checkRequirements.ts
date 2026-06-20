@@ -13,13 +13,16 @@ import {
   fetchChannel,
   interactionDeferReply,
   interactionEditReply,
+  interactionReply,
 } from "#~/effects/discordSdk.ts";
+import { toUserResponse } from "#~/effects/errorHandling";
 import { logEffect } from "#~/effects/observability.ts";
 import {
   OPTIONAL_PERMISSIONS,
   REQUIRED_PERMISSIONS,
 } from "#~/helpers/botPermissions";
 import type { SlashCommand } from "#~/helpers/discord";
+import { formatError } from "#~/helpers/formatError";
 import { commandStats } from "#~/helpers/metrics";
 import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
 
@@ -110,7 +113,10 @@ export const Command = {
   handler: (interaction) =>
     Effect.gen(function* () {
       if (!interaction.guild || !interaction.guildId) {
-        yield* Effect.fail(new Error("This command must be used in a server."));
+        yield* interactionReply(interaction, {
+          content: "This command can only be used in a server.",
+          flags: MessageFlags.Ephemeral,
+        });
         return;
       }
 
@@ -494,8 +500,6 @@ export const Command = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
-
           yield* logEffect(
             "error",
             "Commands",
@@ -503,18 +507,19 @@ export const Command = {
             {
               guildId: interaction.guildId,
               userId: interaction.user.id,
-              error: err,
+              error,
             },
           );
 
           commandStats.commandFailed(
             interaction,
             "check-requirements",
-            err.message,
+            formatError(error),
           );
 
+          const reply = toUserResponse(error);
           yield* interactionEditReply(interaction, {
-            content: `Something broke:\n\`\`\`\n${err.toString()}\n\`\`\``,
+            content: reply.content,
           }).pipe(Effect.catchAll(() => Effect.void));
         }),
       ),

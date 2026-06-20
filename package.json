@@ -13,7 +13,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "build": "run-s build:*",
-    "lint": "eslint --no-warn-ignored --cache --cache-location ./node_modules/.cache/eslint .",
+    "lint": "eslint --no-warn-ignored --max-warnings=0 --cache --cache-location ./node_modules/.cache/eslint .",
     "lint:fix": "eslint --no-warn-ignored --fix --max-warnings=0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

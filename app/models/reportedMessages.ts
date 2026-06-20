@@ -5,6 +5,7 @@ import type { Selectable } from "kysely";
 import { DatabaseService } from "#~/Database";
 import type { DB } from "#~/db";
 import { client } from "#~/discord/client.server";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { logEffect } from "#~/effects/observability";
 
 export type ReportedMessage = Selectable<DB["reported_messages"]>;
@@ -531,24 +532,15 @@ const deleteSingleMessage = (
       return { success: false as const, messageId, error: "Channel not found" };
     }
 
-    const result = yield* Effect.tryPromise({
-      try: async () => {
-        const message = await channel.messages.fetch(messageId);
-        await message.delete();
-        return { deleted: true };
-      },
-      catch: (error) => error,
+    const result = yield* tryDiscord("deleteReportedMessage", async () => {
+      const message = await channel.messages.fetch(messageId);
+      await message.delete();
+      return { deleted: true as const };
     }).pipe(
-      Effect.catchAll((error) => {
-        // If message is already deleted, that's fine - mark it as deleted in DB
-        if (
-          error instanceof Error &&
-          error.message.includes("Unknown Message")
-        ) {
-          return Effect.succeed({ deleted: false, alreadyGone: true });
-        }
-        return Effect.fail(error);
-      }),
+      // Message already gone (404) → recover as alreadyGone.
+      Effect.catchTag("ResourceMissingError", () =>
+        Effect.succeed({ deleted: false as const, alreadyGone: true as const }),
+      ),
     );
 
     // Mark as deleted in database
@@ -574,7 +566,7 @@ const deleteSingleMessage = (
           "Failed to delete message",
           {
             messageId,
-            error: error instanceof Error ? error.message : String(error),
+            error,
           },
         );
         return { success: false as const, messageId, error };
