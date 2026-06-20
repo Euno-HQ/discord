@@ -16,6 +16,7 @@ import {
   interactionReply,
   interactionUpdate,
 } from "#~/effects/discordSdk.ts";
+import { toUserResponse } from "#~/effects/errorHandling";
 import { logEffect } from "#~/effects/observability.ts";
 import { webBaseUrl } from "#~/helpers/env.server";
 import {
@@ -277,9 +278,12 @@ export const EscalationHandlers = {
           error,
         }).pipe(
           Effect.zipRight(
-            interactionEditReply(interaction, {
-              content: "Failed to delete messages",
-            }).pipe(Effect.catchAll(() => Effect.void)),
+            Effect.suspend(() => {
+              const reply = toUserResponse(error);
+              return interactionEditReply(interaction, {
+                content: reply.content,
+              }).pipe(Effect.catchAll(() => Effect.void));
+            }),
           ),
         ),
       ),
@@ -305,10 +309,13 @@ export const EscalationHandlers = {
           error,
         }).pipe(
           Effect.zipRight(
-            interactionReply(interaction, {
-              content: "Failed to kick user",
-              flags: [MessageFlags.Ephemeral],
-            }).pipe(Effect.catchAll(() => Effect.void)),
+            Effect.suspend(() => {
+              const reply = toUserResponse(error);
+              return interactionReply(interaction, {
+                content: reply.content,
+                flags: reply.ephemeral ? [MessageFlags.Ephemeral] : undefined,
+              }).pipe(Effect.catchAll(() => Effect.void));
+            }),
           ),
         ),
       ),
@@ -347,10 +354,13 @@ export const EscalationHandlers = {
           error,
         }).pipe(
           Effect.zipRight(
-            interactionReply(interaction, {
-              content: "Failed to ban user",
-              flags: [MessageFlags.Ephemeral],
-            }).pipe(Effect.catchAll(() => Effect.void)),
+            Effect.suspend(() => {
+              const reply = toUserResponse(error);
+              return interactionReply(interaction, {
+                content: reply.content,
+                flags: reply.ephemeral ? [MessageFlags.Ephemeral] : undefined,
+              }).pipe(Effect.catchAll(() => Effect.void));
+            }),
           ),
         ),
       ),
@@ -386,10 +396,13 @@ export const EscalationHandlers = {
           { error },
         ).pipe(
           Effect.zipRight(
-            interactionReply(interaction, {
-              content: "Failed to ban user and delete messages",
-              flags: [MessageFlags.Ephemeral],
-            }).pipe(Effect.catchAll(() => Effect.void)),
+            Effect.suspend(() => {
+              const reply = toUserResponse(error);
+              return interactionReply(interaction, {
+                content: reply.content,
+                flags: reply.ephemeral ? [MessageFlags.Ephemeral] : undefined,
+              }).pipe(Effect.catchAll(() => Effect.void));
+            }),
           ),
         ),
       ),
@@ -422,10 +435,13 @@ export const EscalationHandlers = {
           error,
         }).pipe(
           Effect.zipRight(
-            interactionReply(interaction, {
-              content: "Failed to restrict user",
-              flags: [MessageFlags.Ephemeral],
-            }).pipe(Effect.catchAll(() => Effect.void)),
+            Effect.suspend(() => {
+              const reply = toUserResponse(error);
+              return interactionReply(interaction, {
+                content: reply.content,
+                flags: reply.ephemeral ? [MessageFlags.Ephemeral] : undefined,
+              }).pipe(Effect.catchAll(() => Effect.void));
+            }),
           ),
         ),
       ),
@@ -458,10 +474,13 @@ export const EscalationHandlers = {
           error,
         }).pipe(
           Effect.zipRight(
-            interactionReply(interaction, {
-              content: "Failed to timeout user",
-              flags: [MessageFlags.Ephemeral],
-            }).pipe(Effect.catchAll(() => Effect.void)),
+            Effect.suspend(() => {
+              const reply = toUserResponse(error);
+              return interactionReply(interaction, {
+                content: reply.content,
+                flags: reply.ephemeral ? [MessageFlags.Ephemeral] : undefined,
+              }).pipe(Effect.catchAll(() => Effect.void));
+            }),
           ),
         ),
       ),

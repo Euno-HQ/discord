@@ -102,7 +102,7 @@ describe("escalateExhausted", () => {
 });
 
 describe("toUserResponse", () => {
-  test("ForbiddenError → permission guidance, ephemeral", () => {
+  test("ForbiddenError on ban → role-hierarchy hint, ephemeral", () => {
     const r = toUserResponse(
       new ForbiddenError({
         source: "discord",
@@ -111,7 +111,7 @@ describe("toUserResponse", () => {
       }),
     );
     expect(r.ephemeral).toBe(true);
-    expect(r.content.toLowerCase()).toContain("permission");
+    expect(r.content.toLowerCase()).toContain("roles list");
   });
 
   test("ForbiddenError on forceBan → role-hierarchy hint, ephemeral", () => {
@@ -123,7 +123,32 @@ describe("toUserResponse", () => {
       }),
     );
     expect(r.ephemeral).toBe(true);
-    expect(r.content.toLowerCase()).toContain("role");
+    expect(r.content.toLowerCase()).toContain("roles list");
+  });
+
+  test("ForbiddenError on softbanMember.ban → role-hierarchy hint, ephemeral", () => {
+    const r = toUserResponse(
+      new ForbiddenError({
+        source: "discord",
+        operation: "softbanMember.ban",
+        cause: new Error("403"),
+      }),
+    );
+    expect(r.ephemeral).toBe(true);
+    expect(r.content.toLowerCase()).toContain("roles list");
+  });
+
+  test("ForbiddenError → generic permission guidance, ephemeral", () => {
+    const r = toUserResponse(
+      new ForbiddenError({
+        source: "discord",
+        operation: "kick",
+        cause: new Error("403"),
+      }),
+    );
+    expect(r.ephemeral).toBe(true);
+    expect(r.content.toLowerCase()).toContain("permission");
+    expect(r.content.toLowerCase()).not.toContain("roles list");
   });
 
   test("ForbiddenError on non-ban operation → generic permission message, no hierarchy hint", () => {
