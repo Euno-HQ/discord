@@ -1,6 +1,7 @@
 import { Routes, type APIGuild } from "discord-api-types/v10";
 import { Link, useFetcher, useSearchParams } from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
 import { Page } from "#~/basics/page.js";
 import { ssrDiscordSdk } from "#~/discord/api.js";
 import {
@@ -37,7 +38,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Fetch bot guilds and all subscriptions in parallel
   const [rawBotGuilds, subscriptions] = await Promise.all([
     ssrDiscordSdk.get(Routes.userGuilds()) as Promise<APIGuild[]>,
-    SubscriptionService.getAllSubscriptions(),
+    runEffect(SubscriptionService.getAllSubscriptions()),
   ]);
 
   const subscriptionsByGuildId = new Map(

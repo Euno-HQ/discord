@@ -11,7 +11,13 @@ import {
   type RESTPostAPIGuildChannelJSONBody,
 } from "discord-api-types/v10";
 
-import { db, isFeatureEnabled, run, runTakeFirst } from "#~/AppRuntime";
+import {
+  db,
+  isFeatureEnabled,
+  run,
+  runEffect,
+  runTakeFirst,
+} from "#~/AppRuntime";
 import { DEFAULT_MESSAGE_TEXT } from "#~/commands/setupHoneypot";
 import { DEFAULT_BUTTON_TEXT } from "#~/commands/setupTickets";
 import { ssrDiscordSdk } from "#~/discord/api";
@@ -421,7 +427,7 @@ export async function setupAll(
   }
 
   // --- Initialize free subscription ---
-  await SubscriptionService.initializeFreeSubscription(guildId);
+  await runEffect(SubscriptionService.initializeFreeSubscription(guildId));
 
   log("info", "setupAll", "Setup-all completed via web", {
     guildId,

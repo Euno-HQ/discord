@@ -52,9 +52,9 @@ export const syncGuildGroup = (guildId: string, guild?: Guild) =>
     const posthog = yield* PostHogService;
     if (!posthog) return;
 
-    const sub = yield* Effect.tryPromise(() =>
-      SubscriptionService.getGuildSubscription(guildId),
-    ).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    const sub = yield* SubscriptionService.getGuildSubscription(guildId).pipe(
+      Effect.catchAll(() => Effect.succeed(null)),
+    );
 
     // Best-effort projection: a PostHog failure must never reject the caller.
     // syncGuildGroup runs inside Stripe webhook handlers and the payment-success

@@ -1,6 +1,6 @@
 import { data, Link, useLoaderData } from "react-router";
 
-import { db, run } from "#~/AppRuntime";
+import { db, run, runEffect } from "#~/AppRuntime";
 import { Sparkline } from "#~/components/Sparkline";
 import { ssrDiscordSdk, userDiscordSdkFromRequest } from "#~/discord/api";
 import { getCachedGuilds } from "#~/helpers/guildCache.server";
@@ -106,7 +106,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     ),
 
     // Subscription tier
-    SubscriptionService.getProductTier(guildId),
+    runEffect(SubscriptionService.getProductTier(guildId)),
   ]);
 
   // Build sparkline array (30 days, zero-filled)

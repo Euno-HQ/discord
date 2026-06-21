@@ -346,7 +346,7 @@ export async function completeOauthLogin(request: Request) {
   // Handle bot installation flows
   if (flow !== "user" && guildId) {
     // Initialize free subscription for the guild
-    await SubscriptionService.initializeFreeSubscription(guildId);
+    await runEffect(SubscriptionService.initializeFreeSubscription(guildId));
   }
 
   // dbState already checked earlier
