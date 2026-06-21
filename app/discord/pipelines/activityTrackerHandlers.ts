@@ -1,7 +1,8 @@
 import { ChannelType } from "discord.js";
 import { Effect } from "effect";
 
-import { db, type RuntimeContext } from "#~/AppRuntime";
+import { type RuntimeContext } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
 import type {
   GuildMemberMessage,
   GuildMessageDelete,
@@ -40,8 +41,9 @@ export const handleMessageCreate = (
   }
 
   return Effect.gen(function* () {
+    const db = yield* DatabaseService;
     const info = yield* getMessageStats(msg);
-    const channelInfo = yield* Effect.promise(() => getOrFetchChannel(msg));
+    const channelInfo = yield* getOrFetchChannel(msg);
 
     yield* db.insertInto("message_stats").values({
       ...info,
@@ -85,6 +87,7 @@ export const handleMessageUpdate = (
   e: GuildMessageUpdate,
 ): Effect.Effect<void, unknown, RuntimeContext> =>
   Effect.gen(function* () {
+    const db = yield* DatabaseService;
     const info = yield* getMessageStats(e.newMessage);
 
     yield* db
@@ -121,6 +124,7 @@ export const handleMessageDelete = (
   }
 
   return Effect.gen(function* () {
+    const db = yield* DatabaseService;
     yield* db
       .deleteFrom("message_stats")
       .where("message_id", "=", e.message.id);
@@ -145,6 +149,7 @@ export const handleReactionAdd = (
   e: MessageReactionAddEvent,
 ): Effect.Effect<void, unknown, RuntimeContext> =>
   Effect.gen(function* () {
+    const db = yield* DatabaseService;
     yield* db
       .updateTable("message_stats")
       .where("message_id", "=", e.reaction.message.id)
@@ -170,6 +175,7 @@ export const handleReactionRemove = (
   e: MessageReactionRemoveEvent,
 ): Effect.Effect<void, unknown, RuntimeContext> =>
   Effect.gen(function* () {
+    const db = yield* DatabaseService;
     yield* db
       .updateTable("message_stats")
       .where("message_id", "=", e.reaction.message.id)

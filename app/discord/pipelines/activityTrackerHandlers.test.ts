@@ -3,6 +3,8 @@ import { ChannelType } from "discord.js";
 import { Context, Effect, Layer } from "effect";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { DatabaseService } from "#~/Database";
+
 import {
   handleMessageCreate,
   handleMessageDelete,
@@ -32,10 +34,6 @@ const mockDeleteFrom = vi.fn().mockReturnValue({
 vi.mock("#~/AppRuntime", () => ({
   runEffect: vi.fn(),
   RuntimeContext: {},
-  db: {
-    insertInto: (...args: any[]) => mockInsertInto(...args),
-    deleteFrom: (...args: any[]) => mockDeleteFrom(...args),
-  },
 }));
 
 vi.mock("#~/helpers/discord.js", () => ({
@@ -57,7 +55,7 @@ vi.mock("#~/helpers/discord.js", () => ({
 }));
 
 vi.mock("#~/discord/utils", () => ({
-  getOrFetchChannel: vi.fn().mockResolvedValue({ category: "general" }),
+  getOrFetchChannel: vi.fn(() => Effect.succeed({ category: "general" })),
 }));
 
 vi.mock("#~/helpers/metrics", () => ({
@@ -66,9 +64,20 @@ vi.mock("#~/helpers/metrics", () => ({
 
 // --- Helpers ---
 
+// Only insertInto + deleteFrom are exercised by the two tested handlers
+// (handleMessageCreate / handleMessageDelete). Do NOT add updateTable here —
+// the reaction/update handlers aren't tested and an unused mock trips lint.
+const mockDb = {
+  insertInto: (...args: any[]) => mockInsertInto(...args),
+  deleteFrom: (...args: any[]) => mockDeleteFrom(...args),
+};
+
 const runHandler = (effect: Effect.Effect<void, unknown, any>) =>
-  // @ts-expect-error - test mock: RuntimeContext services are vi.mocked
-  Effect.runPromise(effect);
+  Effect.runPromise(
+    effect.pipe(
+      Effect.provide(Layer.succeed(DatabaseService, mockDb as any)),
+    ) as Effect.Effect<void, unknown, never>,
+  );
 
 const makeCreateEvent = (overrides: any = {}) => ({
   type: "GuildMemberMessage" as const,
