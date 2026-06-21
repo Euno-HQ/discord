@@ -32,9 +32,8 @@ import {
 } from "#~/helpers/discord";
 import { webBaseUrl } from "#~/helpers/env.server";
 import { featureStats } from "#~/helpers/metrics";
+import { DEFAULT_BUTTON_TEXT } from "#~/helpers/setupDefaults";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
-
-export const DEFAULT_BUTTON_TEXT = "Open a private ticket with the moderators";
 
 export const Command = [
   {

@@ -12,9 +12,7 @@ import { interactionReply, sendMessage } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import type { SlashCommand } from "#~/helpers/discord.js";
 import { featureStats } from "#~/helpers/metrics";
-
-export const DEFAULT_MESSAGE_TEXT =
-  "This channel is used to catch spambots. Do not send a message in this channel or you will be kicked automatically.";
+import { DEFAULT_MESSAGE_TEXT } from "#~/helpers/setupDefaults";
 
 export const Command = [
   {
