@@ -29,6 +29,7 @@
     "prepare": "husky || true",
     "typecheck": "react-router typegen && tsc -b",
     "build:app": "react-router build",
+    "check:client-bundle": "node --experimental-strip-types scripts/check-client-bundle.ts",
     "dev:init": "run-s start:migrate kysely:seed generate:db-types",
     "dev:bot": "node --enable-source-maps --trace-warnings index.dev.js",
     "dev:web": "node --enable-source-maps --trace-warnings index.dev.js",
