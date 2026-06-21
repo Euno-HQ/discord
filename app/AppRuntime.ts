@@ -70,6 +70,13 @@ const NOT_WARMED =
  * Resolve the PostHog client and DB connection once. Called at the process
  * entry point (app/server.ts) before any request/event is served. Idempotent,
  * so HMR re-execution is safe.
+ *
+ * NOT safe against concurrent first-callers: the `if (_warmed) return;` guard
+ * only short-circuits AFTER a prior call has resolved, so two callers racing
+ * before either settles would both run `Promise.all` (a second connection).
+ * This relies on the single serial top-level `await warmRuntime()` in
+ * server.ts being the only caller. If a second caller is ever added, cache the
+ * in-flight promise (`let _warming: Promise<void> | undefined`) and return it.
  */
 export const warmRuntime = async (): Promise<void> => {
   if (_warmed) return;
