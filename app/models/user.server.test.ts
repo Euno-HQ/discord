@@ -1,35 +1,13 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import * as Reactivity from "@effect/experimental/Reactivity";
 import { SqlClient } from "@effect/sql";
 import * as Sqlite from "@effect/sql-kysely/Sqlite";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 
-import { DatabaseService } from "#~/Database";
-import type { DB } from "#~/db";
+import { DatabaseService, type DB } from "#~/Database";
 import { UserService, UserServiceLive } from "#~/models/user.server";
-
-// Stub out the side-effectful AppRuntime (DB connection + PostHog init) that
-// user.server.ts's legacy functions import. Without this mock, loading
-// AppRuntime triggers a real DB open and creates a circular-import cycle that
-// makes UserServiceLive undefined at test-layer composition time.
-vi.mock("#~/AppRuntime", () => ({
-  db: undefined,
-  run: vi.fn(),
-  runTakeFirst: vi.fn(),
-  runTakeFirstOrThrow: vi.fn(),
-  posthogClient: null,
-  runtime: { runPromise: vi.fn() },
-}));
 
 // In-memory SQLite test layer (mirrors app/jobs/jobRunner.test.ts)
 const TestSqliteLive = Layer.scoped(

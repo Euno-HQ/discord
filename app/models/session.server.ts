@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { Effect } from "effect";
 import {
   createCookieSessionStorage,
   createSessionStorage,
@@ -7,7 +8,13 @@ import {
 } from "react-router";
 import { AuthorizationCode } from "simple-oauth2";
 
-import { db, run, runTakeFirst, runTakeFirstOrThrow } from "#~/AppRuntime";
+import {
+  db,
+  run,
+  runEffect,
+  runTakeFirst,
+  runTakeFirstOrThrow,
+} from "#~/AppRuntime";
 import { type DB } from "#~/Database";
 import { BOT_PERMISSIONS } from "#~/helpers/botPermissions";
 import {
@@ -19,13 +26,16 @@ import {
 import { requestOrigin } from "#~/helpers/request.server";
 import { fetchUser } from "#~/models/discord.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
-import {
-  createUser,
-  getUserByExternalId,
-  getUserById,
-} from "#~/models/user.server";
+import { UserService, type IUserService } from "#~/models/user.server";
 
 export type Sessions = DB["sessions"];
+
+// Bridge: run a UserService method from this plain-async (web) module.
+// A SqlError/NotFoundError rejects the returned promise, propagating exactly as
+// the previous thrown DB error did.
+const userSvc = <A, E>(
+  f: (s: IUserService) => Effect.Effect<A, E, never>,
+): Promise<A> => runEffect(Effect.flatMap(UserService, f));
 
 const config = {
   client: {
@@ -163,7 +173,7 @@ export async function getUser(request: Request) {
   const userId = await getUserId(request);
   if (userId === undefined) return null;
 
-  const user = await getUserById(userId);
+  const user = await userSvc((s) => s.getUserById(userId));
   if (!user) throw await logout(request);
   return user;
 }
@@ -187,7 +197,7 @@ export async function requireUserId(
 export async function requireUser(request: Request) {
   const userId = await requireUserId(request);
 
-  const user = await getUserById(userId);
+  const user = await userSvc((s) => s.getUserById(userId));
   if (user) return user;
 
   throw await logout(request);
@@ -315,7 +325,7 @@ export async function completeOauthLogin(request: Request) {
   // Retrieve our user from Discord ID
   let userId;
   try {
-    const user = await getUserByExternalId(discordUser.id);
+    const user = await userSvc((s) => s.getUserByExternalId(discordUser.id));
     if (user) {
       userId = user.id;
     }
@@ -323,7 +333,9 @@ export async function completeOauthLogin(request: Request) {
     // Do nothing
     // TODO: bail out if there's a network/etc error
   }
-  userId ??= await createUser(discordUser.email, discordUser.id);
+  userId ??= await userSvc((s) =>
+    s.createUser(discordUser.email, discordUser.id),
+  );
   if (!userId) {
     throw data(
       { message: `Couldn't find a user or create a new user` },

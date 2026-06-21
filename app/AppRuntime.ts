@@ -16,6 +16,7 @@ import { SupervisorServiceLive } from "#~/effects/supervisor";
 import { TracingLive } from "#~/effects/tracing.js";
 import { SpamDetectionServiceLive } from "#~/features/spam/service.ts";
 import { isProd } from "#~/helpers/env.server.js";
+import { UserServiceLive } from "#~/models/user.server";
 
 // Infrastructure layer: tracing + structured logging + prod log level
 const InfraLayer = Layer.mergeAll(
@@ -38,6 +39,7 @@ const AppLayer = Layer.mergeAll(
   MessageCacheServiceLive,
   SupervisorServiceLive,
   DiscordEventBusLive,
+  Layer.provide(UserServiceLive, DatabaseLayer),
   InfraLayer,
 );
 
