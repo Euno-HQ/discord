@@ -1,6 +1,7 @@
+import type { Effect } from "effect";
 import { data } from "react-router";
 
-import { getPosthog } from "#~/AppRuntime";
+import { getPosthog, runEffect } from "#~/AppRuntime";
 import { requireUser } from "#~/models/session.server";
 import { StripeService } from "#~/models/stripe.server";
 
@@ -21,14 +22,18 @@ export async function fetchFeatureFlags(guildId: string) {
 }
 
 export async function fetchStripeDetails(stripeCustomerId: string) {
+  // StripeService methods now return Effects; bridge each via runEffect to keep
+  // this Promise-based file compiling until it is migrated in Task 7.
   const [paymentMethods, invoices] = await Promise.all([
-    StripeService.listPaymentMethods(stripeCustomerId),
-    StripeService.listInvoices(stripeCustomerId),
+    runEffect(StripeService.listPaymentMethods(stripeCustomerId)),
+    runEffect(StripeService.listInvoices(stripeCustomerId)),
   ]);
   return { paymentMethods, invoices };
 }
 
-export type PaymentMethods = Awaited<
+export type PaymentMethods = Effect.Effect.Success<
   ReturnType<typeof StripeService.listPaymentMethods>
 >;
-export type Invoices = Awaited<ReturnType<typeof StripeService.listInvoices>>;
+export type Invoices = Effect.Effect.Success<
+  ReturnType<typeof StripeService.listInvoices>
+>;

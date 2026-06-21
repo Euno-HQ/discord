@@ -67,6 +67,16 @@ export class SubscriptionNotFoundError extends Data.TaggedError(
 )<{ guildId: string }> {}
 
 /**
+ * A Stripe SDK call rejected. `operation` names the StripeService method, and
+ * `cause` carries the raw Stripe error (never stringified here — the user-facing
+ * mapping in `toUserResponse` returns generic billing copy).
+ */
+export class StripeError extends Data.TaggedError("StripeError")<{
+  operation: string;
+  cause: unknown;
+}> {}
+
+/**
  * Raw `fetch` to a Discord OAuth endpoint (e.g. `/users/@me`) failed: either the
  * request rejected (network) or returned a non-2xx status. This is distinct from
  * the `DiscordError` taxonomy, which classifies `@discordjs/rest` SDK rejection
@@ -163,6 +173,7 @@ export type AppError =
   | ResolutionExecutionError
   | FeatureDisabledError
   | SubscriptionNotFoundError
+  | StripeError
   | OAuthFetchError
   | SqlErrorType
   /** Effect.tryPromise wraps thrown exceptions in UnknownException; command-level

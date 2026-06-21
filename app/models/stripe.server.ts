@@ -1,8 +1,9 @@
+import { Effect } from "effect";
 import Stripe from "stripe";
 
-import { NotFoundError } from "#~/effects/errors.ts";
+import { NotFoundError, StripeError } from "#~/effects/errors.ts";
+import { logEffect } from "#~/effects/observability";
 import { stripeSecretKey, stripeWebhookSecret } from "#~/helpers/env.server.js";
-import { log, trackPerformance } from "#~/helpers/observability";
 import Sentry from "#~/helpers/sentry.server";
 
 const stripe = new Stripe(stripeSecretKey, {
@@ -10,281 +11,342 @@ const stripe = new Stripe(stripeSecretKey, {
   typescript: true,
 });
 
-export const StripeService = {
-  async createCheckoutSession(
-    variant: string,
-    coupon: string,
-    guildId: string,
-    baseUrl: string,
-    customerEmail?: string,
-  ): Promise<string> {
-    return trackPerformance(
-      "createCheckoutSession",
-      async () => {
-        log("info", "Stripe", "Creating checkout session", {
-          guildId,
-          baseUrl,
-          hasEmail: !!customerEmail,
-          variant,
-          coupon,
-        });
+// Wrap a Stripe SDK promise, mapping any rejection to a typed StripeError that
+// also reports the raw cause to Sentry (preserving prior side-effect behavior).
+const tryStripe = <A>(operation: string, fn: () => Promise<A>) =>
+  Effect.tryPromise({
+    try: fn,
+    catch: (cause) => {
+      Sentry.captureException(cause);
+      return new StripeError({ operation, cause });
+    },
+  });
 
-        const successUrl = `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&guild_id=${guildId}`;
-        const settingsUrl = `${baseUrl}/app/${guildId}/settings`;
-        let priceId = "";
-        const prices = await stripe.prices.list({ lookup_keys: [variant] });
-        const price = prices.data.at(0);
-        if (!price) {
-          log("error", "Stripe", "Failed to load pricing data");
-          throw new NotFoundError({ resource: "Price", id: variant });
-        }
-        priceId = price.id;
+const createCheckoutSession = (
+  variant: string,
+  coupon: string,
+  guildId: string,
+  baseUrl: string,
+  customerEmail?: string,
+): Effect.Effect<string, StripeError | NotFoundError, never> =>
+  Effect.gen(function* () {
+    yield* logEffect("info", "Stripe", "Creating checkout session", {
+      guildId,
+      baseUrl,
+      hasEmail: !!customerEmail,
+      variant,
+      coupon,
+    });
 
-        try {
-          const session = await stripe.checkout.sessions.create({
-            mode: "subscription",
-            payment_method_types: ["card"],
-            line_items: [{ price: priceId, quantity: 1 }],
-            discounts: coupon ? [{ coupon }] : [],
-            success_url: successUrl,
-            cancel_url: settingsUrl,
-            client_reference_id: guildId,
-            customer_email: customerEmail,
-            metadata: { guild_id: guildId },
-            subscription_data: {
-              metadata: { guild_id: guildId },
-              trial_period_days: 90,
-            },
-          });
+    const successUrl = `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&guild_id=${guildId}`;
+    const settingsUrl = `${baseUrl}/app/${guildId}/settings`;
 
-          log("info", "Stripe", "Checkout session created successfully", {
-            guildId,
-            sessionId: session.id,
-          });
-
-          return session.url ?? "";
-        } catch (error) {
-          log("error", "Stripe", "Failed to create checkout session", {
-            guildId,
-            error,
-          });
-          Sentry.captureException(error);
-          throw error;
-        }
-      },
-      { guildId, customerEmail },
+    const prices = yield* tryStripe("createCheckoutSession.listPrices", () =>
+      stripe.prices.list({ lookup_keys: [variant] }),
     );
-  },
+    const price = prices.data.at(0);
+    if (!price) {
+      yield* logEffect("error", "Stripe", "Failed to load pricing data");
+      return yield* Effect.fail(
+        new NotFoundError({ resource: "Price", id: variant }),
+      );
+    }
+    const priceId = price.id;
 
-  async verifyCheckoutSession(sessionId: string): Promise<{
+    const session = yield* tryStripe("createCheckoutSession", () =>
+      stripe.checkout.sessions.create({
+        mode: "subscription",
+        payment_method_types: ["card"],
+        line_items: [{ price: priceId, quantity: 1 }],
+        discounts: coupon ? [{ coupon }] : [],
+        success_url: successUrl,
+        cancel_url: settingsUrl,
+        client_reference_id: guildId,
+        customer_email: customerEmail,
+        metadata: { guild_id: guildId },
+        subscription_data: {
+          metadata: { guild_id: guildId },
+          trial_period_days: 90,
+        },
+      }),
+    ).pipe(
+      Effect.tapError((error) =>
+        logEffect("error", "Stripe", "Failed to create checkout session", {
+          guildId,
+          error,
+        }),
+      ),
+    );
+
+    yield* logEffect(
+      "info",
+      "Stripe",
+      "Checkout session created successfully",
+      {
+        guildId,
+        sessionId: session.id,
+      },
+    );
+
+    return session.url ?? "";
+  }).pipe(
+    Effect.withSpan("Stripe.createCheckoutSession", {
+      attributes: { guildId, customerEmail },
+    }),
+  );
+
+const verifyCheckoutSession = (
+  sessionId: string,
+): Effect.Effect<
+  {
     payment_status: string;
     client_reference_id: string | null;
     customer: string | null;
     subscription: string | null;
     amount_total: number | null;
-  } | null> {
-    return trackPerformance(
-      "verifyCheckoutSession",
-      async () => {
-        log("info", "Stripe", "Verifying checkout session", { sessionId });
+  } | null,
+  StripeError,
+  never
+> =>
+  Effect.gen(function* () {
+    yield* logEffect("info", "Stripe", "Verifying checkout session", {
+      sessionId,
+    });
 
-        try {
-          const session = await stripe.checkout.sessions.retrieve(sessionId);
-
-          log("info", "Stripe", "Checkout session retrieved", {
-            sessionId,
-            paymentStatus: session.payment_status,
-            customerId: session.customer,
-          });
-
-          return {
-            payment_status: session.payment_status,
-            client_reference_id: session.client_reference_id,
-            customer:
-              typeof session.customer === "string" ? session.customer : null,
-            subscription:
-              typeof session.subscription === "string"
-                ? session.subscription
-                : null,
-            amount_total: session.amount_total,
-          };
-        } catch (error) {
-          log("error", "Stripe", "Failed to verify checkout session", {
-            sessionId,
-            error,
-          });
-          Sentry.captureException(error);
-          return null;
-        }
-      },
-      { sessionId },
+    const session = yield* tryStripe("verifyCheckoutSession", () =>
+      stripe.checkout.sessions.retrieve(sessionId),
+    ).pipe(
+      Effect.tapError((error) =>
+        logEffect("error", "Stripe", "Failed to verify checkout session", {
+          sessionId,
+          error,
+        }),
+      ),
+      // Prior behavior: errors recover as null rather than propagate.
+      Effect.catchTag("StripeError", () => Effect.succeed(null)),
     );
-  },
 
-  async createCustomer(
-    email: string,
-    guildId: string,
-    guildName?: string,
-  ): Promise<string> {
-    return trackPerformance(
-      "createCustomer",
-      async () => {
-        log("info", "Stripe", "Creating Stripe customer", {
+    if (!session) {
+      return null;
+    }
+
+    yield* logEffect("info", "Stripe", "Checkout session retrieved", {
+      sessionId,
+      paymentStatus: session.payment_status,
+      customerId: session.customer,
+    });
+
+    return {
+      payment_status: session.payment_status,
+      client_reference_id: session.client_reference_id,
+      customer: typeof session.customer === "string" ? session.customer : null,
+      subscription:
+        typeof session.subscription === "string" ? session.subscription : null,
+      amount_total: session.amount_total,
+    };
+  }).pipe(
+    Effect.withSpan("Stripe.verifyCheckoutSession", {
+      attributes: { sessionId },
+    }),
+  );
+
+const createCustomer = (
+  email: string,
+  guildId: string,
+  guildName?: string,
+): Effect.Effect<string, StripeError, never> =>
+  Effect.gen(function* () {
+    yield* logEffect("info", "Stripe", "Creating Stripe customer", {
+      guildId,
+      email,
+    });
+
+    const customer = yield* tryStripe("createCustomer", () =>
+      stripe.customers.create({
+        email,
+        metadata: { guild_id: guildId, guild_name: guildName ?? "" },
+      }),
+    ).pipe(
+      Effect.tapError((error) =>
+        logEffect("error", "Stripe", "Failed to create customer", {
           guildId,
-          email,
-        });
-
-        try {
-          const customer = await stripe.customers.create({
-            email,
-            metadata: { guild_id: guildId, guild_name: guildName ?? "" },
-          });
-
-          log("info", "Stripe", "Customer created successfully", {
-            guildId,
-            customerId: customer.id,
-          });
-
-          return customer.id;
-        } catch (error) {
-          log("error", "Stripe", "Failed to create customer", {
-            guildId,
-            error,
-          });
-          Sentry.captureException(error);
-          throw error;
-        }
-      },
-      { guildId },
+          error,
+        }),
+      ),
     );
-  },
 
-  /**
-   * Get customer by guild ID
-   */
-  async getCustomerByGuildId(guildId: string): Promise<string | null> {
-    return trackPerformance(
-      "getCustomerByGuildId",
-      async () => {
-        log("debug", "Stripe", "Searching for customer by guild ID", {
+    yield* logEffect("info", "Stripe", "Customer created successfully", {
+      guildId,
+      customerId: customer.id,
+    });
+
+    return customer.id;
+  }).pipe(
+    Effect.withSpan("Stripe.createCustomer", { attributes: { guildId } }),
+  );
+
+const getCustomerByGuildId = (
+  guildId: string,
+): Effect.Effect<string | null, StripeError, never> =>
+  Effect.gen(function* () {
+    yield* logEffect("debug", "Stripe", "Searching for customer by guild ID", {
+      guildId,
+    });
+
+    const customers = yield* tryStripe("getCustomerByGuildId", () =>
+      stripe.customers.search({
+        query: `metadata['guild_id']:'${guildId}'`,
+        limit: 1,
+      }),
+    ).pipe(
+      Effect.tapError((error) =>
+        logEffect("error", "Stripe", "Failed to search for customer", {
           guildId,
-        });
-
-        try {
-          const customers = await stripe.customers.search({
-            query: `metadata['guild_id']:'${guildId}'`,
-            limit: 1,
-          });
-
-          if (customers.data.length > 0) {
-            log("debug", "Stripe", "Customer found", {
-              guildId,
-              customerId: customers.data[0].id,
-            });
-            return customers.data[0].id;
-          }
-
-          log("debug", "Stripe", "No customer found", { guildId });
-          return null;
-        } catch (error) {
-          log("error", "Stripe", "Failed to search for customer", {
-            guildId,
-            error,
-          });
-          Sentry.captureException(error);
-          return null;
-        }
-      },
-      { guildId },
+          error,
+        }),
+      ),
+      // Prior behavior: errors recover as null.
+      Effect.catchTag("StripeError", () => Effect.succeed(null)),
     );
-  },
 
-  /**
-   * Cancel a subscription
-   */
-  async cancelSubscription(subscriptionId: string): Promise<boolean> {
-    return trackPerformance(
-      "cancelSubscription",
-      async () => {
-        log("info", "Stripe", "Cancelling subscription", { subscriptionId });
+    if (customers && customers.data.length > 0) {
+      yield* logEffect("debug", "Stripe", "Customer found", {
+        guildId,
+        customerId: customers.data[0].id,
+      });
+      return customers.data[0].id;
+    }
 
-        try {
-          await stripe.subscriptions.cancel(subscriptionId);
+    yield* logEffect("debug", "Stripe", "No customer found", { guildId });
+    return null;
+  }).pipe(
+    Effect.withSpan("Stripe.getCustomerByGuildId", { attributes: { guildId } }),
+  );
 
-          log("info", "Stripe", "Subscription cancelled successfully", {
-            subscriptionId,
-          });
+const cancelSubscription = (
+  subscriptionId: string,
+): Effect.Effect<boolean, StripeError, never> =>
+  Effect.gen(function* () {
+    yield* logEffect("info", "Stripe", "Cancelling subscription", {
+      subscriptionId,
+    });
 
-          return true;
-        } catch (error) {
-          log("error", "Stripe", "Failed to cancel subscription", {
-            subscriptionId,
-            error,
-          });
-          Sentry.captureException(error);
-          return false;
-        }
-      },
-      { subscriptionId },
+    const cancelled = yield* tryStripe("cancelSubscription", () =>
+      stripe.subscriptions.cancel(subscriptionId),
+    ).pipe(
+      Effect.tapError((error) =>
+        logEffect("error", "Stripe", "Failed to cancel subscription", {
+          subscriptionId,
+          error,
+        }),
+      ),
+      Effect.as(true),
+      // Prior behavior: errors recover as false.
+      Effect.catchTag("StripeError", () => Effect.succeed(false)),
     );
-  },
 
-  async listInvoices(customerId: string) {
-    return trackPerformance(
-      "listInvoices",
-      async () => {
-        log("debug", "Stripe", "Listing invoices", { customerId });
-        try {
-          const invoices = await stripe.invoices.list({
-            customer: customerId,
-            limit: 20,
-          });
-          return invoices.data;
-        } catch (error) {
-          log("error", "Stripe", "Failed to list invoices", {
-            customerId,
-            error,
-          });
-          Sentry.captureException(error);
-          return [];
-        }
-      },
-      { customerId },
-    );
-  },
+    if (cancelled) {
+      yield* logEffect(
+        "info",
+        "Stripe",
+        "Subscription cancelled successfully",
+        {
+          subscriptionId,
+        },
+      );
+    }
 
-  async listPaymentMethods(customerId: string) {
-    return trackPerformance(
-      "listPaymentMethods",
-      async () => {
-        log("debug", "Stripe", "Listing payment methods", { customerId });
-        try {
-          const methods = await stripe.customers.listPaymentMethods(customerId);
-          return methods.data;
-        } catch (error) {
-          log("error", "Stripe", "Failed to list payment methods", {
-            customerId,
-            error,
-          });
-          Sentry.captureException(error);
-          return [];
-        }
-      },
-      { customerId },
-    );
-  },
+    return cancelled;
+  }).pipe(
+    Effect.withSpan("Stripe.cancelSubscription", {
+      attributes: { subscriptionId },
+    }),
+  );
 
-  /**
-   * Construct webhook event from raw body and signature
-   */
-  constructWebhookEvent(
-    payload: string | Buffer,
-    signature: string,
-  ): Stripe.Event {
-    return stripe.webhooks.constructEvent(
-      payload,
-      signature,
-      stripeWebhookSecret,
+const listInvoices = (
+  customerId: string,
+): Effect.Effect<Stripe.Invoice[], StripeError, never> =>
+  Effect.gen(function* () {
+    yield* logEffect("debug", "Stripe", "Listing invoices", { customerId });
+
+    const invoices = yield* tryStripe("listInvoices", () =>
+      stripe.invoices.list({ customer: customerId, limit: 20 }),
+    ).pipe(
+      Effect.tapError((error) =>
+        logEffect("error", "Stripe", "Failed to list invoices", {
+          customerId,
+          error,
+        }),
+      ),
+      Effect.map((invoices) => invoices.data),
+      // Prior behavior: errors recover as an empty list.
+      Effect.catchTag("StripeError", () =>
+        Effect.succeed([] as Stripe.Invoice[]),
+      ),
     );
-  },
+
+    return invoices;
+  }).pipe(
+    Effect.withSpan("Stripe.listInvoices", { attributes: { customerId } }),
+  );
+
+const listPaymentMethods = (
+  customerId: string,
+): Effect.Effect<Stripe.PaymentMethod[], StripeError, never> =>
+  Effect.gen(function* () {
+    yield* logEffect("debug", "Stripe", "Listing payment methods", {
+      customerId,
+    });
+
+    const methods = yield* tryStripe("listPaymentMethods", () =>
+      stripe.customers.listPaymentMethods(customerId),
+    ).pipe(
+      Effect.tapError((error) =>
+        logEffect("error", "Stripe", "Failed to list payment methods", {
+          customerId,
+          error,
+        }),
+      ),
+      Effect.map((methods) => methods.data),
+      // Prior behavior: errors recover as an empty list.
+      Effect.catchTag("StripeError", () =>
+        Effect.succeed([] as Stripe.PaymentMethod[]),
+      ),
+    );
+
+    return methods;
+  }).pipe(
+    Effect.withSpan("Stripe.listPaymentMethods", {
+      attributes: { customerId },
+    }),
+  );
+
+const constructWebhookEvent = (
+  payload: string | Buffer,
+  signature: string,
+): Effect.Effect<Stripe.Event, StripeError, never> =>
+  Effect.try({
+    try: () =>
+      stripe.webhooks.constructEvent(payload, signature, stripeWebhookSecret),
+    catch: (cause) => {
+      Sentry.captureException(cause);
+      return new StripeError({ operation: "constructWebhookEvent", cause });
+    },
+  });
+
+/**
+ * Stripe service: each method is a free Effect function (no service requirement).
+ *
+ * Web-async callers: await runEffect(StripeService.method(...))
+ * Effect callers:    yield* StripeService.method(...)
+ */
+export const StripeService = {
+  createCheckoutSession,
+  verifyCheckoutSession,
+  createCustomer,
+  getCustomerByGuildId,
+  cancelSubscription,
+  listInvoices,
+  listPaymentMethods,
+  constructWebhookEvent,
 };
