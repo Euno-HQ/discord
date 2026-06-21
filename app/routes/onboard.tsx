@@ -105,15 +105,17 @@ export async function action({ request }: Route.ActionArgs) {
   try {
     // Register the guild and set up configuration
     await trackPerformance("guilds.registerGuild", () =>
-      registerGuild(guildId),
+      runEffect(registerGuild(guildId)),
     );
 
     await trackPerformance("guilds.setSettings", () =>
-      setSettings(guildId, {
-        [SETTINGS.modLog]: modLogChannel,
-        [SETTINGS.moderator]: moderatorRole,
-        [SETTINGS.restricted]: restrictedRole || undefined,
-      }),
+      runEffect(
+        setSettings(guildId, {
+          [SETTINGS.modLog]: modLogChannel,
+          [SETTINGS.moderator]: moderatorRole,
+          [SETTINGS.restricted]: restrictedRole || undefined,
+        }),
+      ),
     );
 
     // Initialize free subscription for new guilds

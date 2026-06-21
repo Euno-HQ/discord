@@ -4,10 +4,13 @@ import {
   type APIGuild,
 } from "discord-api-types/v10";
 import { type GuildMember } from "discord.js";
+import { Effect, Layer } from "effect";
 import type { AccessToken } from "simple-oauth2";
 
 import type { REST } from "@discordjs/rest";
 
+import { db } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
 import { trackPerformance } from "#~/helpers/observability.js";
 import { complement, intersection } from "#~/helpers/sets.js";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
@@ -69,9 +72,15 @@ export const applyRestriction = async (member: GuildMember | null) => {
     return;
   }
 
-  const { restricted } = await fetchSettings(member.guild.id, [
-    SETTINGS.restricted,
-  ]);
+  // Provide DatabaseService via the lazy AppRuntime db handle rather than
+  // runEffect(...): this module sits inside the AppLayer import graph (via
+  // spamResponseHandler), so importing runEffect — whose signature mentions
+  // RuntimeContext — would create a circular type reference.
+  const { restricted } = await Effect.runPromise(
+    fetchSettings(member.guild.id, [SETTINGS.restricted]).pipe(
+      Effect.provide(Layer.succeed(DatabaseService, db)),
+    ),
+  );
   if (!restricted) {
     throw new Error(
       "Tried to restrict with no restricted role configured. This is likely a development error.",

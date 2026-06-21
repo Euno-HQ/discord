@@ -1,9 +1,9 @@
 import { Effect } from "effect";
+import type { Selectable } from "kysely";
 
-import { db, run, runTakeFirst, runTakeFirstOrThrow } from "#~/AppRuntime";
-import { DatabaseService, type DB } from "#~/Database";
+import { DatabaseService, type DB, type SqlError } from "#~/Database";
 import { NotFoundError } from "#~/effects/errors.ts";
-import { log, trackPerformance } from "#~/helpers/observability";
+import { logEffect } from "#~/effects/observability";
 
 export type Guild = DB["guilds"];
 
@@ -31,56 +31,74 @@ interface SettingsRecord {
   [SETTINGS.applicationChannel]?: string;
 }
 
-export const fetchGuild = async (guildId: string) => {
-  return trackPerformance(
-    "fetchGuild",
-    async () => {
-      log("debug", "Guild", "Fetching guild", { guildId });
+// --- Free Effect functions ---
+// Each requires DatabaseService in context (provided by AppLayer / test layers).
+// Effect callers:    yield* fetchSettings(...)
+// Web-async callers: await runEffect(setSettings(...))
 
-      const guild = await runTakeFirst(
-        db.selectFrom("guilds").selectAll().where("id", "=", guildId),
-      );
+export const fetchGuild = (
+  guildId: string,
+): Effect.Effect<
+  Selectable<DB["guilds"]> | undefined,
+  SqlError,
+  DatabaseService
+> =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
 
-      log("debug", "Guild", guild ? "Guild found" : "Guild not found", {
+    yield* logEffect("debug", "Guild", "Fetching guild", { guildId });
+
+    const rows = yield* db
+      .selectFrom("guilds")
+      .selectAll()
+      .where("id", "=", guildId);
+    const guild = rows[0];
+
+    yield* logEffect(
+      "debug",
+      "Guild",
+      guild ? "Guild found" : "Guild not found",
+      {
         guildId,
         guildExists: !!guild,
         hasSettings: !!guild?.settings,
-      });
+      },
+    );
 
-      return guild;
-    },
-    { guildId },
-  );
-};
+    return guild;
+  }).pipe(Effect.withSpan("Guild.fetchGuild", { attributes: { guildId } }));
 
-export const registerGuild = async (guildId: string) => {
-  return trackPerformance(
-    "registerGuild",
-    async () => {
-      log("info", "Guild", "Registering guild", { guildId });
+export const registerGuild = (
+  guildId: string,
+): Effect.Effect<void, SqlError, DatabaseService> =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
 
-      await run(
-        db
-          .insertInto("guilds")
-          .values({
-            id: guildId,
-            settings: JSON.stringify({}),
-          })
-          .onConflict((oc) => oc.column("id").doNothing()),
-      );
+    yield* logEffect("info", "Guild", "Registering guild", { guildId });
 
-      log("info", "Guild", "Guild registered successfully", { guildId });
-    },
-    { guildId },
-  );
-};
+    yield* db
+      .insertInto("guilds")
+      .values({
+        id: guildId,
+        settings: JSON.stringify({}),
+      })
+      .onConflict((oc) => oc.column("id").doNothing());
 
-export const setSettings = async (
+    yield* logEffect("info", "Guild", "Guild registered successfully", {
+      guildId,
+    });
+  }).pipe(Effect.withSpan("Guild.registerGuild", { attributes: { guildId } }));
+
+export const setSettings = (
   guildId: string,
   settings: SettingsRecord,
-) => {
-  await run(
-    db
+): Effect.Effect<void, SqlError, DatabaseService> =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+
+    // PRESERVE VERBATIM (#335 NULL-coalesce fix): merge new settings into the
+    // existing JSON, treating a NULL settings column as an empty object.
+    yield* db
       .updateTable("guilds")
       .set("settings", (eb) =>
         eb.fn("json_patch", [
@@ -88,35 +106,17 @@ export const setSettings = async (
           eb.val(JSON.stringify(settings)),
         ]),
       )
-      .where("id", "=", guildId),
-  );
-};
+      .where("id", "=", guildId);
+  }).pipe(Effect.withSpan("Guild.setSettings", { attributes: { guildId } }));
 
-export const fetchSettings = async <T extends keyof typeof SETTINGS>(
+export const fetchSettings = <T extends keyof typeof SETTINGS>(
   guildId: string,
   keys: T[],
-) => {
-  const result = Object.entries(
-    await runTakeFirstOrThrow(
-      db
-        .selectFrom("guilds")
-        // @ts-expect-error This is broken because of a migration from knex and
-        // old/bad use of jsonb for storing settings. The type is guaranteed here
-        // not by the codegen
-        .select<DB, "guilds", SettingsRecord>((eb) =>
-          keys.map((k) => eb.ref("settings", "->>").key(k).as(k)),
-        )
-        .where("id", "=", guildId),
-      // This cast is also evidence of the pattern being broken
-    ),
-  ) as [T, string][];
-  return Object.fromEntries(result) as Pick<SettingsRecord, T>;
-};
-
-export const fetchSettingsEffect = <T extends keyof typeof SETTINGS>(
-  guildId: string,
-  keys: T[],
-) =>
+): Effect.Effect<
+  Pick<SettingsRecord, T>,
+  SqlError | NotFoundError,
+  DatabaseService
+> =>
   Effect.gen(function* () {
     const db = yield* DatabaseService;
     const rows = yield* db
@@ -136,7 +136,7 @@ export const fetchSettingsEffect = <T extends keyof typeof SETTINGS>(
     }
     return Object.fromEntries(result) as Pick<SettingsRecord, T>;
   }).pipe(
-    Effect.withSpan("fetchSettingsEffect", {
+    Effect.withSpan("Guild.fetchSettings", {
       attributes: { guildId, keys: keys.join(",") },
     }),
   );

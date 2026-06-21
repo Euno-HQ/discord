@@ -32,7 +32,7 @@ import {
 } from "#~/helpers/discord";
 import { webBaseUrl } from "#~/helpers/env.server";
 import { featureStats } from "#~/helpers/metrics";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 export const DEFAULT_BUTTON_TEXT = "Open a private ticket with the moderators";
 
@@ -126,7 +126,7 @@ export const Command = [
 
         let roleId = pingableRole?.id;
         if (!roleId) {
-          const { [SETTINGS.moderator]: mod } = yield* fetchSettingsEffect(
+          const { [SETTINGS.moderator]: mod } = yield* fetchSettings(
             interaction.guild.id,
             [SETTINGS.moderator, SETTINGS.modLog],
           );
@@ -257,7 +257,7 @@ export const Command = [
 
         // If there's no config, that means that the button was set up before the db was set up. Add one with default values
         if (!config) {
-          const { [SETTINGS.moderator]: mod } = yield* fetchSettingsEffect(
+          const { [SETTINGS.moderator]: mod } = yield* fetchSettings(
             interaction.guild.id,
             [SETTINGS.moderator, SETTINGS.modLog],
           );
@@ -383,7 +383,7 @@ export const Command = [
           return;
         }
 
-        const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(
+        const { [SETTINGS.modLog]: modLog } = yield* fetchSettings(
           interaction.guild.id,
           [SETTINGS.modLog],
         );

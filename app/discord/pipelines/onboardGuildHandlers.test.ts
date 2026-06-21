@@ -73,7 +73,9 @@ beforeEach(() => {
 describe("handleGuildCreate", () => {
   test("skips welcome and deploy when guild already exists (reconnect)", async () => {
     const { deployToGuild } = await import("#~/discord/deployCommands.server");
-    vi.mocked(fetchGuild).mockResolvedValue({ id: "guild-1" } as any);
+    vi.mocked(fetchGuild).mockReturnValue(
+      Effect.succeed({ id: "guild-1" } as any),
+    );
 
     const event = makeGuildCreateEvent();
     await runHandler(handleGuildCreate(event as any));
@@ -83,7 +85,7 @@ describe("handleGuildCreate", () => {
 
   test("deploys commands for new guild install", async () => {
     const { deployToGuild } = await import("#~/discord/deployCommands.server");
-    vi.mocked(fetchGuild).mockResolvedValue(undefined as any);
+    vi.mocked(fetchGuild).mockReturnValue(Effect.succeed(undefined as any));
 
     const event = makeGuildCreateEvent();
     await runHandler(handleGuildCreate(event as any));
@@ -94,7 +96,9 @@ describe("handleGuildCreate", () => {
   test("always emits guildJoined metric", async () => {
     const { botStats } = await import("#~/helpers/metrics");
 
-    vi.mocked(fetchGuild).mockResolvedValue({ id: "guild-1" } as any);
+    vi.mocked(fetchGuild).mockReturnValue(
+      Effect.succeed({ id: "guild-1" } as any),
+    );
 
     const event = makeGuildCreateEvent();
     await runHandler(handleGuildCreate(event as any));
@@ -119,7 +123,7 @@ describe("handleGuildDelete", () => {
 
   test("returns early when guild not found in DB", async () => {
     const { botStats } = await import("#~/helpers/metrics");
-    vi.mocked(fetchGuild).mockResolvedValue(undefined as any);
+    vi.mocked(fetchGuild).mockReturnValue(Effect.succeed(undefined as any));
 
     const event = makeGuildDeleteEvent();
     await runHandler(handleGuildDelete(event as any));
@@ -130,7 +134,9 @@ describe("handleGuildDelete", () => {
 
   test("emits guildRemoved metric when guild exists in DB", async () => {
     const { botStats } = await import("#~/helpers/metrics");
-    vi.mocked(fetchGuild).mockResolvedValue({ id: "guild-1" } as any);
+    vi.mocked(fetchGuild).mockReturnValue(
+      Effect.succeed({ id: "guild-1" } as any),
+    );
 
     const event = makeGuildDeleteEvent();
     await runHandler(handleGuildDelete(event as any));

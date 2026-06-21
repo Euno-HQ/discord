@@ -24,7 +24,7 @@ import {
 import type { SlashCommand } from "#~/helpers/discord";
 import { formatError } from "#~/helpers/formatError";
 import { commandStats } from "#~/helpers/metrics";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 export interface CheckResult {
   name: string;
@@ -129,7 +129,7 @@ export const Command = {
       const results: CheckResult[] = [];
 
       // --- Guild settings ---
-      const settings = yield* fetchSettingsEffect(guildId, [
+      const settings = yield* fetchSettings(guildId, [
         SETTINGS.moderator,
         SETTINGS.modLog,
         SETTINGS.deletionLog,

@@ -6,7 +6,7 @@ import { fetchAuditLogEntry } from "#~/discord/auditLog";
 import { MessageCacheService } from "#~/discord/messageCacheService";
 import { fetchChannel, fetchUserOrNull } from "#~/effects/discordSdk";
 import { getOrCreateDeletionLogThread } from "#~/models/deletionLogThreads";
-import { fetchSettingsEffect } from "#~/models/guilds.server";
+import { fetchSettings } from "#~/models/guilds.server";
 import { getOrCreateUserThread } from "#~/models/userThreads";
 
 import {
@@ -30,7 +30,7 @@ vi.mock("#~/Database", () => ({
 }));
 // These will be controlled per-test via vi.mocked()
 vi.mock("#~/models/guilds.server", () => ({
-  fetchSettingsEffect: vi.fn(),
+  fetchSettings: vi.fn(),
   SETTINGS: { deletionLog: "deletionLog", modLog: "modLog" },
 }));
 vi.mock("#~/discord/auditLog", () => ({
@@ -125,7 +125,7 @@ beforeEach(() => {
 
 describe("handleDelete", () => {
   test("returns early when guild has no deletion log configured", async () => {
-    vi.mocked(fetchSettingsEffect).mockReturnValue(Effect.succeed(null) as any);
+    vi.mocked(fetchSettings).mockReturnValue(Effect.succeed(null) as any);
 
     await runHandler(handleDelete(mockClient, makeDeleteEvent() as any));
 
@@ -133,7 +133,7 @@ describe("handleDelete", () => {
   });
 
   test("batches uncached deletions when no userId available", async () => {
-    vi.mocked(fetchSettingsEffect).mockReturnValue(
+    vi.mocked(fetchSettings).mockReturnValue(
       Effect.succeed({ deletionLog: "channel-1" }) as any,
     );
 
@@ -148,7 +148,7 @@ describe("handleDelete", () => {
   });
 
   test("resolves author from cache when message author is null", async () => {
-    vi.mocked(fetchSettingsEffect).mockReturnValue(
+    vi.mocked(fetchSettings).mockReturnValue(
       Effect.succeed({ deletionLog: "channel-1" }) as any,
     );
 
@@ -178,7 +178,7 @@ describe("handleDelete", () => {
   });
 
   test("posts to mod thread when audit log shows mod deletion", async () => {
-    vi.mocked(fetchSettingsEffect).mockReturnValue(
+    vi.mocked(fetchSettings).mockReturnValue(
       Effect.succeed({ deletionLog: "channel-1" }) as any,
     );
 
@@ -210,7 +210,7 @@ describe("handleDelete", () => {
 
 describe("handleEdit", () => {
   test("returns early when guild has no deletion log configured", async () => {
-    vi.mocked(fetchSettingsEffect).mockReturnValue(Effect.succeed(null) as any);
+    vi.mocked(fetchSettings).mockReturnValue(Effect.succeed(null) as any);
 
     await runHandler(handleEdit(mockClient, makeEditEvent() as any));
 
@@ -218,7 +218,7 @@ describe("handleEdit", () => {
   });
 
   test("returns early when newMessage has no author", async () => {
-    vi.mocked(fetchSettingsEffect).mockReturnValue(
+    vi.mocked(fetchSettings).mockReturnValue(
       Effect.succeed({ deletionLog: "channel-1" }) as any,
     );
 
@@ -232,7 +232,7 @@ describe("handleEdit", () => {
   });
 
   test("prefers cached content as before text", async () => {
-    vi.mocked(fetchSettingsEffect).mockReturnValue(
+    vi.mocked(fetchSettings).mockReturnValue(
       Effect.succeed({ deletionLog: "channel-1" }) as any,
     );
 
@@ -260,7 +260,7 @@ describe("handleEdit", () => {
 
 describe("handleBulkDelete", () => {
   test("returns early when guild has no deletion log configured", async () => {
-    vi.mocked(fetchSettingsEffect).mockReturnValue(Effect.succeed(null) as any);
+    vi.mocked(fetchSettings).mockReturnValue(Effect.succeed(null) as any);
 
     const event = {
       type: "GuildMessageBulkDelete" as const,
@@ -276,7 +276,7 @@ describe("handleBulkDelete", () => {
   });
 
   test("returns early when all messages are from bots", async () => {
-    vi.mocked(fetchSettingsEffect).mockReturnValue(
+    vi.mocked(fetchSettings).mockReturnValue(
       Effect.succeed({ deletionLog: "log-channel" }) as any,
     );
 
@@ -308,7 +308,7 @@ describe("handleBulkDelete", () => {
   });
 
   test("tallies non-bot messages per author", async () => {
-    vi.mocked(fetchSettingsEffect).mockReturnValue(
+    vi.mocked(fetchSettings).mockReturnValue(
       Effect.succeed({ deletionLog: "log-channel" }) as any,
     );
 

@@ -18,7 +18,7 @@ import {
   type NotFoundError,
 } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 type ThreadError = DiscordError | SqlError | NotFoundError;
 
@@ -189,10 +189,9 @@ const doGetOrCreateDeletionLogThread = (guild: Guild, user: User) =>
       }
     }
 
-    const { deletionLog: deletionLogId } = yield* fetchSettingsEffect(
-      guild.id,
-      [SETTINGS.deletionLog],
-    );
+    const { deletionLog: deletionLogId } = yield* fetchSettings(guild.id, [
+      SETTINGS.deletionLog,
+    ]);
 
     if (!deletionLogId) {
       return yield* Effect.fail(

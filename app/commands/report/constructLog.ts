@@ -9,7 +9,7 @@ import {
   isForwardedMessage,
 } from "#~/helpers/discord";
 import { truncateMessage } from "#~/helpers/string";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 import { ReportReasons, type Report } from "#~/models/reportedMessages";
 
 export const ReadableReasons: Record<ReportReasons, string> = {
@@ -41,10 +41,9 @@ export const constructLog = ({
     }
     const { message } = lastReport;
     const { author } = message;
-    const { moderator } = yield* fetchSettingsEffect(
-      lastReport.message.guild.id,
-      [SETTINGS.moderator],
-    );
+    const { moderator } = yield* fetchSettings(lastReport.message.guild.id, [
+      SETTINGS.moderator,
+    ]);
 
     // This should never be possible but we gotta satisfy types
     if (!moderator) {

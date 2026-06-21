@@ -21,7 +21,7 @@ import type { Features } from "#~/helpers/featuresFlags";
 import { votingStrategies, type Resolution } from "#~/helpers/modResponse";
 import {
   DEFAULT_QUORUM,
-  fetchSettingsEffect,
+  fetchSettings,
   SETTINGS,
 } from "#~/models/guilds.server";
 
@@ -54,10 +54,10 @@ export const createEscalationEffect = (
     const features: Features[] = [];
 
     // Get settings
-    const { moderator: modRoleId, restricted } = yield* fetchSettingsEffect(
-      guildId,
-      [SETTINGS.moderator, SETTINGS.restricted],
-    );
+    const { moderator: modRoleId, restricted } = yield* fetchSettings(guildId, [
+      SETTINGS.moderator,
+      SETTINGS.restricted,
+    ]);
 
     if (restricted) {
       features.push("restrict");
@@ -171,10 +171,10 @@ export const upgradeToMajorityEffect = (
     const features: Features[] = [];
 
     // Get settings
-    const { moderator: modRoleId, restricted } = yield* fetchSettingsEffect(
-      guildId,
-      [SETTINGS.moderator, SETTINGS.restricted],
-    );
+    const { moderator: modRoleId, restricted } = yield* fetchSettings(guildId, [
+      SETTINGS.moderator,
+      SETTINGS.restricted,
+    ]);
 
     if (restricted) {
       features.push("restrict");

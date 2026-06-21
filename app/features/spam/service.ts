@@ -145,17 +145,23 @@ export const SpamDetectionServiceLive = Layer.effect(
       Effect.gen(function* () {
         if (member.permissions.has("Administrator")) return true;
 
-        const settings = yield* Effect.tryPromise({
-          try: () => fetchSettings(guildId, [SETTINGS.moderator]),
-          catch: () => null,
-        }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+        // Swallow both SqlError and NotFoundError (missing guild row) to null,
+        // matching the pre-Effect behavior: absent/unreadable settings → not a mod.
+        const settings = yield* fetchSettings(guildId, [
+          SETTINGS.moderator,
+        ]).pipe(Effect.catchAll(() => Effect.succeed(null)));
 
         if (!settings?.moderator) return false;
 
         return Array.isArray(member.roles)
           ? member.roles.includes(settings.moderator)
           : member.roles.cache.has(settings.moderator);
-      }).pipe(Effect.withSpan("SpamDetection.isModeratorOrAdmin"));
+      }).pipe(
+        // fetchSettings requires DatabaseService; provide the captured handle
+        // here so this helper's requirement channel stays `never`.
+        Effect.provide(Layer.succeed(DatabaseService, db)),
+        Effect.withSpan("SpamDetection.isModeratorOrAdmin"),
+      );
 
     return {
       checkMessage: (message, member) =>
