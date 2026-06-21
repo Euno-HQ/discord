@@ -1,17 +1,16 @@
-import { ButtonStyle } from "discord-api-types/v10";
 import { ComponentType } from "discord.js";
 import { vi } from "vitest";
 
 import type { SetupPermissionCheckResult } from "#~/helpers/setupPermissionCheck";
 
 import {
-  buildFeatureToggleRow,
   buildPermWarnings,
   buildSetupConfirmMessage,
   buildSetupScreen1Message,
   buildSetupScreen2Message,
   channelValue,
   defaultSetup,
+  renderScreen,
   type PendingSetup,
 } from "./setupHandlers";
 
@@ -181,38 +180,26 @@ describe("buildPermWarnings", () => {
   });
 });
 
-// --- buildFeatureToggleRow ---
+// --- renderScreen ---
 
-describe("buildFeatureToggleRow", () => {
-  test("disabled feature uses Danger style and '✗' prefix", () => {
-    const state = makePendingSetup({ honeypotChannel: null });
-    const row = buildFeatureToggleRow("guild-1", state);
-
-    expect(row.type).toBe(ComponentType.ActionRow);
-    // Honeypot is at index 1 in OPTIONAL_CHANNELS
-    const honeypotBtn = row.components[1];
-    expect(honeypotBtn.label).toContain("✗");
-    expect(honeypotBtn.style).toBe(ButtonStyle.Danger);
-    expect(honeypotBtn.custom_id).toContain("enable");
+describe("renderScreen", () => {
+  test("screen '1' routes to the screen-1 renderer (has Next button)", () => {
+    const r = renderScreen("g", makePendingSetup(), "1");
+    expect(getButtons(r).some((b) => b.custom_id === "setup-next|g")).toBe(
+      true,
+    );
   });
-
-  test("enabled feature uses Success style and '✓' prefix", () => {
-    const state = makePendingSetup({
-      deletionLogChannel: CREATE_SENTINEL,
-    });
-    const row = buildFeatureToggleRow("guild-1", state);
-
-    // Deletion Log is at index 0
-    const deletionBtn = row.components[0];
-    expect(deletionBtn.label).toContain("✓");
-    expect(deletionBtn.style).toBe(ButtonStyle.Success);
-    expect(deletionBtn.custom_id).toContain("disable");
+  test("screen '2' routes to the screen-2 renderer (has Back-core + Review)", () => {
+    const r = renderScreen("g", makePendingSetup(), "2");
+    const ids = getButtons(r).map((b) => b.custom_id);
+    expect(ids).toContain("setup-back-core|g");
+    expect(ids).toContain("setup-continue|g");
   });
-
-  test("produces 4 buttons for the 4 optional channels", () => {
-    const state = makePendingSetup();
-    const row = buildFeatureToggleRow("guild-1", state);
-    expect(row.components).toHaveLength(4);
+  test("unknown screen defaults to screen 1", () => {
+    const r = renderScreen("g", makePendingSetup(), "");
+    expect(getButtons(r).some((b) => b.custom_id === "setup-next|g")).toBe(
+      true,
+    );
   });
 });
 
