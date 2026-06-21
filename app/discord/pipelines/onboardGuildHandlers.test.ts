@@ -19,10 +19,6 @@ vi.mock("#~/Database", () => ({
   DatabaseService: Context.GenericTag("DatabaseService"),
   DatabaseLayer: Layer.empty,
 }));
-vi.mock("#~/AppRuntime", () => ({
-  runEffect: vi.fn(),
-  RuntimeContext: {},
-}));
 vi.mock("#~/helpers/metrics", () => ({
   botStats: {
     guildJoined: vi.fn(),

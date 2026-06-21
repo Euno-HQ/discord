@@ -28,11 +28,6 @@ vi.mock("#~/Database", () => ({
   DatabaseService: Context.GenericTag("DatabaseService"),
   DatabaseLayer: Layer.empty,
 }));
-vi.mock("#~/AppRuntime", () => ({
-  runEffect: vi.fn(),
-  RuntimeContext: {},
-}));
-
 // These will be controlled per-test via vi.mocked()
 vi.mock("#~/models/guilds.server", () => ({
   fetchSettingsEffect: vi.fn(),

@@ -20,6 +20,7 @@ vi.mock("#~/helpers/observability", () => ({
 let testDb: Kysely<DB>;
 let rawDb: InstanceType<typeof BetterSqlite3>;
 
+// Intentional: stubs run/runTakeFirst/runTakeFirstOrThrow to execute Kysely queries against the in-memory test DB.
 vi.mock("#~/AppRuntime", () => {
   return {
     get db() {

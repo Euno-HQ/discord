@@ -14,10 +14,6 @@ import {
 } from "./setupHandlers";
 
 // Mock modules with side effects before importing the module under test
-vi.mock("#~/AppRuntime", () => ({
-  db: {},
-  runTakeFirst: vi.fn(),
-}));
 vi.mock("#~/effects/discordSdk", () => ({}));
 vi.mock("#~/effects/observability", () => ({
   log: () => {
