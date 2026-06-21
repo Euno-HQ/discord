@@ -1,4 +1,4 @@
-import { data, Link } from "react-router";
+import { data } from "react-router";
 
 import { runEffect } from "#~/AppRuntime";
 import { GuildSettingsForm } from "#~/components/GuildSettingsForm";
@@ -51,30 +51,21 @@ export default function Settings({
   return (
     <div className="space-y-8">
       {/* Settings Form */}
-      {currentSettings ? (
-        <GuildSettingsForm
-          guildId={guildId}
-          roles={roles}
-          channels={channels}
-          buttonText="Save Settings"
-          defaultValues={{
-            moderatorRole: currentSettings.moderator,
-            modLogChannel: currentSettings.modLog,
-            restrictedRole: currentSettings.restricted,
-          }}
-        />
-      ) : (
-        <>
-          You haven’t finished setting the bot up for this server yet!{" "}
-          <Link
-            className="text-amber-400 underline hover:text-amber-300"
-            to={`/app/${guildId}/onboard`}
-          >
-            Finish onboarding
-          </Link>{" "}
-          first.
-        </>
-      )}
+      <GuildSettingsForm
+        guildId={guildId}
+        roles={roles}
+        channels={channels}
+        buttonText="Save Settings"
+        defaultValues={
+          currentSettings
+            ? {
+                moderatorRole: currentSettings.moderator,
+                modLogChannel: currentSettings.modLog,
+                restrictedRole: currentSettings.restricted,
+              }
+            : undefined
+        }
+      />
     </div>
   );
 }

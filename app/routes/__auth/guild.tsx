@@ -281,12 +281,6 @@ export default function GuildOverview() {
         >
           Settings
         </Link>
-        <Link
-          to={`/app/${guild.id}/onboard`}
-          className="text-sm font-medium text-stone-400 transition-colors hover:text-stone-100"
-        >
-          Onboarding
-        </Link>
       </div>
     </main>
   );

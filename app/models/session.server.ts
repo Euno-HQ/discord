@@ -368,7 +368,7 @@ export async function completeOauthLogin(request: Request) {
   // Determine redirect based on flow
   let finalRedirectTo = stateRedirectTo || "/app";
   if (flow !== "user" && guildId) {
-    finalRedirectTo = `app/${guildId}/onboard`;
+    finalRedirectTo = `/app/${guildId}`;
   }
 
   const [clientCookie, dbCookie] = await Promise.all([
