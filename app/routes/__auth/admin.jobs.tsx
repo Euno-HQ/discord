@@ -1,3 +1,4 @@
+import { runEffect } from "#~/AppRuntime";
 import { Page } from "#~/basics/page.js";
 import {
   JobProgressBar,
@@ -13,7 +14,7 @@ import type { Route } from "./+types/admin.jobs";
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireAdmin(request);
-  const jobs = await fetchAdminJobs();
+  const jobs = await runEffect(fetchAdminJobs());
   return { jobs };
 }
 
