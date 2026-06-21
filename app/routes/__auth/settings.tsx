@@ -2,7 +2,7 @@ import { data } from "react-router";
 
 import { runEffect } from "#~/AppRuntime";
 import { GuildSettingsForm } from "#~/components/GuildSettingsForm";
-import { fetchGuildData, type GuildData } from "#~/helpers/guildData.server";
+import { fetchGuildData } from "#~/helpers/guildData.server";
 import { log, trackPerformance } from "#~/helpers/observability";
 import { fetchSettings, setSettings, SETTINGS } from "#~/models/guilds.server";
 import { requireUser } from "#~/models/session.server";
@@ -28,13 +28,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
         SETTINGS.restricted,
       ]),
     ).catch(() => undefined),
-    fetchGuildData(guildId).catch(
-      () =>
-        ({
-          roles: [],
-          channels: [],
-        }) as GuildData,
-    ),
+    runEffect(fetchGuildData(guildId)),
   ]);
 
   return {
