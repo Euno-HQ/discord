@@ -1,13 +1,14 @@
 import type { PropsWithChildren } from "react";
 import { data, Link, useSearchParams } from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
 import { RangeForm, type PresetKey } from "#~/features/StarHunter/RangeForm.js";
 import {
   calculateCohortBenchmarks,
   getCohortMetrics,
 } from "#~/helpers/cohortAnalysis";
 import { log, trackPerformance } from "#~/helpers/observability";
-import { getTopParticipants } from "#~/models/activity.server";
+import { getTopParticipantsEffect } from "#~/models/activity.server";
 
 import type { Route } from "./+types/dashboard";
 
@@ -48,7 +49,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
         return data(null, { status: 400 });
       }
 
-      const userResults = await getTopParticipants(guildId, start, end);
+      const userResults = await runEffect(
+        getTopParticipantsEffect(guildId, start, end),
+      );
 
       // Return full cohort metrics and benchmarks
       const cohortMetrics = await getCohortMetrics(
