@@ -2,8 +2,8 @@ import type { Collection, Guild } from "discord.js";
 import { Context, Effect, Layer } from "effect";
 import { PostHog } from "posthog-node";
 
+import { logEffect } from "#~/effects/observability.ts";
 import { posthogApiKey, posthogHost } from "#~/helpers/env.server";
-import { log } from "#~/helpers/observability";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
 export class PostHogService extends Context.Tag("PostHogService")<
@@ -14,9 +14,9 @@ export class PostHogService extends Context.Tag("PostHogService")<
 export const PostHogServiceLive = Layer.scoped(
   PostHogService,
   Effect.acquireRelease(
-    Effect.sync(() => {
+    Effect.gen(function* () {
       if (!posthogApiKey) {
-        log(
+        yield* logEffect(
           "info",
           "PostHogService",
           "No PostHog API key configured, metrics disabled",
@@ -28,14 +28,18 @@ export const PostHogServiceLive = Layer.scoped(
         flushAt: 20,
         flushInterval: 10000,
       });
-      log("info", "PostHogService", "PostHog client initialized");
+      yield* logEffect("info", "PostHogService", "PostHog client initialized");
       return client;
     }),
     (client) =>
-      Effect.promise(async () => {
+      Effect.gen(function* () {
         if (client) {
-          await client.shutdown();
-          log("info", "PostHogService", "PostHog client shut down");
+          yield* Effect.promise(() => client.shutdown());
+          yield* logEffect(
+            "info",
+            "PostHogService",
+            "PostHog client shut down",
+          );
         }
       }),
   ),
@@ -72,12 +76,10 @@ export const syncGuildGroup = (guildId: string, guild?: Guild) =>
       }),
     ).pipe(
       Effect.catchAll((error) =>
-        Effect.sync(() =>
-          log("warn", "PostHogService", "Failed to sync guild group", {
-            guildId,
-            error,
-          }),
-        ),
+        logEffect("warn", "PostHogService", "Failed to sync guild group", {
+          guildId,
+          error,
+        }),
       ),
     );
   });
@@ -94,7 +96,7 @@ export const initializeGroups = (guilds: Collection<string, Guild>) =>
       yield* syncGuildGroup(guildId, guild);
     }
 
-    log(
+    yield* logEffect(
       "info",
       "PostHogService",
       `Initialized ${guilds.size} guild groups in PostHog`,

@@ -16,6 +16,7 @@ import type {
   GuildMessageDelete,
   GuildMessageUpdate,
 } from "#~/discord/events";
+import { logEffect } from "#~/effects/observability.ts";
 import { log } from "#~/helpers/observability";
 
 // --- Pure enrichment functions ---
@@ -231,7 +232,7 @@ export const DiscordEventBusLive = Layer.scoped(
       Effect.runFork(Queue.offer(queue, { type: "GuildDelete", guild }));
     });
 
-    log("info", "DiscordEventBus", "Event source registered");
+    yield* logEffect("info", "DiscordEventBus", "Event source registered");
 
     // Create broadcast stream — each subscriber gets independent backpressure.
     // The Scope from Layer.scoped keeps the broadcast alive for the runtime lifetime.
