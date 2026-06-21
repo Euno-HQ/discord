@@ -7,6 +7,7 @@ import {
   useSearchParams,
 } from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
 import { log } from "#~/helpers/observability";
 import { requestOrigin } from "#~/helpers/request.server";
 import { requireUser } from "#~/models/session.server";
@@ -27,8 +28,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     throw data({ message: "Guild ID is required" }, { status: 400 });
   }
 
-  const subscription = await SubscriptionService.getGuildSubscription(guildId);
-  const currentTier = await SubscriptionService.getProductTier(guildId);
+  const subscription = await runEffect(
+    SubscriptionService.getGuildSubscription(guildId),
+  );
+  const currentTier = await runEffect(
+    SubscriptionService.getProductTier(guildId),
+  );
 
   return {
     guildId,
@@ -55,8 +60,9 @@ export async function action({ request }: Route.ActionArgs) {
       userId: user.id,
     });
 
-    const subscription =
-      await SubscriptionService.getGuildSubscription(guildId);
+    const subscription = await runEffect(
+      SubscriptionService.getGuildSubscription(guildId),
+    );
 
     if (!subscription?.stripe_subscription_id) {
       return {
@@ -80,7 +86,9 @@ export async function action({ request }: Route.ActionArgs) {
       };
     }
 
-    await SubscriptionService.updateSubscriptionStatus(guildId, "cancelled");
+    await runEffect(
+      SubscriptionService.updateSubscriptionStatus(guildId, "cancelled"),
+    );
 
     log("info", "Upgrade", "Subscription cancelled successfully", {
       guildId,

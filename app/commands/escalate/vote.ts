@@ -7,7 +7,7 @@ import { hasModRole } from "#~/helpers/discord";
 import { calculateScheduledFor, parseFlags } from "#~/helpers/escalationVotes";
 import type { Features } from "#~/helpers/featuresFlags";
 import type { Resolution, VotingStrategy } from "#~/helpers/modResponse";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 import { EscalationService, type Escalation } from "./service";
 import {
@@ -39,7 +39,7 @@ export const voteEffect =
       const features: Features[] = [];
 
       // Get settings
-      const { moderator: modRoleId, restricted } = yield* fetchSettingsEffect(
+      const { moderator: modRoleId, restricted } = yield* fetchSettings(
         guildId,
         [SETTINGS.moderator, SETTINGS.restricted],
       );

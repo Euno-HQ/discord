@@ -28,7 +28,7 @@ import {
   quoteAndEscape,
   quoteAndEscapePoll,
 } from "#~/helpers/discord";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 import {
   getReportsForMessage,
   getUserReportStats,
@@ -85,7 +85,7 @@ export function logUserMessage({
     // Check if this exact message has already been reported
     const [existingReports, { modLog }, logBody, thread] = yield* Effect.all([
       getReportsForMessage(message.id, guild.id),
-      fetchSettingsEffect(guild.id, [SETTINGS.modLog]),
+      fetchSettings(guild.id, [SETTINGS.modLog]),
       constructLog({
         extra,
         logs: [{ message, reason, staff }],

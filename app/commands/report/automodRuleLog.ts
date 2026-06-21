@@ -11,7 +11,7 @@ import { AUDIT_LOG_WINDOW_MS, fetchAuditLogEntry } from "#~/discord/auditLog";
 import { fetchChannelFromClient, sendMessage } from "#~/effects/discordSdk";
 import { logEffect } from "#~/effects/observability";
 import { truncateMessage } from "#~/helpers/string";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -108,9 +108,7 @@ const buildUpdateDiff = (
 
 const fetchModLogChannel = (rule: AutoModerationRule) =>
   Effect.gen(function* () {
-    const { modLog } = yield* fetchSettingsEffect(rule.guild.id, [
-      SETTINGS.modLog,
-    ]);
+    const { modLog } = yield* fetchSettings(rule.guild.id, [SETTINGS.modLog]);
     if (!modLog) {
       yield* logEffect(
         "debug",

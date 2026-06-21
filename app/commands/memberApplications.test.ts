@@ -17,10 +17,10 @@ vi.mock("#~/discord/api", () => ({
   },
 }));
 
-// Mock fetchSettingsEffect so resolveLogMessage doesn't need a guilds table
+// Mock fetchSettings so resolveLogMessage doesn't need a guilds table
 vi.mock("#~/models/guilds.server", () => ({
   SETTINGS: { modLog: "modLog" },
-  fetchSettingsEffect: () => Effect.succeed({ modLog: "fake-mod-log-channel" }),
+  fetchSettings: () => Effect.succeed({ modLog: "fake-mod-log-channel" }),
 }));
 
 // The apply-to-join handler now imports FeatureFlagService, so loading this

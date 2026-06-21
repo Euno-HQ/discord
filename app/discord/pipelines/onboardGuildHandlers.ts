@@ -63,10 +63,7 @@ export const handleGuildCreate = (
   e: GuildCreateEvent,
 ): Effect.Effect<void, unknown, RuntimeContext> =>
   Effect.gen(function* () {
-    const appGuild = yield* Effect.tryPromise({
-      try: () => fetchGuild(e.guild.id),
-      catch: (err) => err,
-    });
+    const appGuild = yield* fetchGuild(e.guild.id);
 
     botStats.guildJoined(e.guild);
 
@@ -93,10 +90,7 @@ export const handleGuildDelete = (
     // GuildDelete also fires when a guild becomes temporarily unavailable
     if (e.guild.available === false) return;
 
-    const appGuild = yield* Effect.tryPromise({
-      try: () => fetchGuild(e.guild.id),
-      catch: (err) => err,
-    });
+    const appGuild = yield* fetchGuild(e.guild.id);
 
     if (!appGuild) return;
 

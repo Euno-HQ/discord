@@ -1,6 +1,6 @@
 import { useLoaderData } from "react-router";
 
-import { db, run } from "#~/AppRuntime";
+import { db, run, runEffect } from "#~/AppRuntime";
 import { AddEunoCard } from "#~/components/AddEunoCard";
 import { ServerCard } from "#~/components/ServerCard";
 import { ssrDiscordSdk, userDiscordSdkFromRequest } from "#~/discord/api";
@@ -96,7 +96,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       ),
 
       // 4. All subscriptions
-      SubscriptionService.getAllSubscriptions(),
+      runEffect(SubscriptionService.getAllSubscriptions()),
     ]);
 
   // Build sparkline arrays (30 days, zero-filled)

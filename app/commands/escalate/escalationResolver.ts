@@ -24,7 +24,7 @@ import {
   resolutions,
   type Resolution,
 } from "#~/helpers/modResponse";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 import { EscalationService, type Escalation } from "./service";
 import { buildVotesListContent } from "./strings";
@@ -94,7 +94,7 @@ export const processEscalationEffect = (
     }
 
     const [{ modLog }, reportedUser, guild, channel] = yield* Effect.all([
-      fetchSettingsEffect(escalation.guild_id, [SETTINGS.modLog]),
+      fetchSettings(escalation.guild_id, [SETTINGS.modLog]),
       fetchUserOrNull(client, escalation.reported_user_id),
       fetchGuild(client, escalation.guild_id),
       fetchChannelFromClient<ThreadChannel>(client, escalation.thread_id),

@@ -44,7 +44,7 @@ import "#~/jobs/bulkRoleAssignment";
 
 import { runJobRunner } from "#~/jobs/jobRunner";
 
-import { runEffect, runtime } from "./AppRuntime";
+import { runEffect, runtime, warmRuntime } from "./AppRuntime";
 import { checkpointWal, runIntegrityCheck } from "./Database";
 import { tryDiscord } from "./effects/classifyDiscordError";
 import { logEffect } from "./effects/observability";
@@ -226,4 +226,5 @@ const startup = Effect.gen(function* () {
 });
 
 console.log("running program");
+await warmRuntime();
 runtime.runCallback(startup);

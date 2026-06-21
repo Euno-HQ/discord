@@ -8,7 +8,7 @@ import type {
   UserContextMenuCommandInteraction,
 } from "discord.js";
 
-import { posthogClient } from "#~/AppRuntime.ts";
+import { getPosthog } from "#~/AppRuntime.ts";
 import { log } from "#~/helpers/observability";
 
 type EventValue = string | number | boolean;
@@ -312,14 +312,15 @@ const emitEvent = (
     guildId,
   }: { data?: EmitEventData; userId?: string; guildId?: string } = {},
 ) => {
+  const posthog = getPosthog();
   log("info", "Metrics", "event emitted", {
     user_id: userId,
     event_type: eventName,
     event_properties: data,
-    client: Boolean(posthogClient),
+    client: Boolean(posthog),
   });
 
-  posthogClient?.capture({
+  posthog?.capture({
     distinctId: userId ?? "system",
     event: eventName,
     properties: {

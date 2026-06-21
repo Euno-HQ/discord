@@ -18,7 +18,7 @@ import { TransientError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { quoteMessageContent } from "#~/helpers/discord";
 import { getOrCreateDeletionLogThread } from "#~/models/deletionLogThreads";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 import { getOrCreateUserThread } from "#~/models/userThreads";
 
 // --- Uncached deletion batching ---
@@ -84,7 +84,7 @@ export const handleDelete = (
     const guild = e.guild;
     const msg = e.message;
 
-    const settings = yield* fetchSettingsEffect(guild.id, [
+    const settings = yield* fetchSettings(guild.id, [
       SETTINGS.deletionLog,
     ]).pipe(Effect.catchAll(() => Effect.succeed(null)));
 
@@ -251,7 +251,7 @@ export const handleEdit = (
     const newMessage = e.newMessage;
     const oldMessage = e.oldMessage;
 
-    const settings = yield* fetchSettingsEffect(guild.id, [
+    const settings = yield* fetchSettings(guild.id, [
       SETTINGS.deletionLog,
     ]).pipe(Effect.catchAll(() => Effect.succeed(null)));
 
@@ -337,7 +337,7 @@ export const handleBulkDelete = (
     const messages = e.messages;
     const channel = e.channel;
 
-    const settings = yield* fetchSettingsEffect(guild.id, [
+    const settings = yield* fetchSettings(guild.id, [
       SETTINGS.deletionLog,
     ]).pipe(Effect.catchAll(() => Effect.succeed(null)));
 

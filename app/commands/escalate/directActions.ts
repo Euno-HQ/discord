@@ -10,7 +10,7 @@ import { NotAuthorizedError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { hasModRole } from "#~/helpers/discord";
 import { applyRestriction, ban, kick, timeout } from "#~/models/discord.server";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 import { deleteAllReportedForUser } from "#~/models/reportedMessages";
 
 export interface DeleteMessagesResult {
@@ -78,7 +78,7 @@ export const kickUser = (interaction: MessageComponentInteraction) =>
     const guildId = interaction.guildId!;
 
     // Get settings and check permissions
-    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+    const { moderator: modRoleId } = yield* fetchSettings(guildId, [
       SETTINGS.moderator,
     ]);
 
@@ -129,7 +129,7 @@ export const banUser = (interaction: MessageComponentInteraction) =>
     const guildId = interaction.guildId!;
 
     // Get settings and check permissions
-    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+    const { moderator: modRoleId } = yield* fetchSettings(guildId, [
       SETTINGS.moderator,
     ]);
 
@@ -184,7 +184,7 @@ export const banUserAndDeleteMessages = (
     const guildId = interaction.guildId!;
 
     // Get settings and check permissions
-    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+    const { moderator: modRoleId } = yield* fetchSettings(guildId, [
       SETTINGS.moderator,
     ]);
 
@@ -248,7 +248,7 @@ export const restrictUser = (interaction: MessageComponentInteraction) =>
     const guildId = interaction.guildId!;
 
     // Get settings and check permissions
-    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+    const { moderator: modRoleId } = yield* fetchSettings(guildId, [
       SETTINGS.moderator,
     ]);
 
@@ -299,7 +299,7 @@ export const timeoutUser = (interaction: MessageComponentInteraction) =>
     const guildId = interaction.guildId!;
 
     // Get settings and check permissions
-    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+    const { moderator: modRoleId } = yield* fetchSettings(guildId, [
       SETTINGS.moderator,
     ]);
 

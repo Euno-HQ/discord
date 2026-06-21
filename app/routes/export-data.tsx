@@ -1,4 +1,10 @@
-import { db, isFeatureEnabled, run, runTakeFirst } from "#~/AppRuntime";
+import {
+  db,
+  isFeatureEnabled,
+  run,
+  runEffect,
+  runTakeFirst,
+} from "#~/AppRuntime";
 import { log, trackPerformance } from "#~/helpers/observability";
 import { requireUser } from "#~/models/session.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
@@ -71,8 +77,9 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
 
         // Get subscription data
-        const subscription =
-          await SubscriptionService.getGuildSubscription(guildId);
+        const subscription = await runEffect(
+          SubscriptionService.getGuildSubscription(guildId),
+        );
 
         if (subscription) {
           exportData.subscription = {

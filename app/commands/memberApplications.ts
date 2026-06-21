@@ -35,7 +35,7 @@ import {
   type ModalCommand,
 } from "#~/helpers/discord";
 import { activateMembershipGateEffect } from "#~/jobs/bulkRoleAssignment";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 import { getOrCreateUserThread } from "#~/models/userThreads";
 
 /**
@@ -80,7 +80,7 @@ const resolveLogMessage = (
 ) =>
   Effect.gen(function* () {
     const db = yield* DatabaseService;
-    const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(guildId, [
+    const { [SETTINGS.modLog]: modLog } = yield* fetchSettings(guildId, [
       SETTINGS.modLog,
     ]);
 
@@ -355,7 +355,7 @@ export const Command = [
         )) as { id: string };
 
         // Post summary to mod-log channel with link to the review message
-        const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(
+        const { [SETTINGS.modLog]: modLog } = yield* fetchSettings(
           interaction.guild.id,
           [SETTINGS.modLog],
         );
@@ -432,7 +432,7 @@ export const Command = [
         const approverId = interaction.user.id;
 
         // Verify the user has the moderator role
-        const { [SETTINGS.moderator]: modRoleId } = yield* fetchSettingsEffect(
+        const { [SETTINGS.moderator]: modRoleId } = yield* fetchSettings(
           guildId,
           [SETTINGS.moderator],
         );
@@ -561,8 +561,10 @@ export const Command = [
         const denierId = interaction.user.id;
 
         // Verify the user has the moderator role
-        const { [SETTINGS.moderator]: denyModRoleId } =
-          yield* fetchSettingsEffect(guildId, [SETTINGS.moderator]);
+        const { [SETTINGS.moderator]: denyModRoleId } = yield* fetchSettings(
+          guildId,
+          [SETTINGS.moderator],
+        );
         if (!hasModRole(interaction, denyModRoleId)) {
           yield* interactionReply(interaction, {
             content: "Only moderators can deny applications.",
@@ -857,7 +859,7 @@ export const Command = [
         }
 
         // Verify the user has the moderator role
-        const { [SETTINGS.moderator]: modRoleId } = yield* fetchSettingsEffect(
+        const { [SETTINGS.moderator]: modRoleId } = yield* fetchSettings(
           guildId,
           [SETTINGS.moderator],
         );

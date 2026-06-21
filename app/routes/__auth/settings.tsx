@@ -1,5 +1,6 @@
 import { data, Link } from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
 import { GuildSettingsForm } from "#~/components/GuildSettingsForm";
 import { fetchGuildData, type GuildData } from "#~/helpers/guildData.server";
 import { log, trackPerformance } from "#~/helpers/observability";
@@ -20,11 +21,13 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   // Fetch current guild settings
   const [currentSettings, { roles, channels }] = await Promise.all([
-    fetchSettings(guildId, [
-      SETTINGS.modLog,
-      SETTINGS.moderator,
-      SETTINGS.restricted,
-    ]).catch(() => undefined),
+    runEffect(
+      fetchSettings(guildId, [
+        SETTINGS.modLog,
+        SETTINGS.moderator,
+        SETTINGS.restricted,
+      ]),
+    ).catch(() => undefined),
     fetchGuildData(guildId).catch(
       () =>
         ({
@@ -104,11 +107,13 @@ export async function action({ request }: Route.ActionArgs) {
 
   try {
     await trackPerformance("guilds.setSettings", () =>
-      setSettings(guildId, {
-        [SETTINGS.modLog]: modLogChannel,
-        [SETTINGS.moderator]: moderatorRole,
-        [SETTINGS.restricted]: restrictedRole || undefined,
-      }),
+      runEffect(
+        setSettings(guildId, {
+          [SETTINGS.modLog]: modLogChannel,
+          [SETTINGS.moderator]: moderatorRole,
+          [SETTINGS.restricted]: restrictedRole || undefined,
+        }),
+      ),
     );
 
     log("info", "settings", "Settings updated successfully", {

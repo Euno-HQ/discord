@@ -1,6 +1,6 @@
 import { data } from "react-router";
 
-import { posthogClient } from "#~/AppRuntime";
+import { getPosthog } from "#~/AppRuntime";
 import { requireUser } from "#~/models/session.server";
 import { StripeService } from "#~/models/stripe.server";
 
@@ -13,8 +13,9 @@ export async function requireAdmin(request: Request) {
 }
 
 export async function fetchFeatureFlags(guildId: string) {
-  if (!posthogClient) return null;
-  return (await posthogClient.getAllFlags(guildId, {
+  const posthog = getPosthog();
+  if (!posthog) return null;
+  return (await posthog.getAllFlags(guildId, {
     groups: { guild: guildId },
   })) as Record<string, string | boolean>;
 }

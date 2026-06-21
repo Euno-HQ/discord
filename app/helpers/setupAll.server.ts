@@ -11,7 +11,13 @@ import {
   type RESTPostAPIGuildChannelJSONBody,
 } from "discord-api-types/v10";
 
-import { db, isFeatureEnabled, run, runTakeFirst } from "#~/AppRuntime";
+import {
+  db,
+  isFeatureEnabled,
+  run,
+  runEffect,
+  runTakeFirst,
+} from "#~/AppRuntime";
 import { DEFAULT_MESSAGE_TEXT } from "#~/commands/setupHoneypot";
 import { DEFAULT_BUTTON_TEXT } from "#~/commands/setupTickets";
 import { ssrDiscordSdk } from "#~/discord/api";
@@ -104,7 +110,7 @@ export async function setupAll(
   const created: string[] = [];
 
   // Register guild (idempotent)
-  await registerGuild(guildId);
+  await runEffect(registerGuild(guildId));
 
   // --- Load existing config to skip unchanged values ---
   const existingAppConfig = await runTakeFirst(
@@ -319,20 +325,22 @@ export async function setupAll(
   }
 
   // --- Save guild settings ---
-  await setSettings(guildId, {
-    [SETTINGS.modLog]: modLogChannelId,
-    [SETTINGS.moderator]: moderatorRoleId,
-    [SETTINGS.restricted]: restrictedRoleId,
-    ...(deletionLogChannelId
-      ? { [SETTINGS.deletionLog]: deletionLogChannelId }
-      : {}),
-    ...(resolvedMemberRoleId
-      ? { [SETTINGS.memberRole]: resolvedMemberRoleId }
-      : {}),
-    ...(applicationChannelId
-      ? { [SETTINGS.applicationChannel]: applicationChannelId }
-      : {}),
-  });
+  await runEffect(
+    setSettings(guildId, {
+      [SETTINGS.modLog]: modLogChannelId,
+      [SETTINGS.moderator]: moderatorRoleId,
+      [SETTINGS.restricted]: restrictedRoleId,
+      ...(deletionLogChannelId
+        ? { [SETTINGS.deletionLog]: deletionLogChannelId }
+        : {}),
+      ...(resolvedMemberRoleId
+        ? { [SETTINGS.memberRole]: resolvedMemberRoleId }
+        : {}),
+      ...(applicationChannelId
+        ? { [SETTINGS.applicationChannel]: applicationChannelId }
+        : {}),
+    }),
+  );
 
   // --- Honeypot channel (optional) ---
   let honeypotChannelId: string | undefined;
@@ -421,7 +429,7 @@ export async function setupAll(
   }
 
   // --- Initialize free subscription ---
-  await SubscriptionService.initializeFreeSubscription(guildId);
+  await runEffect(SubscriptionService.initializeFreeSubscription(guildId));
 
   log("info", "setupAll", "Setup-all completed via web", {
     guildId,

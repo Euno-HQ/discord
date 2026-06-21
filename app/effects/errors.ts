@@ -62,6 +62,10 @@ export class FeatureDisabledError extends Data.TaggedError(
   reason: "not_in_rollout" | "tier_required" | "flag_unavailable";
 }> {}
 
+export class SubscriptionNotFoundError extends Data.TaggedError(
+  "SubscriptionNotFoundError",
+)<{ guildId: string }> {}
+
 // --- Infra error taxonomy (named by the decision each drives) -------------
 // `cause` is always a serializable Error (narrowed at the classifier boundary).
 
@@ -144,6 +148,7 @@ export type AppError =
   | NoLeaderError
   | ResolutionExecutionError
   | FeatureDisabledError
+  | SubscriptionNotFoundError
   | SqlErrorType
   /** Effect.tryPromise wraps thrown exceptions in UnknownException; command-level
    *  catchAll blocks see this whenever a raw promise rejects with an untyped error. */

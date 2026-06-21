@@ -19,7 +19,7 @@ import {
 } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { escalationControls } from "#~/helpers/escalate";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 type ThreadError = DiscordError | SqlError | NotFoundError;
 
@@ -194,7 +194,7 @@ const doGetOrCreateUserThread = (guild: Guild, user: User) =>
     }
 
     // Create new thread and store in database
-    const { modLog: modLogId } = yield* fetchSettingsEffect(guild.id, [
+    const { modLog: modLogId } = yield* fetchSettings(guild.id, [
       SETTINGS.modLog,
     ]);
 

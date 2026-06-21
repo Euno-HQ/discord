@@ -8,7 +8,7 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { db, runTakeFirst } from "#~/AppRuntime";
+import { db, runEffect, runTakeFirst } from "#~/AppRuntime";
 import {
   interactionDeferUpdate,
   interactionEditReply,
@@ -134,7 +134,7 @@ export async function initSetupForm(
 
   // Try to populate from existing guild settings
   const defaults = defaultSetup();
-  const guild = await fetchGuild(guildId);
+  const guild = await runEffect(fetchGuild(guildId));
   if (guild?.settings) {
     const settings = JSON.parse(guild.settings) as Record<string, string>;
 

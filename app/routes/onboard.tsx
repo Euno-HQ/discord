@@ -1,5 +1,6 @@
 import { data } from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
 import { Page } from "#~/basics/page.js";
 import { GuildSettingsForm } from "#~/components/GuildSettingsForm";
 import { fetchGuildData } from "#~/helpers/guildData.server";
@@ -21,13 +22,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   log("info", "onboarding", "Onboarding page accessed", { guildId });
 
   // Get subscription info for the guild
-  const subscription = await trackPerformance(
-    "subscriptions.getGuildSubscription",
-    () => SubscriptionService.getGuildSubscription(guildId),
+  const subscription = await runEffect(
+    SubscriptionService.getGuildSubscription(guildId),
   );
-  const tier = await trackPerformance("subscriptions.getProductTier", () =>
-    SubscriptionService.getProductTier(guildId),
-  );
+  const tier = await runEffect(SubscriptionService.getProductTier(guildId));
 
   // Fetch guild data using the reusable service
   const { roles, channels } = await fetchGuildData(guildId);
@@ -107,21 +105,21 @@ export async function action({ request }: Route.ActionArgs) {
   try {
     // Register the guild and set up configuration
     await trackPerformance("guilds.registerGuild", () =>
-      registerGuild(guildId),
+      runEffect(registerGuild(guildId)),
     );
 
     await trackPerformance("guilds.setSettings", () =>
-      setSettings(guildId, {
-        [SETTINGS.modLog]: modLogChannel,
-        [SETTINGS.moderator]: moderatorRole,
-        [SETTINGS.restricted]: restrictedRole || undefined,
-      }),
+      runEffect(
+        setSettings(guildId, {
+          [SETTINGS.modLog]: modLogChannel,
+          [SETTINGS.moderator]: moderatorRole,
+          [SETTINGS.restricted]: restrictedRole || undefined,
+        }),
+      ),
     );
 
     // Initialize free subscription for new guilds
-    await trackPerformance("subscriptions.initializeFreeSubscription", () =>
-      SubscriptionService.initializeFreeSubscription(guildId),
-    );
+    await runEffect(SubscriptionService.initializeFreeSubscription(guildId));
 
     log("info", "onboarding", "Onboarding completed successfully", {
       guildId,
