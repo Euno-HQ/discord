@@ -320,7 +320,7 @@ export async function completeOauthLogin(request: Request) {
     code,
     redirect_uri: `${origin}/${OAUTH_REDIRECT_ROUTE}`,
   });
-  const discordUser = await fetchUser(token);
+  const discordUser = await runEffect(fetchUser(token));
 
   // Retrieve our user from Discord ID
   let userId;

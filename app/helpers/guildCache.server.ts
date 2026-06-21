@@ -1,6 +1,7 @@
 import type { REST } from "@discordjs/rest";
 import TTLCache from "@isaacs/ttlcache";
 
+import { runEffect } from "#~/AppRuntime";
 import { log } from "#~/helpers/observability";
 import { fetchGuilds, type Guild } from "#~/models/discord.server";
 
@@ -36,7 +37,7 @@ export async function getCachedGuilds(
   const cached = guildCache.get(userId);
   if (cached) return cached;
 
-  const guilds = await fetchGuilds(userRest, botRest);
+  const guilds = await runEffect(fetchGuilds(userRest, botRest));
   const result = guilds.map(toCachedGuild);
   guildCache.set(userId, result);
 

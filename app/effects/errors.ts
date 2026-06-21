@@ -66,6 +66,20 @@ export class SubscriptionNotFoundError extends Data.TaggedError(
   "SubscriptionNotFoundError",
 )<{ guildId: string }> {}
 
+/**
+ * Raw `fetch` to a Discord OAuth endpoint (e.g. `/users/@me`) failed: either the
+ * request rejected (network) or returned a non-2xx status. This is distinct from
+ * the `DiscordError` taxonomy, which classifies `@discordjs/rest` SDK rejection
+ * shapes — the OAuth user-info call is a bare `fetch` with an OAuth access token,
+ * not an SDK call, so it never produces those shapes. `status` is absent on a
+ * network-level rejection.
+ */
+export class OAuthFetchError extends Data.TaggedError("OAuthFetchError")<{
+  operation: string;
+  status?: number;
+  cause: Error;
+}> {}
+
 // --- Infra error taxonomy (named by the decision each drives) -------------
 // `cause` is always a serializable Error (narrowed at the classifier boundary).
 
@@ -149,6 +163,7 @@ export type AppError =
   | ResolutionExecutionError
   | FeatureDisabledError
   | SubscriptionNotFoundError
+  | OAuthFetchError
   | SqlErrorType
   /** Effect.tryPromise wraps thrown exceptions in UnknownException; command-level
    *  catchAll blocks see this whenever a raw promise rejects with an untyped error. */
