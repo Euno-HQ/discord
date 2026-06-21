@@ -2,7 +2,7 @@
 
 Grounding: `app/commands/escalate/*`, `app/discord/escalationResolver.ts`,
 `app/commands/memberApplications.ts`, `app/commands/setupHandlers.ts` +
-`app/helpers/setupAll.server.ts`, `setupHoneypot.ts`, `setupTickets.ts`,
+`app/helpers/setupAll.server.ts`, `setupTickets.ts`,
 `setupReactjiChannel.ts`, `force-ban.ts`, `modreport.ts`, `track.ts`.
 Tables: `escalations`, `escalation_records`, `applications`, `honeypot_config`,
 `tickets_config`, `reactji_channeler_config`, `reported_messages`.
@@ -23,13 +23,13 @@ prove: local → mod-log / deletion-log / honeypot / contact / apply channels ex
 pass:  setup provisions resources in safe order; no guild left view-denied without a member role.
 
 ### A2 honeypot setup
-do:    run the honeypot setup command for a channel
+do:    from /setup Screen 1, toggle honeypot on → "Next →"; on Screen 2, select or create the honeypot channel → "Review →" → "Confirm ✓"
 prove: local → `honeypot_config` has `(guild_id, channel_id)`; re-running is idempotent (ON CONFLICT DO NOTHING); warning message posted to the channel.
        uat   → honeypot channel shows the warning post.
 pass:  honeypot configured, idempotent on re-run. (Enforcement is covered in spam.md Batch D.)
 
 ### A3 tickets setup
-do:    run the tickets-channel command; then a user opens a ticket via the button
+do:    from /setup Screen 1, toggle tickets on → "Next →"; on Screen 2, select or create the tickets channel → "Review →" → "Confirm ✓"; then a user opens a ticket via the button
 prove: local → `tickets_config` row keyed by `message_id`; clicking the button opens a private thread named "<user> – <date>"; close buttons offer neutral/👍/👎.
        uat   → ticket thread created on button click.
 pass:  ticket button provisions a private thread; close flow present.
