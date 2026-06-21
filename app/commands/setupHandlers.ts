@@ -409,6 +409,119 @@ function buildSetupFormMessage(
   });
 }
 
+export function buildSetupScreen1Message(
+  guildId: string,
+  state: PendingSetup,
+  errorText?: string,
+): InteractionUpdateOptions {
+  function channelDefaultValues(value: string | null) {
+    return value !== null && value !== CREATE_SENTINEL
+      ? [{ id: value, type: "channel" as const }]
+      : undefined;
+  }
+
+  function roleDefaultValues(roleId: string | undefined) {
+    return roleId ? [{ id: roleId, type: "role" as const }] : undefined;
+  }
+
+  const toggleRow = {
+    type: ComponentType.ActionRow,
+    components: OPTIONAL_CHANNELS.map(({ field, label }) => {
+      const value = (state as unknown as Record<string, string | null>)[
+        FIELD_MAP[field]
+      ];
+      const isDisabled = value === null;
+      return {
+        type: ComponentType.Button,
+        custom_id: `setup-toggle|${guildId}|${field}|${isDisabled ? "enable" : "disable"}|1`,
+        label: `${isDisabled ? "✗" : "✓"} ${label}`,
+        style: isDisabled ? ButtonStyle.Danger : ButtonStyle.Success,
+      };
+    }),
+  };
+
+  return v2Update({
+    flags: MessageFlags.IsComponentsV2,
+    components: [
+      {
+        type: ComponentType.Container,
+        components: [
+          {
+            type: ComponentType.TextDisplay,
+            content: "## Configure Euno",
+          },
+          {
+            type: ComponentType.TextDisplay,
+            content:
+              "Select your channels and roles below. Channels left on 'Create new' will be auto-created with sensible defaults.",
+          },
+          { type: ComponentType.Separator, spacing: 2 },
+          {
+            type: ComponentType.TextDisplay,
+            content:
+              "**Moderator Role** *(required)*\n**Mod Log** — Moderation actions and reports, visible only to mods",
+          },
+          {
+            type: ComponentType.ActionRow,
+            components: [
+              {
+                type: ComponentType.RoleSelect,
+                custom_id: `setup-sel|${guildId}|modRole||1`,
+                placeholder: "Select a moderator role…",
+                ...(state.modRoleId
+                  ? { default_values: roleDefaultValues(state.modRoleId) }
+                  : {}),
+              },
+            ],
+          },
+          {
+            type: ComponentType.ActionRow,
+            components: [
+              {
+                type: ComponentType.ChannelSelect,
+                custom_id: `setup-sel|${guildId}|modLog||1`,
+                placeholder: "Create new #mod-log (default)",
+                channel_types: [ChannelType.GuildText],
+                ...(channelDefaultValues(state.modLogChannel)
+                  ? {
+                      default_values: channelDefaultValues(state.modLogChannel),
+                    }
+                  : {}),
+              },
+            ],
+          },
+          { type: ComponentType.Separator },
+          {
+            type: ComponentType.TextDisplay,
+            content: "**Enabled features**",
+          },
+          toggleRow,
+          { type: ComponentType.Separator },
+          ...(errorText
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content: `⛔ ${errorText}`,
+                },
+              ]
+            : []),
+          {
+            type: ComponentType.ActionRow,
+            components: [
+              {
+                type: ComponentType.Button,
+                custom_id: `setup-next|${guildId}`,
+                label: "Next →",
+                style: ButtonStyle.Primary,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+}
+
 function roleValue(roleId: string | undefined): string {
   return roleId ? `<@&${roleId}>` : "None";
 }

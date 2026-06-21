@@ -8,6 +8,7 @@ import {
   buildFeatureToggleRow,
   buildPermWarnings,
   buildSetupConfirmMessage,
+  buildSetupScreen1Message,
   channelValue,
   defaultSetup,
   type PendingSetup,
@@ -371,5 +372,79 @@ describe("buildSetupConfirmMessage", () => {
     expect(configText).toContain("Create new #honeypot");
     expect(configText).toContain("<#ch-tickets>");
     expect(configText).toContain("<@&role-restricted>");
+  });
+});
+
+// --- buildSetupScreen1Message ---
+
+describe("buildSetupScreen1Message", () => {
+  function getTextDisplays(result: unknown): { content: string }[] {
+    const r = result as {
+      components: [{ components: { type: number; content: string }[] }];
+    };
+    return r.components[0].components.filter(
+      (c) => c.type === (ComponentType.TextDisplay as number),
+    ) as { content: string }[];
+  }
+
+  function getButtons(
+    result: unknown,
+  ): { type: number; label: string; disabled?: boolean; custom_id: string }[] {
+    const r = result as {
+      components: [
+        { components: { type: number; components?: { type: number }[] }[] },
+      ];
+    };
+    return r.components[0].components
+      .filter((c) => c.type === (ComponentType.ActionRow as number))
+      .flatMap((c) => c.components ?? [])
+      .filter((c) => c.type === (ComponentType.Button as number)) as {
+      type: number;
+      label: string;
+      disabled?: boolean;
+      custom_id: string;
+    }[];
+  }
+
+  test("renders the moderator-role and mod-log selects and a Next button", () => {
+    const result = buildSetupScreen1Message("guild-1", makePendingSetup());
+    const buttons = getButtons(result);
+    expect(buttons.some((b) => b.label === "Next →")).toBe(true);
+    expect(buttons.some((b) => b.custom_id === "setup-next|guild-1")).toBe(
+      true,
+    );
+  });
+
+  test("renders the four feature toggle buttons", () => {
+    const result = buildSetupScreen1Message("guild-1", makePendingSetup());
+    const labels = getButtons(result).map((b) => b.label);
+    for (const f of [
+      "Deletion Log",
+      "Honeypot",
+      "Tickets",
+      "Member Applications",
+    ]) {
+      expect(labels.some((l) => l?.includes(f))).toBe(true);
+    }
+  });
+
+  test("surfaces an error string when provided", () => {
+    const result = buildSetupScreen1Message(
+      "guild-1",
+      makePendingSetup(),
+      "Pick a mod role",
+    );
+    const texts = getTextDisplays(result)
+      .map((t) => t.content)
+      .join("\n");
+    expect(texts).toContain("Pick a mod role");
+  });
+
+  test("does NOT render per-feature channel selects (those live on screen 2)", () => {
+    const result = buildSetupScreen1Message("guild-1", makePendingSetup());
+    const ids = getButtons(result)
+      .map((b) => b.custom_id)
+      .join(" ");
+    expect(ids).not.toContain("setup-sel|guild-1|deletionLog");
   });
 });
