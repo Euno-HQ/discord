@@ -150,6 +150,15 @@ function hasCookie(request: Request, cookieName: string): boolean {
   return regex.test(cookieHeader);
 }
 
+// `getUser`/`requireUser`/`requireUserId` (and the `getUserId` helper) stay
+// thin `async` functions BY DESIGN. They throw `redirect()`/`logout()`
+// `Response`s to signal React-Router control flow — that thrown Response is
+// framework glue, not a domain error, and must reach the route boundary as a
+// RAW `Response` so React Router treats it as a redirect. Running these through
+// `runEffect`/`runPromise` would wrap any failure in a `FiberFailure`, breaking
+// that contract. So the domain data lookups go through `UserService` via the
+// `userSvc` Effect bridge, while the Response-throwing remains in async land.
+
 async function getUserId(request: Request): Promise<string | undefined> {
   const session = await getDbSession(request.headers.get("Cookie"));
   const userId = session.get(CookieSessionKeys.userId) as string;
@@ -384,36 +393,42 @@ export async function completeOauthLogin(request: Request) {
   return redirect(finalRedirectTo, { headers });
 }
 
-export async function retrieveDiscordToken(request: Request) {
-  const dbSession = await getDbSession(request.headers.get("Cookie"));
-  const storedToken = dbSession.get(CookieSessionKeys.discordToken) as {
-    discordToken: string;
-    [k: string]: unknown;
-  };
-  const token = authorization.createToken(storedToken);
-  return token;
-}
-export async function refreshDiscordSession(request: Request) {
-  const dbSession = await getDbSession(request.headers.get("Cookie"));
-  const token = await retrieveDiscordToken(request);
-  const newToken = await token.refresh();
-  // @ts-expect-error token.toJSON() isn't in the types but it works
-  dbSession.set(CookieSessionKeys.discordToken, newToken.toJSON());
+export const retrieveDiscordToken = (request: Request) =>
+  Effect.gen(function* () {
+    const dbSession = yield* Effect.promise(() =>
+      getDbSession(request.headers.get("Cookie")),
+    );
+    const storedToken = dbSession.get(CookieSessionKeys.discordToken) as {
+      discordToken: string;
+      [k: string]: unknown;
+    };
+    const token = authorization.createToken(storedToken);
+    return token;
+  });
 
-  return dbSession;
-}
+export const refreshDiscordSession = (request: Request) =>
+  Effect.gen(function* () {
+    const dbSession = yield* Effect.promise(() =>
+      getDbSession(request.headers.get("Cookie")),
+    );
+    const token = yield* retrieveDiscordToken(request);
+    const newToken = yield* Effect.promise(() => token.refresh());
+    // @ts-expect-error token.toJSON() isn't in the types but it works
+    dbSession.set(CookieSessionKeys.discordToken, newToken.toJSON());
+
+    return dbSession;
+  });
 
 /**
  * Refresh the Discord OAuth token and persist the updated session to the DB.
  * Returns the `Set-Cookie` header value that must be sent back to the client so
  * future requests read the new token instead of the expired one.
  */
-export async function refreshAndPersistDiscordSession(
-  request: Request,
-): Promise<string> {
-  const session = await refreshDiscordSession(request);
-  return commitDbSession(session);
-}
+export const refreshAndPersistDiscordSession = (request: Request) =>
+  Effect.gen(function* () {
+    const session = yield* refreshDiscordSession(request);
+    return yield* Effect.promise(() => commitDbSession(session));
+  });
 
 export async function logout(request: Request) {
   const [cookieSession, dbSession] = await Promise.all([
