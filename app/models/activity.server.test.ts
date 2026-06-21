@@ -30,11 +30,6 @@ vi.mock("#~/helpers/userInfoCache", () => ({
   }),
 }));
 
-// --- mock cohortAnalysis (only used by getEnhancedUserAnalytics which was deleted) ---
-vi.mock("#~/helpers/cohortAnalysis", () => ({
-  getUserCohortAnalysis: vi.fn().mockResolvedValue(null),
-}));
-
 // In-memory SQLite test layer (mirrors app/models/user.server.test.ts)
 const TestSqliteLive = Layer.scoped(
   SqlClient.SqlClient,

@@ -438,6 +438,6 @@ export const getTopParticipantsEffect = (
     return withUsernames;
   }).pipe(
     Effect.withSpan("Activity.getTopParticipants", {
-      attributes: { guildId: guildId },
+      attributes: { guildId },
     }),
   );
