@@ -91,6 +91,16 @@ export function channelValue(
   return `<#${value}>`;
 }
 
+function channelDefaultValues(value: string | null) {
+  return value !== null && value !== CREATE_SENTINEL
+    ? [{ id: value, type: "channel" as const }]
+    : undefined;
+}
+
+function roleDefaultValues(roleId: string | undefined) {
+  return roleId ? [{ id: roleId, type: "role" as const }] : undefined;
+}
+
 const OPTIONAL_CHANNELS = [
   { field: "deletionLog", label: "Deletion Log" },
   { field: "honeypot", label: "Honeypot" },
@@ -188,16 +198,6 @@ function buildSetupFormMessage(
   state: PendingSetup,
   errorText?: string,
 ) {
-  function channelDefaultValues(value: string | null) {
-    return value !== null && value !== CREATE_SENTINEL
-      ? [{ id: value, type: "channel" as const }]
-      : undefined;
-  }
-
-  function roleDefaultValues(roleId: string | undefined) {
-    return roleId ? [{ id: roleId, type: "role" as const }] : undefined;
-  }
-
   return v2Update({
     flags: MessageFlags.IsComponentsV2,
     components: [
@@ -414,16 +414,6 @@ export function buildSetupScreen1Message(
   state: PendingSetup,
   errorText?: string,
 ): InteractionUpdateOptions {
-  function channelDefaultValues(value: string | null) {
-    return value !== null && value !== CREATE_SENTINEL
-      ? [{ id: value, type: "channel" as const }]
-      : undefined;
-  }
-
-  function roleDefaultValues(roleId: string | undefined) {
-    return roleId ? [{ id: roleId, type: "role" as const }] : undefined;
-  }
-
   const toggleRow = {
     type: ComponentType.ActionRow,
     components: OPTIONAL_CHANNELS.map(({ field, label }) => {
@@ -512,6 +502,203 @@ export function buildSetupScreen1Message(
                 type: ComponentType.Button,
                 custom_id: `setup-next|${guildId}`,
                 label: "Next →",
+                style: ButtonStyle.Primary,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+}
+
+export function buildSetupScreen2Message(
+  guildId: string,
+  state: PendingSetup,
+  errorText?: string,
+): InteractionUpdateOptions {
+  return v2Update({
+    flags: MessageFlags.IsComponentsV2,
+    components: [
+      {
+        type: ComponentType.Container,
+        components: [
+          {
+            type: ComponentType.TextDisplay,
+            content: "## Configure Euno — Feature Details",
+          },
+          {
+            type: ComponentType.TextDisplay,
+            content:
+              "Configure channels and roles for the features you enabled. Channels left on 'Create new' will be auto-created.",
+          },
+          { type: ComponentType.Separator, spacing: 2 },
+          ...(state.deletionLogChannel !== null
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content: "**Deletion Log** — Captures deleted messages",
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.ChannelSelect,
+                      custom_id: `setup-sel|${guildId}|deletionLog||2`,
+                      placeholder: "Create new #deletion-log (default)",
+                      channel_types: [ChannelType.GuildText],
+                      ...(channelDefaultValues(state.deletionLogChannel)
+                        ? {
+                            default_values: channelDefaultValues(
+                              state.deletionLogChannel,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
+                },
+              ]
+            : []),
+          ...(state.honeypotChannel !== null
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content:
+                    "**Honeypot** — Trap channel; bots that post here are auto-banned",
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.ChannelSelect,
+                      custom_id: `setup-sel|${guildId}|honeypot||2`,
+                      placeholder: "Create new #honeypot (default)",
+                      channel_types: [ChannelType.GuildText],
+                      ...(channelDefaultValues(state.honeypotChannel)
+                        ? {
+                            default_values: channelDefaultValues(
+                              state.honeypotChannel,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
+                },
+              ]
+            : []),
+          ...(state.ticketChannel !== null
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content:
+                    "**Ticket Channel** — Where members open private tickets",
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.ChannelSelect,
+                      custom_id: `setup-sel|${guildId}|tickets||2`,
+                      placeholder: "Create new #contact-mods (default)",
+                      channel_types: [ChannelType.GuildText],
+                      ...(channelDefaultValues(state.ticketChannel)
+                        ? {
+                            default_values: channelDefaultValues(
+                              state.ticketChannel,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
+                },
+              ]
+            : []),
+          ...(state.applicationChannel !== null
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content:
+                    "**Application Channel** — Where members submit applications\n**Member Role** — Granted to approved applicants; all current members will receive this role",
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.ChannelSelect,
+                      custom_id: `setup-sel|${guildId}|applications||2`,
+                      placeholder: "Create new #apply-here (default)",
+                      channel_types: [ChannelType.GuildText],
+                      ...(channelDefaultValues(state.applicationChannel)
+                        ? {
+                            default_values: channelDefaultValues(
+                              state.applicationChannel,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.RoleSelect,
+                      custom_id: `setup-sel|${guildId}|memberRole||2`,
+                      placeholder: "Create new @Member role (default)",
+                      ...(state.memberRoleId
+                        ? {
+                            default_values: roleDefaultValues(
+                              state.memberRoleId,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
+                },
+              ]
+            : []),
+          {
+            type: ComponentType.TextDisplay,
+            content:
+              "**Restricted Role** *(optional)* — Assigned to muted/restricted members",
+          },
+          {
+            type: ComponentType.ActionRow,
+            components: [
+              {
+                type: ComponentType.RoleSelect,
+                custom_id: `setup-sel|${guildId}|restrictedRole||2`,
+                placeholder: "None — skip (default)",
+                ...(state.restrictedRoleId
+                  ? {
+                      default_values: roleDefaultValues(state.restrictedRoleId),
+                    }
+                  : {}),
+              },
+            ],
+          },
+          { type: ComponentType.Separator },
+          ...(errorText
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content: `⛔ ${errorText}`,
+                },
+              ]
+            : []),
+          {
+            type: ComponentType.ActionRow,
+            components: [
+              {
+                type: ComponentType.Button,
+                custom_id: `setup-back-core|${guildId}`,
+                label: "← Back",
+                style: ButtonStyle.Secondary,
+              },
+              {
+                type: ComponentType.Button,
+                custom_id: `setup-continue|${guildId}`,
+                label: "Review →",
                 style: ButtonStyle.Primary,
               },
             ],

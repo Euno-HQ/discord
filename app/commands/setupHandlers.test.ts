@@ -9,6 +9,7 @@ import {
   buildPermWarnings,
   buildSetupConfirmMessage,
   buildSetupScreen1Message,
+  buildSetupScreen2Message,
   channelValue,
   defaultSetup,
   type PendingSetup,
@@ -48,6 +49,36 @@ function makePendingSetup(overrides: Partial<PendingSetup> = {}): PendingSetup {
     createdAt: Date.now(),
     ...overrides,
   };
+}
+
+// --- Shared test helpers ---
+
+function getTextDisplays(result: unknown): { content: string }[] {
+  const r = result as {
+    components: [{ components: { type: number; content: string }[] }];
+  };
+  return r.components[0].components.filter(
+    (c) => c.type === (ComponentType.TextDisplay as number),
+  ) as { content: string }[];
+}
+
+function getButtons(
+  result: unknown,
+): { type: number; label: string; disabled?: boolean; custom_id: string }[] {
+  const r = result as {
+    components: [
+      { components: { type: number; components?: { type: number }[] }[] },
+    ];
+  };
+  return r.components[0].components
+    .filter((c) => c.type === (ComponentType.ActionRow as number))
+    .flatMap((c) => c.components ?? [])
+    .filter((c) => c.type === (ComponentType.Button as number)) as {
+    type: number;
+    label: string;
+    disabled?: boolean;
+    custom_id: string;
+  }[];
 }
 
 // --- channelValue ---
@@ -207,34 +238,6 @@ describe("defaultSetup", () => {
 // --- buildSetupConfirmMessage ---
 
 describe("buildSetupConfirmMessage", () => {
-  function getTextDisplays(result: unknown): string[] {
-    const r = result as {
-      components: [{ components: { type: number; content: string }[] }];
-    };
-    return r.components[0].components
-      .filter((c) => c.type === (ComponentType.TextDisplay as number))
-      .map((c) => c.content);
-  }
-
-  function getButtons(
-    result: unknown,
-  ): { type: number; label: string; disabled?: boolean; custom_id: string }[] {
-    const r = result as {
-      components: [
-        { components: { type: number; components?: { type: number }[] }[] },
-      ];
-    };
-    return r.components[0].components
-      .filter((c) => c.type === (ComponentType.ActionRow as number))
-      .flatMap((c) => c.components ?? [])
-      .filter((c) => c.type === (ComponentType.Button as number)) as {
-      type: number;
-      label: string;
-      disabled?: boolean;
-      custom_id: string;
-    }[];
-  }
-
   test("all CREATE_SENTINEL channels listed in 'Create' section", () => {
     const state = makePendingSetup({
       modLogChannel: CREATE_SENTINEL,
@@ -243,7 +246,7 @@ describe("buildSetupConfirmMessage", () => {
       ticketChannel: CREATE_SENTINEL,
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     const changesText = texts.find((t) => t.includes("Changes Euno will make"));
 
     expect(changesText).toBeDefined();
@@ -262,7 +265,7 @@ describe("buildSetupConfirmMessage", () => {
       ticketChannel: "existing-ch-4",
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     const changesText = texts.find((t) => t.includes("Changes Euno will make"));
 
     // No channels to create and no application channel, so no delta section
@@ -278,7 +281,7 @@ describe("buildSetupConfirmMessage", () => {
       applicationChannel: null,
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     const changesText = texts.find((t) => t.includes("Changes Euno will make"));
 
     expect(changesText).toBeUndefined();
@@ -294,7 +297,7 @@ describe("buildSetupConfirmMessage", () => {
       memberRoleId: undefined,
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     const changesText = texts.find((t) => t.includes("Changes Euno will make"));
 
     expect(changesText).toBeDefined();
@@ -314,7 +317,7 @@ describe("buildSetupConfirmMessage", () => {
       memberRoleId: "role-456",
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     const changesText = texts.find((t) => t.includes("Changes Euno will make"));
 
     expect(changesText).toBeDefined();
@@ -361,7 +364,7 @@ describe("buildSetupConfirmMessage", () => {
       restrictedRoleId: "role-restricted",
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     // The config list is the text display that contains "Moderator Role"
     const configText = texts.find((t) => t.includes("Moderator Role"));
 
@@ -378,34 +381,6 @@ describe("buildSetupConfirmMessage", () => {
 // --- buildSetupScreen1Message ---
 
 describe("buildSetupScreen1Message", () => {
-  function getTextDisplays(result: unknown): { content: string }[] {
-    const r = result as {
-      components: [{ components: { type: number; content: string }[] }];
-    };
-    return r.components[0].components.filter(
-      (c) => c.type === (ComponentType.TextDisplay as number),
-    ) as { content: string }[];
-  }
-
-  function getButtons(
-    result: unknown,
-  ): { type: number; label: string; disabled?: boolean; custom_id: string }[] {
-    const r = result as {
-      components: [
-        { components: { type: number; components?: { type: number }[] }[] },
-      ];
-    };
-    return r.components[0].components
-      .filter((c) => c.type === (ComponentType.ActionRow as number))
-      .flatMap((c) => c.components ?? [])
-      .filter((c) => c.type === (ComponentType.Button as number)) as {
-      type: number;
-      label: string;
-      disabled?: boolean;
-      custom_id: string;
-    }[];
-  }
-
   test("renders the moderator-role and mod-log selects and a Next button", () => {
     const result = buildSetupScreen1Message("guild-1", makePendingSetup());
     const buttons = getButtons(result);
@@ -446,5 +421,38 @@ describe("buildSetupScreen1Message", () => {
       .map((b) => b.custom_id)
       .join(" ");
     expect(ids).not.toContain("setup-sel|guild-1|deletionLog");
+  });
+});
+
+// --- buildSetupScreen2Message ---
+
+describe("buildSetupScreen2Message", () => {
+  test("renders Back and Review buttons", () => {
+    const result = buildSetupScreen2Message("guild-1", makePendingSetup());
+    const ids = getButtons(result).map((b) => b.custom_id);
+    expect(ids).toContain("setup-back-core|guild-1");
+    expect(ids).toContain("setup-continue|guild-1");
+  });
+
+  test("renders application channel + member role selects only when applications enabled", () => {
+    const off = buildSetupScreen2Message(
+      "guild-1",
+      makePendingSetup({ applicationChannel: null }),
+    );
+    const on = buildSetupScreen2Message(
+      "guild-1",
+      makePendingSetup({ applicationChannel: CREATE_SENTINEL }),
+    );
+    const idsOff = JSON.stringify(off);
+    const idsOn = JSON.stringify(on);
+    expect(idsOff).not.toContain("setup-sel|guild-1|applications");
+    expect(idsOn).toContain("setup-sel|guild-1|applications");
+  });
+
+  test("always renders the restricted-role select", () => {
+    const result = buildSetupScreen2Message("guild-1", makePendingSetup());
+    expect(JSON.stringify(result)).toContain(
+      "setup-sel|guild-1|restrictedRole",
+    );
   });
 });
