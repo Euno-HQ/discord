@@ -1,8 +1,10 @@
+import { Effect } from "effect";
+
 import type { REST } from "@discordjs/rest";
 import TTLCache from "@isaacs/ttlcache";
 
-import { runEffect } from "#~/AppRuntime";
-import { log } from "#~/helpers/observability";
+import type { DiscordError } from "#~/effects/errors";
+import { logEffect } from "#~/effects/observability";
 import { fetchGuilds, type Guild } from "#~/models/discord.server";
 
 export interface CachedGuild {
@@ -29,23 +31,26 @@ function toCachedGuild(g: Guild): CachedGuild {
   };
 }
 
-export async function getCachedGuilds(
+export const getCachedGuilds = (
   userId: string,
   userRest: REST,
   botRest: REST,
-): Promise<CachedGuild[]> {
-  const cached = guildCache.get(userId);
-  if (cached) return cached;
+): Effect.Effect<CachedGuild[], DiscordError, never> =>
+  Effect.gen(function* () {
+    const cached = guildCache.get(userId);
+    if (cached) return cached;
 
-  const guilds = await runEffect(fetchGuilds(userRest, botRest));
-  const result = guilds.map(toCachedGuild);
-  guildCache.set(userId, result);
+    const guilds = yield* fetchGuilds(userRest, botRest);
+    const result = guilds.map(toCachedGuild);
+    guildCache.set(userId, result);
 
-  log("info", "guildCache", "Guilds fetched and cached", {
-    userId,
-    totalGuilds: result.length,
-    manageableGuilds: result.filter((g) => g.hasBot).length,
-  });
+    yield* logEffect("info", "guildCache", "Guilds fetched and cached", {
+      userId,
+      totalGuilds: result.length,
+      manageableGuilds: result.filter((g) => g.hasBot).length,
+    });
 
-  return result;
-}
+    return result;
+  }).pipe(
+    Effect.withSpan("guildCache.getCachedGuilds", { attributes: { userId } }),
+  );
