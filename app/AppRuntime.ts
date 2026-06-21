@@ -54,12 +54,52 @@ export type RuntimeContext = ManagedRuntime.ManagedRuntime.Context<
   typeof runtime
 >;
 
-// Extract the PostHog client for use by metrics.ts (null when no API key configured).
-export const [posthogClient, db]: [PostHog | null, EffectKysely] =
-  await Promise.all([
+// Lazily-warmed runtime handles. Importing AppRuntime has NO side effect; the
+// PostHog client + DB connection are resolved once at the process entry point
+// via warmRuntime() (called from app/server.ts). This keeps the import graph
+// free of an import-time DB open, so tests that transitively import AppRuntime
+// don't open the real database.
+let _realDb: EffectKysely | undefined;
+let _posthog: PostHog | null = null;
+let _warmed = false;
+
+const NOT_WARMED =
+  "AppRuntime not warmed — call warmRuntime() at startup before using db/getPosthog()";
+
+/**
+ * Resolve the PostHog client and DB connection once. Called at the process
+ * entry point (app/server.ts) before any request/event is served. Idempotent,
+ * so HMR re-execution is safe.
+ */
+export const warmRuntime = async (): Promise<void> => {
+  if (_warmed) return;
+  const [posthog, realDb] = await Promise.all([
     runtime.runPromise(PostHogService),
     runtime.runPromise(DatabaseService),
   ]);
+  _posthog = posthog;
+  _realDb = realDb;
+  _warmed = true;
+};
+
+/** The PostHog client (null when no API key). Throws if used before warmRuntime(). */
+export const getPosthog = (): PostHog | null => {
+  if (!_warmed) throw new Error(NOT_WARMED);
+  return _posthog;
+};
+
+/**
+ * Lazy EffectKysely handle for legacy async/await code. Forwards to the real
+ * instance once warmRuntime() has run; throws a clear error if used before then.
+ * Keeps the `db` name + type so existing consumers are unchanged.
+ */
+export const db: EffectKysely = new Proxy({} as EffectKysely, {
+  get(_target, prop) {
+    if (!_warmed || !_realDb) throw new Error(NOT_WARMED);
+    const value = _realDb[prop as keyof EffectKysely];
+    return typeof value === "function" ? value.bind(_realDb) : value;
+  },
+});
 
 // --- Bridge functions for legacy async/await code ---
 
@@ -130,7 +170,7 @@ export const runGatedFeature = <A>(
       const flags = yield* FeatureFlagService;
       const enabled = yield* flags.isPostHogEnabled(flag, guildId);
       if (!enabled) {
-        posthogClient?.capture({
+        getPosthog()?.capture({
           distinctId: guildId,
           event: "premium gate hit",
           properties: { flag, $groups: { guild: guildId } },
