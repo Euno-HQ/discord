@@ -63,18 +63,21 @@ const sendWebhookAlert = (message: string) =>
     catch: (e) => e,
   }).pipe(
     Effect.tapError((e) =>
-      Effect.sync(() =>
-        log("error", "IntegrityCheck", "Failed to send webhook alert", {
-          error: e,
-        }),
-      ),
+      logEffect("error", "IntegrityCheck", "Failed to send webhook alert", {
+        error: e,
+      }),
     ),
     Effect.ignore, // Don't fail the whole check if webhook fails
   );
 
 /** Run SQLite integrity check using the existing database connection */
 export const runIntegrityCheck = Effect.gen(function* () {
-  log("info", "IntegrityCheck", "Running scheduled integrity check", {});
+  yield* logEffect(
+    "info",
+    "IntegrityCheck",
+    "Running scheduled integrity check",
+    {},
+  );
 
   const sql = yield* SqlClient.SqlClient;
   const result = yield* sql.unsafe<{ integrity_check: string }>(
@@ -82,12 +85,19 @@ export const runIntegrityCheck = Effect.gen(function* () {
   );
 
   if (result[0]?.integrity_check === "ok") {
-    log("info", "IntegrityCheck", "Database integrity check passed", {});
+    yield* logEffect(
+      "info",
+      "IntegrityCheck",
+      "Database integrity check passed",
+      {},
+    );
     return "ok" as const;
   }
 
   const errors = result.map((r) => r.integrity_check).join("\n");
-  log("error", "IntegrityCheck", "Database corruption detected!", { errors });
+  yield* logEffect("error", "IntegrityCheck", "Database corruption detected!", {
+    errors,
+  });
 
   yield* sendWebhookAlert(
     `🚨 **Database Corruption Detected**\n\`\`\`\n${errors.slice(0, 1800)}\n\`\`\``,
