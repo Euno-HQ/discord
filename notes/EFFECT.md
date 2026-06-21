@@ -30,9 +30,11 @@ Two guards enforce this so it can't regress:
   the client and inspects the emitted sourcemaps' `sources` for any
   `node_modules/effect` / `node_modules/@effect` path (a grep won't work — the
   bundle is minified and Effect is inlined). It fails if Effect reached the
-  client graph, and deletes the client `.map` files afterward so the deploy
-  artifact ships no sourcemaps. Wired into CI as the `client-bundle` job; run it
-  locally with `npm run check:client-bundle`.
+  client graph. The script deletes the `.map` files it generates afterward so
+  they don't linger in the CI workspace; this does NOT govern what the
+  production image ships (the prod build runs `npm run build`, and client
+  sourcemap policy is a separate concern not changed here). Wired into CI as the
+  `client-bundle` job; run it locally with `npm run check:client-bundle`.
 
 ## Reading Effect Code
 
