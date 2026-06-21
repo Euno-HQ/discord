@@ -4,6 +4,36 @@ This document gets you reading and writing Effect code in this codebase. It
 covers the patterns we actually use, with references to real files. For a quick
 lookup reference, see [EFFECT_REFERENCE.md](./EFFECT_REFERENCE.md).
 
+## Effect Stays on the Server
+
+**Principle:** Effect never leaves the server. It lives in `*.server.ts` modules
+(or confirmed server-only directories: `app/effects/**`, `app/discord/**`,
+`app/commands/**`, `app/jobs/**`, `app/models/**`, plus `app/server.ts`,
+`app/AppRuntime.ts`, `app/Database.ts`). Client code — route component parts,
+`app/components/**`, `app/root.tsx`, `app/entry.client.tsx` — reaches Effect work
+**only through route loaders/actions**, never by importing `effect`/`@effect/*` or
+a server module directly. React Router v7 + Vite strips `*.server.{ts,tsx}` from
+the client build and tree-shakes loaders/actions out of client chunks, so server
+code reached that way is safe; importing Effect from genuinely client-reachable
+code would pull the whole library into the browser bundle.
+
+Two guards enforce this so it can't regress:
+
+- **Lint rule (fast feedback):** a scoped `no-restricted-imports` block in
+  `eslint.config.js` forbids `effect`, `effect/*`, and `@effect/*` imports from
+  client-reachable app source. Runs as part of `npm run lint` (`--max-warnings=0`).
+  Server zones are allowlisted via the block's `ignores`. Server-only files that
+  lack a `.server.ts` suffix (e.g. `app/helpers/discord.ts`,
+  `app/features/spam/*`) get narrow per-file exceptions — prefer renaming such
+  files to `*.server.ts` over widening the allowlist.
+- **CI bundle check (authoritative net):** `npm run check:client-bundle` builds
+  the client and inspects the emitted sourcemaps' `sources` for any
+  `node_modules/effect` / `node_modules/@effect` path (a grep won't work — the
+  bundle is minified and Effect is inlined). It fails if Effect reached the
+  client graph, and deletes the client `.map` files afterward so the deploy
+  artifact ships no sourcemaps. Wired into CI as the `client-bundle` job; run it
+  locally with `npm run check:client-bundle`.
+
 ## Reading Effect Code
 
 ### The Mental Model

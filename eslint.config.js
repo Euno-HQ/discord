@@ -148,6 +148,68 @@ export default [
     rules: { "local/no-error-string-cast": "off" },
   },
   {
+    // Effect must never reach the client bundle. It lives in *.server.ts modules
+    // (RRv7+Vite strips those from the client build) or in confirmed server-only
+    // directories that the client graph never imports. Client-reachable code
+    // (routes' component parts, components, root, entry.client) must reach Effect
+    // only through route loaders/actions — never by importing `effect` directly.
+    //
+    // This block forbids `effect`/`effect/*`/`@effect/*` imports across all app
+    // source, then carves out the server zone via `ignores`. The CI bundle check
+    // (npm run check:client-bundle) is the authoritative net; this rule is fast
+    // local feedback. See notes/EFFECT.md.
+    files: ["app/**/*.{ts,tsx}"],
+    ignores: [
+      // RRv7 hard guarantee: *.server.{ts,tsx} are stripped from the client build.
+      "**/*.server.ts",
+      "**/*.server.tsx",
+      // Server entrypoints / runtime wiring (never in the client graph).
+      "app/server.ts",
+      "app/entry.server.tsx",
+      "app/AppRuntime.ts",
+      "app/Database.ts",
+      // Entirely server-only directories (Discord bot, command handlers, Effect
+      // services, background jobs, persistence models — none client-reachable).
+      "app/effects/**",
+      "app/discord/**",
+      "app/commands/**",
+      "app/jobs/**",
+      "app/models/**",
+      // Mixed directories (app/helpers, app/features contain both client and
+      // server files): narrow per-file exceptions for confirmed server-only
+      // modules that lack a .server.ts suffix. These are not imported by any
+      // client-reachable module today; ideally they'd be renamed to *.server.ts.
+      "app/helpers/discord.ts",
+      "app/features/spam/service.ts",
+      "app/features/spam/spamResponseHandler.ts",
+      "app/features/spam/velocityGate.ts",
+      // Tests are not part of any shipped bundle.
+      "**/*.test.ts",
+      "**/*.test.tsx",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "effect",
+              message:
+                "Effect must not reach the client bundle. Move Effect code into a *.server.ts module (or a confirmed server-only dir) and have client code reach it through a route loader/action. See notes/EFFECT.md.",
+            },
+          ],
+          patterns: [
+            {
+              group: ["effect/*", "@effect/*"],
+              message:
+                "Effect must not reach the client bundle. Move Effect code into a *.server.ts module (or a confirmed server-only dir) and have client code reach it through a route loader/action. See notes/EFFECT.md.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Local ESLint rule modules are plain-JS tooling (untyped AST callbacks),
     // not app code — type-aware lint rules produce false positives here. This
     // must come last so it overrides the global type-checked rule block above.
