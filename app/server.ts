@@ -24,12 +24,9 @@ import {
   deployCommands,
   registerCommand,
 } from "#~/discord/deployCommands.server";
-import { startEscalationResolver } from "#~/discord/escalationResolver";
+import { escalationResolverSchedule } from "#~/discord/escalationResolver";
 import { initDiscordBot } from "#~/discord/gateway";
-import {
-  MessageCacheService,
-  startMessageCacheExpiration,
-} from "#~/discord/messageCacheService";
+import { messageCacheExpirationSchedule } from "#~/discord/messageCacheService";
 import { activityTrackerPipeline } from "#~/discord/pipelines/activityTracker";
 import { automodPipeline } from "#~/discord/pipelines/automod";
 import { deletionLoggerPipeline } from "#~/discord/pipelines/deletionLogger";
@@ -43,7 +40,7 @@ import "#~/jobs/bulkRoleAssignment";
 
 import { runJobRunner } from "#~/jobs/jobRunner";
 
-import { runEffect, runtime, warmRuntime } from "./AppRuntime";
+import { runtime, warmRuntime } from "./AppRuntime";
 import { checkpointWal, runIntegrityCheck } from "./Database";
 import { tryDiscord } from "./effects/classifyDiscordError";
 import { logEffect } from "./effects/observability";
@@ -129,30 +126,12 @@ const startup = Effect.gen(function* () {
 
     yield* tryDiscord("init", () => deployCommands(discordClient));
 
-    // Message cache expiration (was inside startDeletionLogging, now standalone)
-    startMessageCacheExpiration(() =>
-      runEffect(
-        Effect.gen(function* () {
-          const cache = yield* MessageCacheService;
-          yield* cache.expireContent();
-          yield* cache.expireRows();
-        }).pipe(
-          Effect.catchAll((e) =>
-            logEffect(
-              "warn",
-              "MessageCacheExpiration",
-              "Expiration run failed",
-              {
-                error: e,
-              },
-            ),
-          ),
-        ),
-      ),
-    );
-
-    // Start escalation resolver scheduler (must be after client is ready)
-    startEscalationResolver(discordClient);
+    // Periodic schedulers — long-lived Effects forked off the runtime so they
+    // outlive `startup`. Each self-recovers per run (see scheduleTaskEffect),
+    // so a single failure never tears the schedule down.
+    runtime.runFork(messageCacheExpirationSchedule);
+    // Escalation resolver scheduler (must be after client is ready)
+    runtime.runFork(escalationResolverSchedule(discordClient));
     runtime.runFork(runJobRunner);
 
     yield* logEffect("info", "Gateway", "Gateway initialization completed", {

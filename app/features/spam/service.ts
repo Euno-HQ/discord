@@ -4,7 +4,7 @@
  */
 
 import type { GuildMember, Message } from "discord.js";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Schedule } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
 import { FeatureFlagService } from "#~/effects/featureFlags";
@@ -75,10 +75,15 @@ export const SpamDetectionServiceLive = Layer.effect(
     const tracker: ActivityMap = new Map();
     const honeypotCache = new Map<string, HoneypotCacheEntry>();
 
-    // Periodic cleanup
-    setInterval(
-      () => cleanupTracker(tracker, TRACKER_MAX_AGE),
-      TRACKER_CLEANUP_INTERVAL,
+    // Periodic cleanup — a daemon fiber forked off the runtime that builds this
+    // layer, so it lives for the whole process (matching the old setInterval).
+    // cleanupTracker is a pure mutation, wrapped in Effect.sync.
+    yield* Effect.forkDaemon(
+      Effect.sync(() => cleanupTracker(tracker, TRACKER_MAX_AGE)).pipe(
+        // delay the first run one interval, matching setInterval semantics
+        Effect.delay(`${TRACKER_CLEANUP_INTERVAL} millis`),
+        Effect.repeat(Schedule.fixed(`${TRACKER_CLEANUP_INTERVAL} millis`)),
+      ),
     );
 
     // ── Honeypot lookup ──
