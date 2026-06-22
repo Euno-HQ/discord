@@ -93,7 +93,7 @@ const resolveLogMessage = (
 
     if (!app?.log_message_id) return;
 
-    yield* Effect.tryPromise(() =>
+    yield* tryDiscord("memberApp.updateLogMessage", () =>
       rest.patch(Routes.channelMessage(modLog, app.log_message_id!), {
         body: {
           content,
@@ -175,7 +175,9 @@ export const Command = [
         // @ts-expect-error busted types
         modal.addComponents(aboutRow, referralRow, goalsRow);
 
-        yield* Effect.tryPromise(() => interaction.showModal(modal));
+        yield* tryDiscord("memberApp.showModal", () =>
+          interaction.showModal(modal),
+        );
       }).pipe(
         Effect.catchAll(() => Effect.void),
         Effect.withSpan("applyToJoinModal", {
@@ -244,13 +246,15 @@ export const Command = [
           return;
         }
 
-        const thread = yield* Effect.tryPromise(() =>
-          applyChannel.threads.create({
-            name: `Application: ${user.username}`,
-            autoArchiveDuration: 60 * 24 * 7,
-            type: ChannelType.PrivateThread,
-            invitable: false,
-          }),
+        const thread = yield* tryDiscord(
+          "memberApp.createApplicantThread",
+          () =>
+            applyChannel.threads.create({
+              name: `Application: ${user.username}`,
+              autoArchiveDuration: 60 * 24 * 7,
+              type: ChannelType.PrivateThread,
+              invitable: false,
+            }),
         );
 
         // Record the application in the database
@@ -279,7 +283,7 @@ export const Command = [
         ];
 
         // Post application receipt to the applicant's private thread
-        yield* Effect.tryPromise(() =>
+        yield* tryDiscord("memberApp.postApplicantReceipt", () =>
           rest.post(Routes.channelMessages(thread.id), {
             body: {
               flags: MessageFlags.IsComponentsV2,
@@ -315,43 +319,45 @@ export const Command = [
         // Post review message with approve/deny buttons to the mod-log user thread
         const modThread = yield* getOrCreateUserThread(interaction.guild, user);
 
-        const reviewMsg = (yield* Effect.tryPromise(() =>
-          rest.post(Routes.channelMessages(modThread.id), {
-            body: {
-              flags: MessageFlags.IsComponentsV2,
-              components: [
-                {
-                  type: ComponentType.Container,
-                  components: [
-                    {
-                      type: ComponentType.TextDisplay,
-                      content: `## Application from ${user.displayName}\nApplicant thread: <#${thread.id}>`,
-                    },
-                    { type: ComponentType.Separator },
-                    ...applicationComponents,
-                    { type: ComponentType.Separator },
-                    {
-                      type: ComponentType.ActionRow,
-                      components: [
-                        {
-                          type: ComponentType.Button,
-                          custom_id: `app-approve||${user.id}`,
-                          label: "Approve",
-                          style: ButtonStyle.Success,
-                        },
-                        {
-                          type: ComponentType.Button,
-                          custom_id: `app-deny||${user.id}`,
-                          label: "Deny",
-                          style: ButtonStyle.Danger,
-                        },
-                      ],
-                    },
-                  ],
-                },
-              ],
-            },
-          }),
+        const reviewMsg = (yield* tryDiscord(
+          "memberApp.postReviewMessage",
+          () =>
+            rest.post(Routes.channelMessages(modThread.id), {
+              body: {
+                flags: MessageFlags.IsComponentsV2,
+                components: [
+                  {
+                    type: ComponentType.Container,
+                    components: [
+                      {
+                        type: ComponentType.TextDisplay,
+                        content: `## Application from ${user.displayName}\nApplicant thread: <#${thread.id}>`,
+                      },
+                      { type: ComponentType.Separator },
+                      ...applicationComponents,
+                      { type: ComponentType.Separator },
+                      {
+                        type: ComponentType.ActionRow,
+                        components: [
+                          {
+                            type: ComponentType.Button,
+                            custom_id: `app-approve||${user.id}`,
+                            label: "Approve",
+                            style: ButtonStyle.Success,
+                          },
+                          {
+                            type: ComponentType.Button,
+                            custom_id: `app-deny||${user.id}`,
+                            label: "Deny",
+                            style: ButtonStyle.Danger,
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            }),
         )) as { id: string };
 
         // Post summary to mod-log channel with link to the review message
@@ -360,7 +366,7 @@ export const Command = [
           [SETTINGS.modLog],
         );
         const reviewLink = `https://discord.com/channels/${interaction.guild.id}/${modThread.id}/${reviewMsg.id}`;
-        const logMsg = (yield* Effect.tryPromise(() =>
+        const logMsg = (yield* tryDiscord("memberApp.postLogSummary", () =>
           rest.post(Routes.channelMessages(modLog), {
             body: {
               content: `<@${user.id}> applied to join — [review application](${reviewLink})`,
@@ -485,7 +491,7 @@ export const Command = [
           })
           .where("id", "=", appRow.id);
 
-        yield* Effect.tryPromise(() =>
+        yield* tryDiscord("memberApp.addMemberRole", () =>
           rest.put(
             Routes.guildMemberRole(guildId, applicantUserId, config.role_id),
           ),
@@ -497,15 +503,19 @@ export const Command = [
         });
 
         // Attempt to notify the applicant via DM
-        yield* Effect.tryPromise(async () => {
-          const dmChannel = (await rest.post(Routes.userChannels(), {
-            body: { recipient_id: applicantUserId },
-          })) as { id: string };
-          await rest.post(Routes.channelMessages(dmChannel.id), {
-            body: {
-              content: `Your application to **${interaction.guild!.name}** has been approved! Welcome to the community!`,
-            },
-          });
+        yield* Effect.gen(function* () {
+          const dmChannel = (yield* tryDiscord("memberApp.dmOpenChannel", () =>
+            rest.post(Routes.userChannels(), {
+              body: { recipient_id: applicantUserId },
+            }),
+          )) as { id: string };
+          yield* tryDiscord("memberApp.dmSendMessage", () =>
+            rest.post(Routes.channelMessages(dmChannel.id), {
+              body: {
+                content: `Your application to **${interaction.guild!.name}** has been approved! Welcome to the community!`,
+              },
+            }),
+          );
         }).pipe(Effect.catchAll(() => Effect.void));
 
         const appMsgLink = `https://discord.com/channels/${guildId}/${interaction.channelId}/${interaction.message?.id}`;
@@ -593,20 +603,24 @@ export const Command = [
         }
 
         // Notify the applicant via DM before kicking, fall back to thread
-        const dmSent = yield* Effect.tryPromise(async () => {
-          const dmChannel = (await rest.post(Routes.userChannels(), {
-            body: { recipient_id: applicantUserId },
-          })) as { id: string };
-          await rest.post(Routes.channelMessages(dmChannel.id), {
-            body: {
-              content: `Your application to **${interaction.guild!.name}** has been denied.`,
-            },
-          });
+        const dmSent = yield* Effect.gen(function* () {
+          const dmChannel = (yield* tryDiscord("memberApp.dmOpenChannel", () =>
+            rest.post(Routes.userChannels(), {
+              body: { recipient_id: applicantUserId },
+            }),
+          )) as { id: string };
+          yield* tryDiscord("memberApp.dmSendMessage", () =>
+            rest.post(Routes.channelMessages(dmChannel.id), {
+              body: {
+                content: `Your application to **${interaction.guild!.name}** has been denied.`,
+              },
+            }),
+          );
           return true;
         }).pipe(Effect.catchAll(() => Effect.succeed(false)));
 
         if (!dmSent && denyAppRow.thread_id) {
-          yield* Effect.tryPromise(() =>
+          yield* tryDiscord("memberApp.postDenyThreadFallback", () =>
             rest.post(Routes.channelMessages(denyAppRow.thread_id), {
               body: {
                 content: `<@${applicantUserId}>, your application has been denied.`,
@@ -625,7 +639,7 @@ export const Command = [
           .where("id", "=", denyAppRow.id);
 
         // Kick the applicant
-        yield* Effect.tryPromise(() =>
+        yield* tryDiscord("memberApp.kickApplicant", () =>
           rest.delete(Routes.guildMember(guildId, applicantUserId), {
             reason: `Application denied by ${denierId}`,
           }),
@@ -724,13 +738,15 @@ export const Command = [
 
         if (retractAppRow?.review_message_id && modThreadRow?.thread_id) {
           // Fetch the existing message to preserve application content
-          const existingMsg = (yield* Effect.tryPromise(() =>
-            rest.get(
-              Routes.channelMessage(
-                modThreadRow.thread_id,
-                retractAppRow.review_message_id!,
+          const existingMsg = (yield* tryDiscord(
+            "memberApp.fetchReviewMessage",
+            () =>
+              rest.get(
+                Routes.channelMessage(
+                  modThreadRow.thread_id,
+                  retractAppRow.review_message_id!,
+                ),
               ),
-            ),
           ).pipe(Effect.catchAll(() => Effect.succeed(null)))) as {
             components?: { components?: unknown[] }[];
           } | null;
@@ -777,7 +793,7 @@ export const Command = [
               },
             );
 
-            yield* Effect.tryPromise(() =>
+            yield* tryDiscord("memberApp.disableReviewButtons", () =>
               rest.patch(
                 Routes.channelMessage(
                   modThreadRow.thread_id,
@@ -810,7 +826,7 @@ export const Command = [
           `<@${applicantUserId}> retracted their application`,
         );
 
-        yield* Effect.tryPromise(() =>
+        yield* tryDiscord("memberApp.archiveApplicantThread", () =>
           rest.patch(Routes.channel(interaction.channelId), {
             body: { archived: true, locked: true },
           }),

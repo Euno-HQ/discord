@@ -8,7 +8,7 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { db, runEffect, runTakeFirst } from "#~/AppRuntime";
+import { DatabaseService, type SqlError } from "#~/Database";
 import {
   interactionDeferUpdate,
   interactionEditReply,
@@ -117,63 +117,63 @@ const v2Update = v2Payload;
 
 // --- Public: initialize state and return the form payload for slash command use ---
 
-export async function initSetupForm(
+export const initSetupForm = (
   guildId: string,
   userId: string,
   guildChannelIds?: Set<string>,
-): Promise<object> {
-  cleanupStaleSetups();
+): Effect.Effect<object, SqlError, DatabaseService> =>
+  Effect.gen(function* () {
+    cleanupStaleSetups();
 
-  // Try to populate from existing guild settings
-  const defaults = defaultSetup();
-  const guild = await runEffect(fetchGuild(guildId));
-  if (guild?.settings) {
-    const settings = JSON.parse(guild.settings) as Record<string, string>;
+    // Try to populate from existing guild settings
+    const defaults = defaultSetup();
+    const db = yield* DatabaseService;
+    const guild = yield* fetchGuild(guildId);
+    if (guild?.settings) {
+      const settings = JSON.parse(guild.settings) as Record<string, string>;
 
-    if (settings.moderator) defaults.modRoleId = settings.moderator;
-    if (settings.modLog) defaults.modLogChannel = settings.modLog;
-    // If guild is configured but deletionLog is absent, treat as disabled
-    defaults.deletionLogChannel = settings.deletionLog ?? null;
-    if (settings.restricted) defaults.restrictedRoleId = settings.restricted;
+      if (settings.moderator) defaults.modRoleId = settings.moderator;
+      if (settings.modLog) defaults.modLogChannel = settings.modLog;
+      // If guild is configured but deletionLog is absent, treat as disabled
+      defaults.deletionLogChannel = settings.deletionLog ?? null;
+      if (settings.restricted) defaults.restrictedRoleId = settings.restricted;
 
-    // Check for existing honeypot channel
-    const honeypot = await runTakeFirst(
-      db
+      // Check for existing honeypot channel
+      const honeypotRows = yield* db
         .selectFrom("honeypot_config")
         .select("channel_id")
-        .where("guild_id", "=", guildId),
-    );
-    if (honeypot) {
-      defaults.honeypotChannel = honeypot.channel_id;
-    } else {
-      defaults.honeypotChannel = null;
-    }
+        .where("guild_id", "=", guildId);
+      const honeypot = honeypotRows[0];
+      if (honeypot) {
+        defaults.honeypotChannel = honeypot.channel_id;
+      } else {
+        defaults.honeypotChannel = null;
+      }
 
-    // tickets_config has no guild_id, so match by channel ownership
-    if (guildChannelIds) {
-      const ticketRows = await runTakeFirst(
-        db
+      // tickets_config has no guild_id, so match by channel ownership
+      if (guildChannelIds) {
+        const ticketRowsResult = yield* db
           .selectFrom("tickets_config")
           .select("channel_id")
-          .where("channel_id", "is not", null),
-      );
-      if (
-        ticketRows?.channel_id &&
-        guildChannelIds.has(ticketRows.channel_id)
-      ) {
-        defaults.ticketChannel = ticketRows.channel_id;
+          .where("channel_id", "is not", null);
+        const ticketRows = ticketRowsResult[0];
+        if (
+          ticketRows?.channel_id &&
+          guildChannelIds.has(ticketRows.channel_id)
+        ) {
+          defaults.ticketChannel = ticketRows.channel_id;
+        } else {
+          defaults.ticketChannel = null;
+        }
       } else {
         defaults.ticketChannel = null;
       }
-    } else {
-      defaults.ticketChannel = null;
     }
-  }
 
-  const state: PendingSetup = { ...defaults, createdAt: Date.now() };
-  pendingSetups.set(setupKey(guildId, userId), state);
-  return buildSetupScreen1Message(guildId, state);
-}
+    const state: PendingSetup = { ...defaults, createdAt: Date.now() };
+    pendingSetups.set(setupKey(guildId, userId), state);
+    return buildSetupScreen1Message(guildId, state);
+  });
 
 export function renderScreen(
   guildId: string,

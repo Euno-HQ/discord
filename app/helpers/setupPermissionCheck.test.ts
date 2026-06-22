@@ -14,7 +14,7 @@ vi.mock("#~/jobs/jobRunner", () => ({
   registerNotificationBuilder: () => {
     /* noop for test */
   },
-  createJob: vi.fn(),
+  createJobEffect: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
