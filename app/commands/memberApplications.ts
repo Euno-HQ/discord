@@ -26,7 +26,7 @@ import {
   interactionUpdate,
 } from "#~/effects/discordSdk.ts";
 import { toUserResponse } from "#~/effects/errorHandling";
-import { FeatureFlagService } from "#~/effects/featureFlags";
+import { FeatureFlagService, guardFeature } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
 import {
   hasModRole,
@@ -437,6 +437,10 @@ export const Command = [
         const guildId = interaction.guild.id;
         const approverId = interaction.user.id;
 
+        // Gate on the member-applications feature flag
+        const flags = yield* FeatureFlagService;
+        yield* guardFeature(flags, "member-applications", guildId);
+
         // Verify the user has the moderator role
         const { [SETTINGS.moderator]: modRoleId } = yield* fetchSettings(
           guildId,
@@ -569,6 +573,10 @@ export const Command = [
 
         const guildId = interaction.guild.id;
         const denierId = interaction.user.id;
+
+        // Gate on the member-applications feature flag
+        const flags = yield* FeatureFlagService;
+        yield* guardFeature(flags, "member-applications", guildId);
 
         // Verify the user has the moderator role
         const { [SETTINGS.moderator]: denyModRoleId } = yield* fetchSettings(
@@ -709,6 +717,10 @@ export const Command = [
         }
 
         const guildId = interaction.guild.id;
+
+        // Gate on the member-applications feature flag
+        const flags = yield* FeatureFlagService;
+        yield* guardFeature(flags, "member-applications", guildId);
 
         const db = yield* DatabaseService;
         yield* db
@@ -874,6 +886,10 @@ export const Command = [
           return;
         }
 
+        // Gate on the member-applications feature flag
+        const flags = yield* FeatureFlagService;
+        yield* guardFeature(flags, "member-applications", guildId);
+
         // Verify the user has the moderator role
         const { [SETTINGS.moderator]: modRoleId } = yield* fetchSettings(
           guildId,
@@ -984,6 +1000,14 @@ export const Command = [
           ],
         });
       }).pipe(
+        // The feature gate produces the standard feature-disabled reply, not the
+        // gate-failure copy — a disabled flag is not an activation failure.
+        Effect.catchTag("FeatureDisabledError", (error) =>
+          interactionReply(interaction, {
+            content: toUserResponse(error).content,
+            flags: MessageFlags.Ephemeral,
+          }).pipe(Effect.catchAll(() => Effect.void)),
+        ),
         Effect.catchAll((error) =>
           Effect.gen(function* () {
             yield* logEffect(

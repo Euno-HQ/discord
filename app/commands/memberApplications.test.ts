@@ -8,6 +8,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 
 import { DatabaseService } from "#~/Database.ts";
 import type { DB } from "#~/db";
+import { FeatureFlagService } from "#~/effects/featureFlags";
 
 // Mock the Discord REST client so resolveLogMessage doesn't make HTTP calls
 vi.mock("#~/discord/api", () => ({
@@ -244,5 +245,127 @@ describe("resolveApplicationsForDeparture", () => {
 
     expect(user3.status).toBe("approved");
     expect(user3.resolved_at).toBeNull();
+  });
+});
+
+// A mock FeatureFlagService whose boolean check always resolves to `enabled`.
+// Mirrors the makeMockFlags pattern in app/effects/featureFlags.test.ts.
+const makeMockFlags = (enabled: boolean) => ({
+  isPostHogEnabled: () => Effect.succeed(enabled),
+  getPostHogValue: () => Effect.succeed(undefined as never),
+});
+
+// Find a handler in the exported Command array by its command name.
+const findHandler = async (name: string) => {
+  const { Command } = await loadModule();
+  const entry = Command.find((c) => c.command.name === name);
+  if (!entry) throw new Error(`No command handler named ${name}`);
+  return entry.handler;
+};
+
+// Minimal mock MessageComponentInteraction. `reply` is a spy so we can assert
+// the user-facing response; the moderator-role members collection is generous
+// so the gate is the only thing that can short-circuit these handlers.
+const makeInteraction = (overrides: Record<string, unknown> = {}) => {
+  const reply = vi.fn().mockResolvedValue({});
+  const update = vi.fn().mockResolvedValue({});
+  return {
+    interaction: {
+      reply,
+      update,
+      guildId: "guild-1",
+      channelId: "channel-1",
+      user: { id: "mod-1" },
+      member: {
+        roles: { cache: { has: () => true } },
+      },
+      guild: { id: "guild-1", name: "Test Guild" },
+      message: { id: "msg-1" },
+      ...overrides,
+    },
+    reply,
+    update,
+  };
+};
+
+const runGated = (effect: unknown, enabled: boolean) =>
+  runtime.runPromise(
+    // @ts-expect-error - test provides only the FeatureFlagService the handler
+    // gates on; the rest of RuntimeContext is supplied by the test runtime.
+    effect.pipe(
+      Effect.provide(Layer.succeed(FeatureFlagService, makeMockFlags(enabled))),
+    ),
+  );
+
+describe("feature-flag gating", () => {
+  test.each([
+    ["app-approve", "approved"],
+    ["app-deny", "denied"],
+    ["app-retract", "retracted"],
+  ])(
+    "%s no-ops on the DB and replies feature-disabled when the flag is off",
+    async (commandName, resolvedStatus) => {
+      const handler = await findHandler(commandName);
+      await insertApplication({ guild_id: "guild-1", user_id: "user-1" });
+
+      // app-retract requires the actor to be the applicant; approve/deny require
+      // a moderator. Use the applicant id for retract so the gate (not the
+      // authorization check) is what we're exercising.
+      const actorId = commandName === "app-retract" ? "user-1" : "mod-1";
+      const { interaction, reply } = makeInteraction({
+        customId: `${commandName}||user-1`,
+        user: { id: actorId },
+      });
+
+      await runGated(handler(interaction as never), false);
+
+      // The application is untouched — the gate short-circuited before any write.
+      const rows = await queryAll();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe("pending");
+      expect(rows[0].status).not.toBe(resolvedStatus);
+
+      // The user gets the feature-disabled response (from toUserResponse).
+      expect(reply).toHaveBeenCalledTimes(1);
+      expect(reply.mock.calls[0][0]).toMatchObject({
+        content: "That feature isn't enabled for this server.",
+      });
+    },
+  );
+
+  test("activate-gate replies feature-disabled when the flag is off", async () => {
+    const handler = await findHandler("activate-gate");
+    const { interaction, reply } = makeInteraction({
+      customId: `activate-gate|guild-1`,
+    });
+
+    await runGated(handler(interaction as never), false);
+
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(reply.mock.calls[0][0]).toMatchObject({
+      content: "That feature isn't enabled for this server.",
+    });
+  });
+
+  test("app-approve proceeds past the gate when the flag is on", async () => {
+    // With the flag on, the gate passes and the handler reaches its real logic.
+    // We don't assert the full approval flow here (it makes Discord calls), only
+    // that the gate did NOT produce the feature-disabled reply.
+    const handler = await findHandler("app-approve");
+    await insertApplication({ guild_id: "guild-1", user_id: "user-1" });
+
+    const { interaction, reply } = makeInteraction({
+      customId: `app-approve||user-1`,
+    });
+
+    // The handler's own catchAll means this never rejects.
+    await runGated(handler(interaction as never), true);
+
+    const featureDisabled = reply.mock.calls.some(
+      (call) =>
+        (call[0] as { content?: string })?.content ===
+        "That feature isn't enabled for this server.",
+    );
+    expect(featureDisabled).toBe(false);
   });
 });
