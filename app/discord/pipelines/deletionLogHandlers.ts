@@ -86,7 +86,7 @@ export const handleDelete = (
 
     const settings = yield* fetchSettings(guild.id, [
       SETTINGS.deletionLog,
-    ]).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    ]).pipe(Effect.catchTag("NotFoundError", () => Effect.succeed(null)));
 
     if (!settings?.deletionLog) return;
 
@@ -253,7 +253,7 @@ export const handleEdit = (
 
     const settings = yield* fetchSettings(guild.id, [
       SETTINGS.deletionLog,
-    ]).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    ]).pipe(Effect.catchTag("NotFoundError", () => Effect.succeed(null)));
 
     if (!settings?.deletionLog) return;
 
@@ -339,7 +339,7 @@ export const handleBulkDelete = (
 
     const settings = yield* fetchSettings(guild.id, [
       SETTINGS.deletionLog,
-    ]).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    ]).pipe(Effect.catchTag("NotFoundError", () => Effect.succeed(null)));
 
     if (!settings?.deletionLog) return;
 

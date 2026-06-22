@@ -12,7 +12,6 @@ import {
 } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { calculateScheduledFor } from "#~/helpers/escalationVotes";
-import { formatError } from "#~/helpers/formatError";
 import type { Resolution, VotingStrategy } from "#~/helpers/modResponse";
 import { applyRestriction, ban, kick, timeout } from "#~/models/discord.server";
 
@@ -318,11 +317,26 @@ export const EscalationServiceLive = Layer.effect(
             },
           );
 
-          // Try to fetch the member - they may have left
+          // Try to fetch the member - they may have left. ONLY a genuine 404
+          // (ResourceMissingError) means "member gone → skip"; any other
+          // DiscordError (rate limit, transient 5xx, forbidden, etc.) must
+          // propagate as ResolutionExecutionError so a community-voted action
+          // is not silently dropped. Mirror the action fold's field shape so
+          // the public contract and downstream logging stay consistent.
           const reportedMember = yield* fetchMember(
             guild,
             escalation.reported_user_id,
-          ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+          ).pipe(
+            Effect.catchTag("ResourceMissingError", () => Effect.succeed(null)),
+            Effect.mapError(
+              (caught) =>
+                new ResolutionExecutionError({
+                  escalationId: escalation.id,
+                  resolution,
+                  cause: caught,
+                }),
+            ),
+          );
 
           if (!reportedMember) {
             yield* logEffect(
@@ -365,10 +379,7 @@ export const EscalationServiceLive = Layer.effect(
                 new ResolutionExecutionError({
                   escalationId: escalation.id,
                   resolution,
-                  cause:
-                    caught instanceof Error
-                      ? caught
-                      : new Error(formatError(caught)),
+                  cause: caught,
                 }),
             ),
           );
