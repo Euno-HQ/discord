@@ -7,6 +7,7 @@ import type { GuildMember, Message } from "discord.js";
 import { Context, Effect, Layer, Schedule } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
+import { DiscordClient } from "#~/discord/client.server.ts";
 import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
 import { getMessageContent } from "#~/helpers/discord.ts";
@@ -70,6 +71,7 @@ export const SpamDetectionServiceLive = Layer.effect(
   Effect.gen(function* () {
     const db = yield* DatabaseService;
     const featureFlags = yield* FeatureFlagService;
+    const client = yield* DiscordClient;
 
     // In-memory state, lives for the bot's lifetime
     const tracker: ActivityMap = new Map();
@@ -300,7 +302,12 @@ export const SpamDetectionServiceLive = Layer.effect(
 
       executeResponse: (verdict, message, member) =>
         executeResponse(verdict, message, member).pipe(
-          Effect.provide(Layer.succeed(DatabaseService, db)),
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.succeed(DatabaseService, db),
+              Layer.succeed(DiscordClient, client),
+            ),
+          ),
           Effect.catchAll((error) =>
             logEffect("error", "SpamDetection", "Response execution failed", {
               error,

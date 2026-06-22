@@ -8,7 +8,7 @@ import {
 } from "discord.js";
 import { Context, Effect, Layer, Queue, Stream } from "effect";
 
-import { client } from "#~/discord/client.server";
+import { DiscordClient } from "#~/discord/client.server";
 import type {
   DiscordEvent,
   GuildMemberMessage,
@@ -105,6 +105,7 @@ export class DiscordEventBus extends Context.Tag("DiscordEventBus")<
 export const DiscordEventBusLive = Layer.scoped(
   DiscordEventBus,
   Effect.gen(function* () {
+    const client = yield* DiscordClient;
     const queue = yield* Queue.sliding<DiscordEvent>(1024);
 
     // --- Register event sources ---
