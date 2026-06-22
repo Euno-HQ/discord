@@ -2,7 +2,6 @@ import { Routes } from "discord-api-types/v10";
 import { Deferred, Effect, Fiber, FiberRef } from "effect";
 import type { Selectable } from "kysely";
 
-import { runEffect } from "#~/AppRuntime";
 import { DatabaseService, type SqlError } from "#~/Database";
 import type { DB } from "#~/db";
 import { ssrDiscordSdk } from "#~/discord/api";
@@ -253,13 +252,6 @@ export const getJobEffect = (jobId: string) =>
       .where("id", "=", jobId);
     return job as Job | undefined;
   }).pipe(Effect.withSpan("getJob", { attributes: { jobId } }));
-
-// ---------------------------------------------------------------------------
-// Async wrapper (kept for setupAll.server.ts)
-// ---------------------------------------------------------------------------
-
-export const createJob = (options: CreateJobOptions): Promise<Job> =>
-  runEffect(createJobEffect(options));
 
 // ---------------------------------------------------------------------------
 // Handler registry and polling loop

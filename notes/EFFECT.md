@@ -36,6 +36,43 @@ Two guards enforce this so it can't regress:
   sourcemap policy is a separate concern not changed here). Wired into CI as the
   `client-bundle` job; run it locally with `npm run check:client-bundle`.
 
+## Runtime & Boundaries
+
+Effects are lazy descriptions — nothing runs until something executes them. This
+codebase has exactly **one** runtime: a `ManagedRuntime` built from `AppLayer`
+and exported as `runtime` in `app/AppRuntime.ts`. `AppLayer` merges every
+service (Database, PostHog, FeatureFlag, MessageCache, DiscordEventBus,
+Supervisor, SpamDetection, User) and stays open for the whole process lifetime,
+so its resources — the SQLite connection, the PostHog flush finalizer, the
+broadcast event queue — live as long as the bot does.
+
+Because the services live in `AppLayer`, code that `yield* DatabaseService` (or
+any other app service) **never needs a per-call `Layer.provide`** — the runtime
+already supplies the whole context. The requirement type these effects carry is
+`RuntimeContext` (`AppRuntime.ts`).
+
+You only execute an effect at a **boundary** — the edge between Effect-land and
+the outside (an HTTP request, a Discord callback, process startup):
+
+| Boundary helper | What it does | Used at |
+| --- | --- | --- |
+| `runEffect(effect)` | `runtime.runPromise` — run to a `Promise<A>` | route loaders/actions, the gateway interaction handler, schedulers |
+| `runEffectExit(effect)` | `runtime.runPromiseExit` — run to an `Exit` (no throw) | callers that must inspect success/failure |
+| `Effect.forkDaemon` | fork a long-lived background fiber off the runtime | the six event pipelines, started in `server.ts` |
+
+**`forkDaemon`, not `fork`.** The pipelines are forked with `Effect.forkDaemon`
+(`server.ts`) specifically so they outlive the `startup` fiber that spawns them —
+a plain `Effect.fork` would tie their lifetime to startup and they'd be
+interrupted the moment it finished. On HMR the previous fibers are
+`Fiber.interrupt`ed and re-forked. This distinction is load-bearing; don't
+"simplify" it to `fork`.
+
+> Legacy async/await callers reach Effect through `runEffect`. A handful of
+> `@deprecated` Promise bridges (`run`, `runTakeFirst`, `runTakeFirstOrThrow`,
+> and the lazy `db` proxy in `AppRuntime.ts`) remain for not-yet-migrated call
+> sites (notably `session.server.ts`). Don't reach for them in new code — use
+> `runEffect` with a real Effect.
+
 ## Reading Effect Code
 
 ### The Mental Model
@@ -276,9 +313,122 @@ const results = yield* Effect.forEach(due, (escalation) =>
 
 **See:** `app/commands/escalate/escalationResolver.ts:186-197`
 
+### Event Pipelines (Streams)
+
+Discord events are processed through **Effect `Stream` pipelines** — this is the
+backbone of the bot, not an advanced extra. The flow:
+
+1. `DiscordEventBus` (`app/discord/eventBus.ts`) is a `Layer.scoped` service that
+   registers ~18 `client.on(...)` discord.js listeners. Each listener enriches
+   the raw event into a tagged `DiscordEvent` and offers it to a
+   `Queue.sliding(1024)` (drops oldest under load rather than blocking the
+   callback). The queue is exposed as a `Stream.broadcastDynamic` so every
+   pipeline gets its own independently-backpressured copy.
+2. Each of the six pipelines (`app/discord/pipelines/*`) subscribes to that
+   stream, narrows by event type, optionally gates on a feature flag, and
+   dispatches a handler — all as `Effect.Effect<void, never, RuntimeContext>`.
+3. `server.ts` forks all six with `Effect.forkDaemon` at startup.
+
+The canonical pipeline body (`app/discord/pipelines/automod.ts`):
+
+```typescript
+export const automodPipeline: Effect.Effect<void, never, RuntimeContext> =
+  Effect.gen(function* () {
+    const { stream } = yield* DiscordEventBus;
+    const spamService = yield* SpamDetectionService;
+
+    yield* stream.pipe(
+      Stream.filter(isGuildMemberMessage), // type-guard narrows the event
+      Stream.mapEffect((e) =>
+        handleMessage(e, spamService).pipe(
+          // per-event recovery: one failure must NOT kill the stream
+          Effect.catchAll((err) =>
+            logEffect("warn", "Automod", "Pipeline handler failed", {
+              ...logContext(e),
+              error: err, // tagged error passed whole, never stringified
+            }),
+          ),
+        ),
+      ),
+      Stream.runDrain,
+    );
+  });
+```
+
+Key idioms:
+
+- **`never` error channel is structural.** Every handler ends in
+  `Effect.catchAll`, so the pipeline type is `…, never, …`. A pipeline that can
+  fail would tear down on the first bad event; the type makes that impossible.
+- **`Stream.filter` with a type-guard** narrows `DiscordEvent` to the variant a
+  pipeline cares about. Use `Stream.filterEffect` when the gate is itself an
+  Effect (e.g. a feature-flag check — `deletionLogger.ts`).
+- **`filterLog`** (`app/effects/observability.ts`) filters *and* logs the drop,
+  so "not flagged" is distinguishable from "never evaluated."
+- **`Stream.tap`** for side effects that don't change the value (cache touches).
+- **`Stream.runDrain`** consumes the stream forever.
+
+To add a pipeline: write an `Effect<void, never, RuntimeContext>` with this
+shape, then fork it in `server.ts` alongside the others. The pure `enrich*`
+functions in `eventBus.ts` are extracted precisely so the interesting logic is
+unit-testable without a runtime.
+
+**See:** `app/discord/eventBus.ts`, `app/discord/pipelines/*.ts`, `app/server.ts`
+
+### Data Access: Free Effect Functions
+
+**This is the dominant pattern in the codebase.** Most data access is *not* a
+service — it's a plain exported function that returns an `Effect` and pulls the
+database out of context on its first line:
+
+```typescript
+// app/models/guilds.server.ts — the shape almost every model function takes
+export const fetchGuild = (guildId: string) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+    const row = yield* db
+      .selectFrom("guilds")
+      .selectAll()
+      .where("id", "=", guildId)
+      .pipe(/* ...takeFirst... */);
+    if (!row) return yield* Effect.fail(new NotFoundError({ resource: "guild", id: guildId }));
+    return row;
+  }).pipe(Effect.withSpan("Guild.fetchGuild", { attributes: { guildId } }));
+```
+
+These functions have requirement type `DatabaseService` (satisfied by the
+runtime). Callers compose them with `yield*` inside larger Effects, or cross a
+boundary with `await runEffect(fetchGuild(id))`. The Kysely builder is itself
+yieldable — `yield* db.selectFrom(...)` runs the query; there's no `.execute()`.
+DB failures surface automatically as `SqlError` in the error channel; domain
+"not found" is a deliberate `Effect.fail(new NotFoundError(...))`.
+
+The model files (`app/models/*.server.ts`) are the reference for this pattern.
+`subscriptions.server.ts` and `stripe.server.ts` group their free functions
+under an exported object (`SubscriptionService` / `StripeService`) for
+namespacing — note these are **plain objects of functions, not `Context.Tag`
+services** despite the name.
+
+> There are no DB transactions in the codebase — idempotency leans on SQLite
+> upserts (`onConflict`) plus in-process `Ref`/`Deferred` single-flight for
+> cross-request dedup (`app/models/userThreads.ts`). If you need atomicity
+> across multiple writes, that's new ground; design it deliberately.
+
 ### Services & Dependency Injection
 
-Services have three parts: an interface, a tag, and a live implementation.
+Reach for a `Context.Tag` service only when a free function won't do — when you
+need **lifetime-held state** (an in-memory cache, a Supervisor registration, a
+long-lived connection) or a **swappable implementation**. The nine production
+services are `DatabaseService`, `DiscordEventBus`, `MessageCacheService`,
+`SpamDetectionService`, `UserService`, `EscalationService`, `FeatureFlagService`,
+`PostHogService`, and `SupervisorService` — everything else in the model/helper
+layers is free functions.
+
+`UserService` is the one model-layer service: it captures `db` once at layer
+construction, so its methods require nothing (`R = never`) rather than
+`DatabaseService` per call.
+
+A service has three parts: an interface, a tag, and a live implementation.
 
 **1. Define the interface:**
 
@@ -306,7 +456,7 @@ export class EscalationService extends Context.Tag("EscalationService")<
 export const EscalationServiceLive = Layer.effect(
   EscalationService,
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
+    const db = yield* DatabaseService; // satisfied by AppLayer — no Layer.provide
     return {
       getEscalation: (id) =>
         Effect.gen(function* () {
@@ -314,7 +464,7 @@ export const EscalationServiceLive = Layer.effect(
         }),
     };
   }),
-).pipe(Layer.provide(DatabaseLayer));
+);
 ```
 
 **4. Use in handlers:**
@@ -358,18 +508,32 @@ yield* Effect.annotateCurrentSpan({ processed: due.length });
 
 ### Promise Integration
 
-Use `Effect.tryPromise` to wrap external Promise-based APIs:
+**For Discord calls, use `tryDiscord`** — don't hand-roll `Effect.tryPromise`
+with a hand-constructed error. `tryDiscord(operation, () => promise)` wraps the
+call and classifies any rejection into a typed `DiscordError` at the boundary
+(see "Decision-oriented errors" above):
 
 ```typescript
 export const fetchGuild = (client: Client, guildId: string) =>
+  tryDiscord("fetchGuild", () => client.guilds.fetch(guildId)).pipe(
+    Effect.withSpan("discord.fetchGuild", { attributes: { guildId } }),
+  );
+```
+
+**For other Promise-based APIs** (Stripe, OAuth fetches, the PostHog SDK), use
+`Effect.tryPromise` directly and map to the relevant tagged error — e.g.
+`StripeError`, `OAuthFetchError`:
+
+```typescript
+const tryStripe = (operation: string, fn: () => Promise<T>) =>
   Effect.tryPromise({
-    try: () => client.guilds.fetch(guildId),
-    catch: (error) =>
-      new DiscordApiError({ operation: "fetchGuild", cause: error }),
+    try: fn,
+    catch: (cause) => new StripeError({ operation, cause }),
   });
 ```
 
-For cases where failure is acceptable (returns null):
+For cases where failure is acceptable (returns null), drop the typed error and
+recover (error channel becomes `never`):
 
 ```typescript
 export const fetchMemberOrNull = (guild: Guild, userId: string) =>
@@ -379,20 +543,27 @@ export const fetchMemberOrNull = (guild: Guild, userId: string) =>
   }).pipe(Effect.catchAll(() => Effect.succeed(null)));
 ```
 
-**See:** `app/effects/discordSdk.ts` for all Discord SDK wrappers
+**See:** `app/effects/discordSdk.ts` (Discord wrappers),
+`app/effects/classifyDiscordError.ts` (`tryDiscord`),
+`app/models/stripe.server.ts` (`tryStripe`)
 
 ## Writing New Code
 
 ### Checklist
 
-1. **Define errors** — add to `app/effects/errors.ts` using `Data.TaggedError`
-2. **Define service interface** — see `app/commands/escalate/service.ts` for the
-   pattern
-3. **Implement with `Effect.gen`** — see `escalationResolver.ts` for complex
-   examples
-4. **Create a Layer** — see `app/Database.ts` for Layer composition
-5. **Add observability** — use `Effect.withSpan()` on every public function, use
-   `logEffect()` for important events
+1. **Reach for a free function first** — an exported `(args) => Effect.gen(...)`
+   that does `const db = yield* DatabaseService`. Only define a `Context.Tag`
+   service if you need lifetime-held state or a swappable implementation.
+2. **Define errors** — add to `app/effects/errors.ts` using `Data.TaggedError`;
+   for Discord calls, let `tryDiscord` produce the `DiscordError` for you
+3. **Implement with `Effect.gen`** — see `guilds.server.ts` for a typical model
+   function, `escalationResolver.ts` for complex orchestration
+4. **If it's an event reaction, write a pipeline** — not an ad-hoc
+   `client.on(...)`; add a `Stream` pipeline and fork it in `server.ts`
+5. **Add observability** — `Effect.withSpan()` on every public function;
+   `logEffect()` (with the tagged error passed whole) for important events
+6. **A new service?** — then also define the interface + tag + Layer and merge
+   it into `AppLayer` (`app/AppRuntime.ts`)
 
 ### Template: New Handler
 
@@ -525,15 +696,23 @@ const add = (a: number, b: number): number => a + b;
 
 These are the best files to study when learning how Effect is used here:
 
+- **`app/AppRuntime.ts`** — the single `ManagedRuntime`, `AppLayer` composition,
+  and the `runEffect` boundary
+- **`app/discord/eventBus.ts`** + **`app/discord/pipelines/automod.ts`** — the
+  Stream-based event-pipeline architecture (queue → broadcast → filter →
+  mapEffect → runDrain)
+- **`app/models/guilds.server.ts`** — the dominant free-Effect-function data
+  pattern (`yield* DatabaseService`, yieldable Kysely, `withSpan`)
 - **`app/commands/escalate/escalationResolver.ts`** — parallel operations,
-  sequential processing, error recovery, span annotations
-- **`app/effects/discordSdk.ts`** — Promise wrapping, error mapping,
-  null-safe variants
-- **`app/commands/escalate/service.ts`** — full service pattern with interface,
-  tag, Layer, and dependency injection
+  sequential rate-limited processing, error recovery, span annotations
+- **`app/effects/discordSdk.ts`** + **`app/effects/classifyDiscordError.ts`** —
+  `tryDiscord` Promise wrapping and boundary error classification
+- **`app/commands/escalate/service.ts`** — the full `Context.Tag` service pattern
+  (interface, tag, Layer) for the cases that need one
 - **`app/Database.ts`** — Layer composition, merging independent layers
-- **`app/effects/observability.ts`** — `logEffect` and `tapLog` utilities
-- **`app/effects/errors.ts`** — `Data.TaggedError` definitions
+- **`app/effects/observability.ts`** — `logEffect`, `tapLog`, `filterLog`
+- **`app/effects/errors.ts`** + **`app/effects/errorHandling.ts`** —
+  `Data.TaggedError` taxonomy and the `withRetry`/`toUserResponse` helpers
 
 ## Unit Testing
 
@@ -641,5 +820,7 @@ unabridged versions of the documentation are
 [indexed here](https://effect.website/llms.txt); you can retrieve a URL with
 more detailed information from there.
 
-For patterns not used in this codebase (Streams, etc.), see
-[EFFECT_ADVANCED.md](./EFFECT_ADVANCED.md).
+For Effect patterns we don't use yet (Sink, the Config module, callback→Effect
+adapters), see [EFFECT_ADVANCED.md](./EFFECT_ADVANCED.md). Streams, Queues,
+Schedule, Ref, and Fiber supervision are all core here and documented above or
+in [EFFECT_REFERENCE.md](./EFFECT_REFERENCE.md).

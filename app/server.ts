@@ -174,17 +174,41 @@ const startup = Effect.gen(function* () {
 
     // Graceful shutdown handler to checkpoint WAL and dispose the runtime
     // (tears down PostHog finalizer, feature flag interval, and SQLite connection)
-    const handleShutdown = (signal: string) =>
-      runtime
-        .runPromise(
+    // Graceful shutdown: checkpoint WAL, THEN dispose the runtime so AppLayer
+    // finalizers run (PostHog flush/shutdown, feature-flag interval clear,
+    // SQLite connection close) before the process exits. The exit must come
+    // after dispose — an earlier `process.exit` here skips every finalizer.
+    let shuttingDown = false;
+    const handleShutdown = async (signal: string) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+
+      // Failsafe: if teardown hangs (a finalizer blocks), force-exit rather
+      // than wait for the orchestrator's SIGKILL. unref() so this timer can
+      // never keep the process alive on its own.
+      const forceExit = setTimeout(() => {
+        console.error("Graceful shutdown timed out; forcing exit");
+        process.exit(1);
+      }, 10_000);
+      forceExit.unref();
+
+      try {
+        await runtime.runPromise(
           Effect.gen(function* () {
             yield* logEffect("info", "Server", `Received ${signal}`);
             yield* checkpointWal();
             yield* logEffect("info", "Server", "Database WAL checkpointed");
-            process.exit(0);
           }),
-        )
-        .then(() => runtime.dispose().then(() => console.log("ok")));
+        );
+      } catch (error) {
+        console.error("Shutdown WAL checkpoint failed:", error);
+      } finally {
+        await runtime
+          .dispose()
+          .catch((error) => console.error("Runtime dispose failed:", error));
+        process.exit(0);
+      }
+    };
 
     yield* logEffect("debug", "Server", "setting signal handlers");
     process.on("SIGTERM", () => void handleShutdown("SIGTERM"));

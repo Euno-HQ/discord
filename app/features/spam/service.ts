@@ -149,7 +149,17 @@ export const SpamDetectionServiceLive = Layer.effect(
         // matching the pre-Effect behavior: absent/unreadable settings → not a mod.
         const settings = yield* fetchSettings(guildId, [
           SETTINGS.moderator,
-        ]).pipe(Effect.catchAll(() => Effect.succeed(null)));
+        ]).pipe(
+          Effect.catchTag("NotFoundError", () => Effect.succeed(null)),
+          Effect.catchTag("SqlError", (error) =>
+            logEffect(
+              "warn",
+              "SpamDetection",
+              "Failed to fetch guild settings for moderator check",
+              { error },
+            ).pipe(Effect.as(null)),
+          ),
+        );
 
         if (!settings?.moderator) return false;
 

@@ -135,7 +135,7 @@ export const Command = {
         SETTINGS.deletionLog,
         SETTINGS.restricted,
       ]).pipe(
-        Effect.catchAll(() =>
+        Effect.catchTag("NotFoundError", () =>
           Effect.succeed(null as null | Record<string, string | undefined>),
         ),
       );

@@ -12,18 +12,18 @@ import {
 } from "discord-api-types/v10";
 import { Effect } from "effect";
 
-import { isFeatureEnabled } from "#~/AppRuntime";
 import { DatabaseService, type SqlError } from "#~/Database";
 import { ssrDiscordSdk } from "#~/discord/api";
-import { toError, tryDiscord } from "#~/effects/classifyDiscordError";
-import { TransientError, type DiscordError } from "#~/effects/errors";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
+import { type DiscordError } from "#~/effects/errors";
+import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability";
 import { applicationId } from "#~/helpers/env.server";
 import {
   DEFAULT_BUTTON_TEXT,
   DEFAULT_MESSAGE_TEXT,
 } from "#~/helpers/setupDefaults";
-import { createJob } from "#~/jobs/jobRunner";
+import { createJobEffect } from "#~/jobs/jobRunner";
 import { registerGuild, setSettings, SETTINGS } from "#~/models/guilds.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
@@ -102,7 +102,11 @@ const sendChannelMessage = (
 
 export const setupAll = (
   options: SetupAllOptions,
-): Effect.Effect<SetupAllResult, DiscordError | SqlError, DatabaseService> =>
+): Effect.Effect<
+  SetupAllResult,
+  DiscordError | SqlError,
+  DatabaseService | FeatureFlagService
+> =>
   Effect.gen(function* () {
     const {
       guildId,
@@ -319,25 +323,16 @@ export const setupAll = (
       // assign the role in batches with checkpointing, and finally update
       // permissions once all members have the role.
       const bulkRoleId = resolvedMemberRoleId;
-      yield* Effect.tryPromise({
-        try: () =>
-          createJob({
-            guildId,
-            jobType: "bulk_role_assignment",
-            payload: {
-              roleId: bulkRoleId,
-              everyonePermissions: String(everyonePerms),
-              memberPermissions: String(memberPerms),
-            },
-            totalPhases: 1,
-            notifyChannelId: modLogChannelId,
-          }),
-        catch: (rejection) =>
-          new TransientError({
-            source: "discord",
-            operation: "createJob",
-            cause: toError(rejection),
-          }),
+      yield* createJobEffect({
+        guildId,
+        jobType: "bulk_role_assignment",
+        payload: {
+          roleId: bulkRoleId,
+          everyonePermissions: String(everyonePerms),
+          memberPermissions: String(memberPerms),
+        },
+        totalPhases: 1,
+        notifyChannelId: modLogChannelId,
       });
 
       yield* logEffect(
@@ -400,19 +395,9 @@ export const setupAll = (
     // user who later clicks it (#370). Skip the whole section when disabled.
     let ticketChannelId: string | undefined;
     const ticketRequested = ticketChannel !== undefined;
-    // isFeatureEnabled (AppRuntime) Promise-bridges a PostHog flag check through
-    // the ManagedRuntime, which provides FeatureFlagService itself — so the flag
-    // check does NOT add FeatureFlagService to this function's requirements.
+    const flags = yield* FeatureFlagService;
     const ticketingEnabled = ticketRequested
-      ? yield* Effect.tryPromise({
-          try: () => isFeatureEnabled("ticketing", guildId),
-          catch: (rejection) =>
-            new TransientError({
-              source: "discord",
-              operation: "isFeatureEnabled",
-              cause: toError(rejection),
-            }),
-        })
+      ? yield* flags.isPostHogEnabled("ticketing", guildId)
       : false;
 
     if (ticketRequested && !ticketingEnabled) {
