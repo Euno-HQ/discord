@@ -1,4 +1,5 @@
 import { ComponentType } from "discord.js";
+import { Effect } from "effect";
 import { vi } from "vitest";
 
 import type { SetupPermissionCheckResult } from "#~/helpers/setupPermissionCheck";
@@ -20,6 +21,9 @@ vi.mock("#~/effects/observability", () => ({
   log: () => {
     /* noop */
   },
+  // Database.ts (pulled in transitively) calls logEffect at module load via
+  // Effect.runFork; return a real no-op Effect so the fork has something to run.
+  logEffect: () => Effect.void,
 }));
 vi.mock("#~/helpers/metrics", () => ({ commandStats: {} }));
 vi.mock("#~/helpers/setupPermissionCheck", () => ({

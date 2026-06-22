@@ -8,7 +8,6 @@ import { matchCommand } from "#~/discord/deployCommands.server";
 import { logEffect } from "#~/effects/observability.ts";
 import { type AnyCommand } from "#~/helpers/discord.ts";
 import { botStats } from "#~/helpers/metrics";
-import { log } from "#~/helpers/observability";
 import Sentry from "#~/helpers/sentry.server";
 
 // Track if gateway is already initialized to prevent duplicate logins during HMR
@@ -44,46 +43,54 @@ export const initDiscordBot: Effect.Effect<Client> = Effect.gen(function* () {
   client.on(
     Events.Raw,
     (packet: { t?: string; op?: number; d?: Record<string, unknown> }) => {
-      log("debug", "Gateway.Raw", packet.t ?? "unknown", {
-        op: packet.op,
-        guildId: packet.d?.guild_id,
-        channelId: packet.d?.channel_id,
-        userId: packet.d?.user_id,
-      });
+      Effect.runFork(
+        logEffect("debug", "Gateway.Raw", packet.t ?? "unknown", {
+          op: packet.op,
+          guildId: packet.d?.guild_id,
+          channelId: packet.d?.channel_id,
+          userId: packet.d?.user_id,
+        }),
+      );
     },
   );
 
   client.on(Events.ThreadCreate, (thread) => {
-    log("info", "Gateway", "Thread created", {
-      threadId: thread.id,
-      guildId: thread.guild.id,
-      channelId: thread.parentId,
-      threadName: thread.name,
-    });
+    Effect.runFork(
+      logEffect("info", "Gateway", "Thread created", {
+        threadId: thread.id,
+        guildId: thread.guild.id,
+        channelId: thread.parentId,
+        threadName: thread.name,
+      }),
+    );
 
     // Track thread creation in business analytics
     botStats.threadCreated(thread);
 
     thread.join().catch((error) => {
-      log("error", "Gateway", "Failed to join thread", {
-        threadId: thread.id,
-        guildId: thread.guild.id,
-        error,
-      });
+      Effect.runFork(
+        logEffect("error", "Gateway", "Failed to join thread", {
+          threadId: thread.id,
+          guildId: thread.guild.id,
+          error,
+        }),
+      );
     });
   });
 
   client.on(Events.InteractionCreate, (interaction) => {
-    log("debug", "deployCommands", "Handling interaction", {
-      type: interaction.type,
-      id: interaction.id,
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      commandName: interaction.commandName,
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      customId: interaction.customId,
-    });
+    Effect.runFork(
+      logEffect("debug", "deployCommands", "Handling interaction", {
+        type: interaction.type,
+        id: interaction.id,
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        commandName: interaction.commandName,
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        customId: interaction.customId,
+      }),
+    );
     let config: AnyCommand | undefined = undefined;
     let commandName: string | undefined = undefined;
     switch (interaction.type) {
@@ -101,10 +108,14 @@ export const initDiscordBot: Effect.Effect<Client> = Effect.gen(function* () {
     }
 
     if (!config || !commandName) {
-      log("debug", "deployCommands", "no matching command found");
+      Effect.runFork(
+        logEffect("debug", "deployCommands", "no matching command found"),
+      );
       return;
     }
-    log("debug", "deployCommands", "found matching command", { config });
+    Effect.runFork(
+      logEffect("debug", "deployCommands", "found matching command", { config }),
+    );
 
     void runEffect(
       config.handler(interaction as never).pipe(
@@ -124,12 +135,14 @@ export const initDiscordBot: Effect.Effect<Client> = Effect.gen(function* () {
   const errorHandler = (error: unknown) => {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
-    log("error", "Gateway", "Gateway error occurred", {
-      error: errorMessage,
-      stack: error instanceof Error ? error.stack : undefined,
-      guildCount: client.guilds.cache.size,
-      userCount: client.users.cache.size,
-    });
+    Effect.runFork(
+      logEffect("error", "Gateway", "Gateway error occurred", {
+        error: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined,
+        guildCount: client.guilds.cache.size,
+        userCount: client.users.cache.size,
+      }),
+    );
 
     // Track gateway errors in business analytics
     botStats.gatewayError(errorMessage, client.guilds.cache.size);
@@ -142,10 +155,12 @@ export const initDiscordBot: Effect.Effect<Client> = Effect.gen(function* () {
   // Add connection monitoring
   client.on(Events.ShardDisconnect, async (closeEvent, _shardId) => {
     if (FATAL_CLOSE_CODES.has(closeEvent.code)) {
-      log("error", "Gateway", "Received fatal gateway close code — exiting", {
-        code: closeEvent.code,
-        reason: closeEvent.reason,
-      });
+      Effect.runFork(
+        logEffect("error", "Gateway", "Received fatal gateway close code — exiting", {
+          code: closeEvent.code,
+          reason: closeEvent.reason,
+        }),
+      );
       Sentry.captureMessage(
         `Fatal gateway disconnect: code ${closeEvent.code}`,
         "fatal",
@@ -155,18 +170,22 @@ export const initDiscordBot: Effect.Effect<Client> = Effect.gen(function* () {
       process.exit(1);
     }
 
-    log("warn", "Gateway", "Client disconnected", {
-      code: closeEvent.code,
-      guildCount: client.guilds.cache.size,
-      userCount: client.users.cache.size,
-    });
+    Effect.runFork(
+      logEffect("warn", "Gateway", "Client disconnected", {
+        code: closeEvent.code,
+        guildCount: client.guilds.cache.size,
+        userCount: client.users.cache.size,
+      }),
+    );
   });
 
   client.on(Events.ShardReconnecting, () => {
-    log("info", "Gateway", "Client reconnecting", {
-      guildCount: client.guilds.cache.size,
-      userCount: client.users.cache.size,
-    });
+    Effect.runFork(
+      logEffect("info", "Gateway", "Client reconnecting", {
+        guildCount: client.guilds.cache.size,
+        userCount: client.users.cache.size,
+      }),
+    );
 
     // Track reconnections in business analytics
     botStats.reconnection(client.guilds.cache.size, client.users.cache.size);

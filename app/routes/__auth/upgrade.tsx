@@ -8,7 +8,7 @@ import {
 } from "react-router";
 
 import { runEffect } from "#~/AppRuntime";
-import { log } from "#~/helpers/observability";
+import { logEffect } from "#~/effects/observability";
 import { requestOrigin } from "#~/helpers/request.server";
 import { requireUser } from "#~/models/session.server";
 import { StripeService } from "#~/models/stripe.server";
@@ -55,10 +55,12 @@ export async function action({ request }: Route.ActionArgs) {
 
   // Handle cancellation
   if (intent === "cancel") {
-    log("info", "Upgrade", "Processing subscription cancellation", {
-      guildId,
-      userId: user.id,
-    });
+    void runEffect(
+      logEffect("info", "Upgrade", "Processing subscription cancellation", {
+        guildId,
+        userId: user.id,
+      }),
+    );
 
     const subscription = await runEffect(
       SubscriptionService.getGuildSubscription(guildId),
@@ -90,10 +92,12 @@ export async function action({ request }: Route.ActionArgs) {
       SubscriptionService.updateSubscriptionStatus(guildId, "cancelled"),
     );
 
-    log("info", "Upgrade", "Subscription cancelled successfully", {
-      guildId,
-      userId: user.id,
-    });
+    void runEffect(
+      logEffect("info", "Upgrade", "Subscription cancelled successfully", {
+        guildId,
+        userId: user.id,
+      }),
+    );
 
     return { cancelled: true };
   }
@@ -108,10 +112,12 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (tier === "paid") {
-    log("info", "Upgrade", "Creating Stripe checkout session", {
-      guildId,
-      userId: user.id,
-    });
+    void runEffect(
+      logEffect("info", "Upgrade", "Creating Stripe checkout session", {
+        guildId,
+        userId: user.id,
+      }),
+    );
 
     try {
       // Honor reverse-proxy forwarded headers so Stripe return URLs point at
@@ -129,19 +135,23 @@ export async function action({ request }: Route.ActionArgs) {
         ),
       );
 
-      log("info", "Upgrade", "Redirecting to Stripe checkout", {
-        guildId,
-        userId: user.id,
-      });
+      void runEffect(
+        logEffect("info", "Upgrade", "Redirecting to Stripe checkout", {
+          guildId,
+          userId: user.id,
+        }),
+      );
 
       // Redirect to Stripe checkout
       return redirect(checkoutUrl);
     } catch (caught) {
-      log("error", "Upgrade", "Failed to create checkout session", {
-        guildId,
-        userId: user.id,
-        error: caught,
-      });
+      void runEffect(
+        logEffect("error", "Upgrade", "Failed to create checkout session", {
+          guildId,
+          userId: user.id,
+          error: caught,
+        }),
+      );
 
       // StripeService now rejects with a typed StripeError whose `.cause` is the
       // raw Stripe SDK error; unwrap it so config-error detection sees the same

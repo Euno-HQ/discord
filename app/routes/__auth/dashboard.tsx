@@ -2,12 +2,13 @@ import type { PropsWithChildren } from "react";
 import { data, Link, useSearchParams } from "react-router";
 
 import { runEffect } from "#~/AppRuntime";
+import { logEffect } from "#~/effects/observability";
 import { RangeForm, type PresetKey } from "#~/features/StarHunter/RangeForm.js";
 import {
   calculateCohortBenchmarks,
   getCohortMetrics,
 } from "#~/helpers/cohortAnalysis";
-import { log, trackPerformance } from "#~/helpers/observability";
+import { trackPerformance } from "#~/helpers/observability";
 import { getTopParticipantsEffect } from "#~/models/activity.server";
 
 import type { Route } from "./+types/dashboard";
@@ -27,24 +28,28 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       const guildId = params.guildId;
       const minThreshold = Number(url.searchParams.get("minThreshold") ?? 10);
 
-      log("info", "Dashboard", "Dashboard loader accessed", {
-        guildId,
-        start,
-        end,
-        userAgent: request.headers.get("user-agent"),
-        ip: request.headers.get("x-forwarded-for") ?? "unknown",
-      });
+      void runEffect(
+        logEffect("info", "Dashboard", "Dashboard loader accessed", {
+          guildId,
+          start,
+          end,
+          userAgent: request.headers.get("user-agent"),
+          ip: request.headers.get("x-forwarded-for") ?? "unknown",
+        }),
+      );
 
       if (!(guildId && start && end)) {
-        log(
-          "warn",
-          "Dashboard",
-          "Invalid dashboard request - missing parameters",
-          {
-            guildId,
-            start,
-            end,
-          },
+        void runEffect(
+          logEffect(
+            "warn",
+            "Dashboard",
+            "Invalid dashboard request - missing parameters",
+            {
+              guildId,
+              start,
+              end,
+            },
+          ),
         );
         return data(null, { status: 400 });
       }

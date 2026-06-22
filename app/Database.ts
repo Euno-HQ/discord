@@ -11,7 +11,6 @@ import { DatabaseCorruptionError } from "./effects/errors";
 import { logEffect } from "./effects/observability";
 import { databaseUrl, emergencyWebhook } from "./helpers/env.server";
 import { formatError } from "./helpers/formatError";
-import { log } from "./helpers/observability";
 
 // Re-export SQL errors and DB type for consumers
 export { SqlError, ResultLengthMismatch };
@@ -43,7 +42,9 @@ const KyselyLive = Layer.effect(DatabaseService, Sqlite.make<DB>()).pipe(
 // Combined database layer providing SqlClient, SqliteClient, and KyselyService
 export const DatabaseLayer = Layer.mergeAll(SqliteLive, KyselyLive);
 
-log("info", "Database", `Database configured at ${databaseUrl}`);
+Effect.runFork(
+  logEffect("info", "Database", `Database configured at ${databaseUrl}`),
+);
 
 export function checkpointWal() {
   return Effect.gen(function* () {

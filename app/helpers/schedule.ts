@@ -1,7 +1,8 @@
 import { format, parseISO, subDays } from "date-fns";
 import { schedule as scheduleCron } from "node-cron";
 
-import { log } from "./observability";
+import { runEffect } from "#~/AppRuntime";
+import { logEffect } from "#~/effects/observability";
 
 /**
  * getFirstRun ensures that a newly created interval timer runs at consistent
@@ -40,18 +41,25 @@ export const scheduleTask = (
 ) => {
   if (typeof interval === "number") {
     const firstRun = getFirstRun(interval);
-    log(
-      "info",
-      "ScheduleTask",
-      `Scheduling ${serviceName} in ${Math.floor(firstRun / 1000) / 60}min, repeating ${Math.floor(interval / 1000) / 60}`,
-      { serviceName, interval, firstRun },
+    void runEffect(
+      logEffect(
+        "info",
+        "ScheduleTask",
+        `Scheduling ${serviceName} in ${Math.floor(firstRun / 1000) / 60}min, repeating ${Math.floor(interval / 1000) / 60}`,
+        { serviceName, interval, firstRun },
+      ),
     );
     setTimeout(() => {
       task();
       setInterval(task, interval);
     }, firstRun);
   } else {
-    log("info", "ScheduleTask", JSON.stringify({ serviceName, interval }));
+    void runEffect(
+      logEffect("info", "ScheduleTask", "Scheduling cron task", {
+        serviceName,
+        interval,
+      }),
+    );
     scheduleCron(interval, task);
   }
 };

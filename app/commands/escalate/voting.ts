@@ -1,5 +1,7 @@
+import { Effect } from "effect";
+
+import { logEffect } from "#~/effects/observability.ts";
 import { type Resolution, type VotingStrategy } from "#~/helpers/modResponse";
-import { log } from "#~/helpers/observability";
 
 export interface VoteTally {
   totalVotes: number;
@@ -60,7 +62,7 @@ export function tallyVotes(votes: VoteRecord[]): VoteTally {
     isTied,
     tiedResolutions,
   };
-  log("info", "Voting", "Tallied votes", output);
+  Effect.runFork(logEffect("info", "Voting", "Tallied votes", output));
 
   return output;
 }

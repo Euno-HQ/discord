@@ -2,8 +2,9 @@ import { data } from "react-router";
 
 import { runEffect } from "#~/AppRuntime";
 import { GuildSettingsForm } from "#~/components/GuildSettingsForm";
+import { logEffect } from "#~/effects/observability";
 import { fetchGuildData } from "#~/helpers/guildData.server";
-import { log, trackPerformance } from "#~/helpers/observability";
+import { trackPerformance } from "#~/helpers/observability";
 import { fetchSettings, setSettings, SETTINGS } from "#~/models/guilds.server";
 import { requireUser } from "#~/models/session.server";
 
@@ -17,7 +18,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     throw data({ message: "Guild ID is required" }, { status: 400 });
   }
 
-  log("info", "settings", "Settings page accessed", { guildId });
+  void runEffect(
+    logEffect("info", "settings", "Settings page accessed", { guildId }),
+  );
 
   // Fetch current guild settings
   const [currentSettings, { roles, channels }] = await Promise.all([
@@ -83,12 +86,14 @@ export async function action({ request }: Route.ActionArgs) {
     );
   }
 
-  log("info", "settings", "Settings form submitted", {
-    guildId,
-    modLogChannel,
-    moderatorRole,
-    hasRestrictedRole: !!restrictedRole,
-  });
+  void runEffect(
+    logEffect("info", "settings", "Settings form submitted", {
+      guildId,
+      modLogChannel,
+      moderatorRole,
+      hasRestrictedRole: !!restrictedRole,
+    }),
+  );
 
   try {
     await trackPerformance("guilds.setSettings", () =>
@@ -101,18 +106,25 @@ export async function action({ request }: Route.ActionArgs) {
       ),
     );
 
-    log("info", "settings", "Settings updated successfully", {
-      guildId,
-      settings: {
-        modLog: modLogChannel,
-        moderator: moderatorRole,
-        restricted: restrictedRole || null,
-      },
-    });
+    void runEffect(
+      logEffect("info", "settings", "Settings updated successfully", {
+        guildId,
+        settings: {
+          modLog: modLogChannel,
+          moderator: moderatorRole,
+          restricted: restrictedRole || null,
+        },
+      }),
+    );
 
     return data({ success: true });
   } catch (error) {
-    log("error", "settings", "Settings update failed", { guildId, error });
+    void runEffect(
+      logEffect("error", "settings", "Settings update failed", {
+        guildId,
+        error,
+      }),
+    );
     throw data(
       { message: "Failed to update settings. Please try again." },
       { status: 500 },

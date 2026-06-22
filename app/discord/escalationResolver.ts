@@ -5,7 +5,7 @@ import { runEffectExit } from "#~/AppRuntime";
 import { checkPendingEscalationsEffect } from "#~/commands/escalate/escalationResolver";
 import { getFailure } from "#~/commands/escalate/index";
 import { EscalationServiceLive } from "#~/commands/escalate/service.ts";
-import { log } from "#~/helpers/observability";
+import { logEffect } from "#~/effects/observability.ts";
 import { scheduleTask } from "#~/helpers/schedule";
 
 const ONE_MINUTE = 60 * 1000;
@@ -22,9 +22,16 @@ async function checkPendingEscalations(client: Client): Promise<void> {
 
   if (exit._tag === "Failure") {
     const error = getFailure(exit.cause);
-    log("error", "EscalationResolver", "Failed to check pending escalations", {
-      error,
-    });
+    Effect.runFork(
+      logEffect(
+        "error",
+        "EscalationResolver",
+        "Failed to check pending escalations",
+        {
+          error,
+        },
+      ),
+    );
   }
 }
 
@@ -33,11 +40,13 @@ async function checkPendingEscalations(client: Client): Promise<void> {
  * Runs every 15 minutes to check for escalations that should be auto-resolved.
  */
 export function startEscalationResolver(client: Client): void {
-  log(
-    "info",
-    "EscalationResolver",
-    "Starting escalation resolver scheduler",
-    {},
+  Effect.runFork(
+    logEffect(
+      "info",
+      "EscalationResolver",
+      "Starting escalation resolver scheduler",
+      {},
+    ),
   );
 
   scheduleTask("EscalationResolver", ONE_MINUTE * 15, () => {
