@@ -5,11 +5,11 @@ import {
 import { Effect } from "effect";
 
 import { fetchMember } from "#~/effects/discordSdk";
-import { DiscordApiError, NotAuthorizedError } from "#~/effects/errors";
+import { NotAuthorizedError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { hasModRole } from "#~/helpers/discord";
 import { applyRestriction, ban, kick, timeout } from "#~/models/discord.server";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 import { deleteAllReportedForUser } from "#~/models/reportedMessages";
 
 export interface DeleteMessagesResult {
@@ -77,7 +77,7 @@ export const kickUser = (interaction: MessageComponentInteraction) =>
     const guildId = interaction.guildId!;
 
     // Get settings and check permissions
-    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+    const { moderator: modRoleId } = yield* fetchSettings(guildId, [
       SETTINGS.moderator,
     ]);
 
@@ -98,11 +98,7 @@ export const kickUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute kick
-    yield* Effect.tryPromise({
-      try: () => kick(reportedMember, "single moderator decision"),
-      catch: (error) =>
-        new DiscordApiError({ operation: "kick", cause: error }),
-    });
+    yield* kick(reportedMember, "single moderator decision");
 
     yield* logEffect("info", "DirectActions", "Kicked user", {
       reportedUserId,
@@ -130,7 +126,7 @@ export const banUser = (interaction: MessageComponentInteraction) =>
     const guildId = interaction.guildId!;
 
     // Get settings and check permissions
-    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+    const { moderator: modRoleId } = yield* fetchSettings(guildId, [
       SETTINGS.moderator,
     ]);
 
@@ -151,10 +147,7 @@ export const banUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute ban
-    yield* Effect.tryPromise({
-      try: () => ban(reportedMember, "single moderator decision"),
-      catch: (error) => new DiscordApiError({ operation: "ban", cause: error }),
-    });
+    yield* ban(reportedMember, "single moderator decision");
 
     yield* logEffect("info", "DirectActions", "Banned user", {
       reportedUserId,
@@ -186,7 +179,7 @@ export const banUserAndDeleteMessages = (
     const guildId = interaction.guildId!;
 
     // Get settings and check permissions
-    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+    const { moderator: modRoleId } = yield* fetchSettings(guildId, [
       SETTINGS.moderator,
     ]);
 
@@ -207,15 +200,11 @@ export const banUserAndDeleteMessages = (
     );
 
     // Execute ban with message deletion
-    yield* Effect.tryPromise({
-      try: () =>
-        ban(
-          reportedMember,
-          "single moderator decision",
-          DELETE_MESSAGE_SECONDS,
-        ),
-      catch: (error) => new DiscordApiError({ operation: "ban", cause: error }),
-    }).pipe(
+    yield* ban(
+      reportedMember,
+      "single moderator decision",
+      DELETE_MESSAGE_SECONDS,
+    ).pipe(
       Effect.withSpan("discord.ban", {
         attributes: {
           userId: reportedUserId,
@@ -256,7 +245,7 @@ export const restrictUser = (interaction: MessageComponentInteraction) =>
     const guildId = interaction.guildId!;
 
     // Get settings and check permissions
-    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+    const { moderator: modRoleId } = yield* fetchSettings(guildId, [
       SETTINGS.moderator,
     ]);
 
@@ -277,14 +266,7 @@ export const restrictUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute restriction
-    yield* Effect.tryPromise({
-      try: () => applyRestriction(reportedMember),
-      catch: (error) =>
-        new DiscordApiError({
-          operation: "applyRestriction",
-          cause: error,
-        }),
-    });
+    yield* applyRestriction(reportedMember);
 
     yield* logEffect("info", "DirectActions", "Restricted user", {
       reportedUserId,
@@ -312,7 +294,7 @@ export const timeoutUser = (interaction: MessageComponentInteraction) =>
     const guildId = interaction.guildId!;
 
     // Get settings and check permissions
-    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+    const { moderator: modRoleId } = yield* fetchSettings(guildId, [
       SETTINGS.moderator,
     ]);
 
@@ -333,11 +315,7 @@ export const timeoutUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute timeout
-    yield* Effect.tryPromise({
-      try: () => timeout(reportedMember, "single moderator decision"),
-      catch: (error) =>
-        new DiscordApiError({ operation: "timeout", cause: error }),
-    });
+    yield* timeout(reportedMember, "single moderator decision");
 
     yield* logEffect("info", "DirectActions", "Timed out user", {
       reportedUserId,

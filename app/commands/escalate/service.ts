@@ -317,11 +317,26 @@ export const EscalationServiceLive = Layer.effect(
             },
           );
 
-          // Try to fetch the member - they may have left
+          // Try to fetch the member - they may have left. ONLY a genuine 404
+          // (ResourceMissingError) means "member gone → skip"; any other
+          // DiscordError (rate limit, transient 5xx, forbidden, etc.) must
+          // propagate as ResolutionExecutionError so a community-voted action
+          // is not silently dropped. Mirror the action fold's field shape so
+          // the public contract and downstream logging stay consistent.
           const reportedMember = yield* fetchMember(
             guild,
             escalation.reported_user_id,
-          ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+          ).pipe(
+            Effect.catchTag("ResourceMissingError", () => Effect.succeed(null)),
+            Effect.mapError(
+              (caught) =>
+                new ResolutionExecutionError({
+                  escalationId: escalation.id,
+                  resolution,
+                  cause: caught,
+                }),
+            ),
+          );
 
           if (!reportedMember) {
             yield* logEffect(
@@ -332,33 +347,42 @@ export const EscalationServiceLive = Layer.effect(
             return;
           }
 
-          yield* Effect.tryPromise({
-            try: async () => {
-              switch (resolution) {
-                case "track":
-                  // No action needed
-                  break;
-                case "timeout":
-                  await timeout(reportedMember, "voted resolution");
-                  break;
-                case "restrict":
-                  await applyRestriction(reportedMember);
-                  break;
-                case "kick":
-                  await kick(reportedMember, "voted resolution");
-                  break;
-                case "ban":
-                  await ban(reportedMember, "voted resolution");
-                  break;
-              }
-            },
-            catch: (error) =>
-              new ResolutionExecutionError({
-                escalationId: escalation.id,
-                resolution,
-                cause: error,
-              }),
+          const action = Effect.gen(function* () {
+            switch (resolution) {
+              case "track":
+                // No action needed
+                break;
+              case "timeout":
+                yield* timeout(reportedMember, "voted resolution");
+                break;
+              case "restrict":
+                yield* applyRestriction(reportedMember);
+                break;
+              case "kick":
+                yield* kick(reportedMember, "voted resolution");
+                break;
+              case "ban":
+                yield* ban(reportedMember, "voted resolution");
+                break;
+            }
           });
+
+          // Fold the typed DiscordError/SqlError/NotFoundError failures of the
+          // action Effects into the public ResolutionExecutionError contract.
+          // applyRestriction requires DatabaseService — satisfy it from the
+          // `db` captured in this Layer's closure so executeResolution keeps a
+          // `never` Requirements channel per IEscalationService.
+          yield* action.pipe(
+            Effect.provideService(DatabaseService, db),
+            Effect.mapError(
+              (caught) =>
+                new ResolutionExecutionError({
+                  escalationId: escalation.id,
+                  resolution,
+                  cause: caught,
+                }),
+            ),
+          );
 
           yield* logEffect("info", "EscalationService", "Resolution executed");
         }).pipe(

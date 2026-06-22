@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { Effect } from "effect";
 import {
   createCookieSessionStorage,
   createSessionStorage,
@@ -7,7 +8,13 @@ import {
 } from "react-router";
 import { AuthorizationCode } from "simple-oauth2";
 
-import { db, run, runTakeFirst, runTakeFirstOrThrow } from "#~/AppRuntime";
+import {
+  db,
+  run,
+  runEffect,
+  runTakeFirst,
+  runTakeFirstOrThrow,
+} from "#~/AppRuntime";
 import { type DB } from "#~/Database";
 import { BOT_PERMISSIONS } from "#~/helpers/botPermissions";
 import {
@@ -16,15 +23,19 @@ import {
   isProd,
   sessionSecret,
 } from "#~/helpers/env.server";
+import { requestOrigin } from "#~/helpers/request.server";
 import { fetchUser } from "#~/models/discord.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
-import {
-  createUser,
-  getUserByExternalId,
-  getUserById,
-} from "#~/models/user.server";
+import { UserService, type IUserService } from "#~/models/user.server";
 
 export type Sessions = DB["sessions"];
+
+// Bridge: run a UserService method from this plain-async (web) module.
+// A SqlError/NotFoundError rejects the returned promise, propagating exactly as
+// the previous thrown DB error did.
+const userSvc = <A, E>(
+  f: (s: IUserService) => Effect.Effect<A, E, never>,
+): Promise<A> => runEffect(Effect.flatMap(UserService, f));
 
 const config = {
   client: {
@@ -70,6 +81,7 @@ const {
   cookie: {
     name: "__session",
     sameSite: "lax",
+    secrets: [sessionSecret],
   },
   async createData(data, expires) {
     const result = await runTakeFirstOrThrow(
@@ -138,6 +150,15 @@ function hasCookie(request: Request, cookieName: string): boolean {
   return regex.test(cookieHeader);
 }
 
+// `getUser`/`requireUser`/`requireUserId` (and the `getUserId` helper) stay
+// thin `async` functions BY DESIGN. They throw `redirect()`/`logout()`
+// `Response`s to signal React-Router control flow — that thrown Response is
+// framework glue, not a domain error, and must reach the route boundary as a
+// RAW `Response` so React Router treats it as a redirect. Running these through
+// `runEffect`/`runPromise` would wrap any failure in a `FiberFailure`, breaking
+// that contract. So the domain data lookups go through `UserService` via the
+// `userSvc` Effect bridge, while the Response-throwing remains in async land.
+
 async function getUserId(request: Request): Promise<string | undefined> {
   const session = await getDbSession(request.headers.get("Cookie"));
   const userId = session.get(CookieSessionKeys.userId) as string;
@@ -161,18 +182,22 @@ export async function getUser(request: Request) {
   const userId = await getUserId(request);
   if (userId === undefined) return null;
 
-  const user = await getUserById(userId);
+  const user = await userSvc((s) => s.getUserById(userId));
   if (!user) throw await logout(request);
   return user;
 }
 
 export async function requireUserId(
   request: Request,
-  redirectTo: string = new URL(request.url).pathname,
+  redirectTo?: string,
 ): Promise<string> {
   const userId = await getUserId(request);
   if (!userId) {
-    const searchParams = new URLSearchParams([["redirectTo", redirectTo]]);
+    // Capture the full path (incl. query) so login returns the user exactly
+    // where they were, not just the bare pathname (#373).
+    const url = new URL(request.url);
+    const target = redirectTo ?? `${url.pathname}${url.search}`;
+    const searchParams = new URLSearchParams([["redirectTo", target]]);
     throw redirect(`/login?${searchParams}`);
   }
   return userId;
@@ -181,7 +206,7 @@ export async function requireUserId(
 export async function requireUser(request: Request) {
   const userId = await requireUserId(request);
 
-  const user = await getUserById(userId);
+  const user = await userSvc((s) => s.getUserById(userId));
   if (user) return user;
 
   throw await logout(request);
@@ -200,11 +225,7 @@ export async function initOauthLogin({
   flow?: "user" | "signup" | "add-bot";
   guildId?: string;
 }) {
-  const url = new URL(request.url);
-  const proto =
-    request.headers.get("X-Forwarded-Proto") ?? url.protocol.replace(":", "");
-  const host = request.headers.get("X-Forwarded-Host") ?? url.host;
-  const origin = `${proto}://${host}`;
+  const origin = requestOrigin(request);
   const cookieSession = await getCookieSession(request.headers.get("Cookie"));
 
   const state = JSON.stringify({
@@ -258,10 +279,7 @@ export async function completeOauthLogin(request: Request) {
     throw redirect("/login", 500);
   }
 
-  const proto =
-    request.headers.get("X-Forwarded-Proto") ?? url.protocol.replace(":", "");
-  const host = request.headers.get("X-Forwarded-Host") ?? url.host;
-  const origin = `${proto}://${host}`;
+  const origin = requestOrigin(request);
   const reqCookie: string = cookie;
   const state: string | undefined = url.searchParams.get("state") ?? undefined;
 
@@ -311,12 +329,12 @@ export async function completeOauthLogin(request: Request) {
     code,
     redirect_uri: `${origin}/${OAUTH_REDIRECT_ROUTE}`,
   });
-  const discordUser = await fetchUser(token);
+  const discordUser = await runEffect(fetchUser(token));
 
   // Retrieve our user from Discord ID
   let userId;
   try {
-    const user = await getUserByExternalId(discordUser.id);
+    const user = await userSvc((s) => s.getUserByExternalId(discordUser.id));
     if (user) {
       userId = user.id;
     }
@@ -324,7 +342,9 @@ export async function completeOauthLogin(request: Request) {
     // Do nothing
     // TODO: bail out if there's a network/etc error
   }
-  userId ??= await createUser(discordUser.email, discordUser.id);
+  userId ??= await userSvc((s) =>
+    s.createUser(discordUser.email, discordUser.id),
+  );
   if (!userId) {
     throw data(
       { message: `Couldn't find a user or create a new user` },
@@ -335,7 +355,7 @@ export async function completeOauthLogin(request: Request) {
   // Handle bot installation flows
   if (flow !== "user" && guildId) {
     // Initialize free subscription for the guild
-    await SubscriptionService.initializeFreeSubscription(guildId);
+    await runEffect(SubscriptionService.initializeFreeSubscription(guildId));
   }
 
   // dbState already checked earlier
@@ -357,7 +377,7 @@ export async function completeOauthLogin(request: Request) {
   // Determine redirect based on flow
   let finalRedirectTo = stateRedirectTo || "/app";
   if (flow !== "user" && guildId) {
-    finalRedirectTo = `app/${guildId}/onboard`;
+    finalRedirectTo = `/app/${guildId}`;
   }
 
   const [clientCookie, dbCookie] = await Promise.all([
@@ -373,36 +393,42 @@ export async function completeOauthLogin(request: Request) {
   return redirect(finalRedirectTo, { headers });
 }
 
-export async function retrieveDiscordToken(request: Request) {
-  const dbSession = await getDbSession(request.headers.get("Cookie"));
-  const storedToken = dbSession.get(CookieSessionKeys.discordToken) as {
-    discordToken: string;
-    [k: string]: unknown;
-  };
-  const token = authorization.createToken(storedToken);
-  return token;
-}
-export async function refreshDiscordSession(request: Request) {
-  const dbSession = await getDbSession(request.headers.get("Cookie"));
-  const token = await retrieveDiscordToken(request);
-  const newToken = await token.refresh();
-  // @ts-expect-error token.toJSON() isn't in the types but it works
-  dbSession.set(CookieSessionKeys.discordToken, newToken.toJSON());
+export const retrieveDiscordToken = (request: Request) =>
+  Effect.gen(function* () {
+    const dbSession = yield* Effect.promise(() =>
+      getDbSession(request.headers.get("Cookie")),
+    );
+    const storedToken = dbSession.get(CookieSessionKeys.discordToken) as {
+      discordToken: string;
+      [k: string]: unknown;
+    };
+    const token = authorization.createToken(storedToken);
+    return token;
+  });
 
-  return dbSession;
-}
+export const refreshDiscordSession = (request: Request) =>
+  Effect.gen(function* () {
+    const dbSession = yield* Effect.promise(() =>
+      getDbSession(request.headers.get("Cookie")),
+    );
+    const token = yield* retrieveDiscordToken(request);
+    const newToken = yield* Effect.promise(() => token.refresh());
+    // @ts-expect-error token.toJSON() isn't in the types but it works
+    dbSession.set(CookieSessionKeys.discordToken, newToken.toJSON());
+
+    return dbSession;
+  });
 
 /**
  * Refresh the Discord OAuth token and persist the updated session to the DB.
  * Returns the `Set-Cookie` header value that must be sent back to the client so
  * future requests read the new token instead of the expired one.
  */
-export async function refreshAndPersistDiscordSession(
-  request: Request,
-): Promise<string> {
-  const session = await refreshDiscordSession(request);
-  return commitDbSession(session);
-}
+export const refreshAndPersistDiscordSession = (request: Request) =>
+  Effect.gen(function* () {
+    const session = yield* refreshDiscordSession(request);
+    return yield* Effect.promise(() => commitDbSession(session));
+  });
 
 export async function logout(request: Request) {
   const [cookieSession, dbSession] = await Promise.all([

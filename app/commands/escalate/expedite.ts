@@ -10,7 +10,7 @@ import {
 import { logEffect } from "#~/effects/observability";
 import { hasModRole } from "#~/helpers/discord";
 import type { Resolution } from "#~/helpers/modResponse";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 import { EscalationService, type Escalation } from "./service";
 import { tallyVotes, type VoteTally } from "./voting";
@@ -39,7 +39,7 @@ export const expediteEffect = (interaction: MessageComponentInteraction) =>
     const expeditedBy = interaction.user.id;
 
     // Get settings and check mod role
-    const { moderator: modRoleId } = yield* fetchSettingsEffect(guildId, [
+    const { moderator: modRoleId } = yield* fetchSettings(guildId, [
       SETTINGS.moderator,
     ]);
 

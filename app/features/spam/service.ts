@@ -145,17 +145,33 @@ export const SpamDetectionServiceLive = Layer.effect(
       Effect.gen(function* () {
         if (member.permissions.has("Administrator")) return true;
 
-        const settings = yield* Effect.tryPromise({
-          try: () => fetchSettings(guildId, [SETTINGS.moderator]),
-          catch: () => null,
-        }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+        // Swallow both SqlError and NotFoundError (missing guild row) to null,
+        // matching the pre-Effect behavior: absent/unreadable settings → not a mod.
+        const settings = yield* fetchSettings(guildId, [
+          SETTINGS.moderator,
+        ]).pipe(
+          Effect.catchTag("NotFoundError", () => Effect.succeed(null)),
+          Effect.catchTag("SqlError", (error) =>
+            logEffect(
+              "warn",
+              "SpamDetection",
+              "Failed to fetch guild settings for moderator check",
+              { error },
+            ).pipe(Effect.as(null)),
+          ),
+        );
 
         if (!settings?.moderator) return false;
 
         return Array.isArray(member.roles)
           ? member.roles.includes(settings.moderator)
           : member.roles.cache.has(settings.moderator);
-      }).pipe(Effect.withSpan("SpamDetection.isModeratorOrAdmin"));
+      }).pipe(
+        // fetchSettings requires DatabaseService; provide the captured handle
+        // here so this helper's requirement channel stays `never`.
+        Effect.provide(Layer.succeed(DatabaseService, db)),
+        Effect.withSpan("SpamDetection.isModeratorOrAdmin"),
+      );
 
     return {
       checkMessage: (message, member) =>
@@ -191,11 +207,13 @@ export const SpamDetectionServiceLive = Layer.effect(
           const hasLink = hasLinkInContentOrEmbeds(content, message.embeds);
 
           // Record in activity tracker
-          const attachmentIds = Array.from(message.attachments.keys());
+          const attachmentFingerprints = [...message.attachments.values()].map(
+            (a) => `${a.name}:${a.size}:${a.contentType ?? ""}`,
+          );
           const contentHash = buildContentHash(
             content,
             embedText,
-            attachmentIds,
+            attachmentFingerprints,
           );
           recordMessage(tracker, guildId, userId, {
             messageId: message.id,
@@ -227,6 +245,7 @@ export const SpamDetectionServiceLive = Layer.effect(
             guildId,
             recentMessages,
             contentHash,
+            attachmentFingerprints.length,
           );
 
           const allSignals = [
@@ -265,7 +284,7 @@ export const SpamDetectionServiceLive = Layer.effect(
                 "error",
                 "SpamDetection",
                 "Spam check failed, falling through",
-                { error: String(error) },
+                { error },
               );
               // Spam detection failure should never block message processing
               return computeVerdict([]);
@@ -279,7 +298,7 @@ export const SpamDetectionServiceLive = Layer.effect(
           Effect.provide(Layer.succeed(DatabaseService, db)),
           Effect.catchAll((error) =>
             logEffect("error", "SpamDetection", "Response execution failed", {
-              error: String(error),
+              error,
             }),
           ),
           Effect.withSpan("SpamDetection.executeResponse"),

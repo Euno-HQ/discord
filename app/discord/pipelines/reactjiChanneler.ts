@@ -23,7 +23,7 @@ export const reactjiChannelerPipeline: Effect.Effect<
         Effect.catchAll((err) =>
           logEffect("warn", "ReactjiChanneler", "Pipeline handler failed", {
             eventType: e.type,
-            error: String(err),
+            error: err,
           }),
         ),
       );

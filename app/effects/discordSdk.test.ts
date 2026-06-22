@@ -5,7 +5,7 @@ import { softbanMember } from "./discordSdk";
 
 // ── softbanMember ──
 // Splits ban and unban so that a failing unban after a successful ban is
-// distinguishable from a failing ban (operation field on the DiscordApiError),
+// distinguishable from a failing ban (operation field on the TransientError),
 // and is also logged loudly inside the helper because the consequence — user
 // left banned — is too important to rely on the caller's error handling.
 
@@ -44,7 +44,7 @@ test("softbanMember calls ban then unban on the happy path", async () => {
   );
 });
 
-test("softbanMember fails with DiscordApiError(operation=softbanMember.ban) when ban itself fails; unban is not called", async () => {
+test("softbanMember fails with TransientError(operation=softbanMember.ban) when ban itself fails; unban is not called", async () => {
   const { member, banSpy, unbanSpy } = makeMemberMock({
     banImpl: () => Promise.reject(new Error("missing permissions")),
   });
@@ -56,14 +56,14 @@ test("softbanMember fails with DiscordApiError(operation=softbanMember.ban) when
   expect(Exit.isFailure(exit)).toBe(true);
   if (Exit.isFailure(exit)) {
     const failure = exit.cause._tag === "Fail" ? exit.cause.error : null;
-    expect(failure?._tag).toBe("DiscordApiError");
+    expect(failure?._tag).toBe("TransientError");
     expect(failure?.operation).toBe("softbanMember.ban");
   }
   expect(banSpy).toHaveBeenCalledTimes(1);
   expect(unbanSpy).not.toHaveBeenCalled();
 });
 
-test("softbanMember fails with DiscordApiError(operation=softbanMember.unban) when unban fails after a successful ban", async () => {
+test("softbanMember fails with TransientError(operation=softbanMember.unban) when unban fails after a successful ban", async () => {
   const { member, banSpy, unbanSpy } = makeMemberMock({
     unbanImpl: () => Promise.reject(new Error("network error")),
   });
@@ -75,7 +75,7 @@ test("softbanMember fails with DiscordApiError(operation=softbanMember.unban) wh
   expect(Exit.isFailure(exit)).toBe(true);
   if (Exit.isFailure(exit)) {
     const failure = exit.cause._tag === "Fail" ? exit.cause.error : null;
-    expect(failure?._tag).toBe("DiscordApiError");
+    expect(failure?._tag).toBe("TransientError");
     expect(failure?.operation).toBe("softbanMember.unban");
   }
   expect(banSpy).toHaveBeenCalledTimes(1);

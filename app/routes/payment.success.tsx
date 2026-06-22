@@ -21,7 +21,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   // Verify Stripe session
-  const stripeSession = await StripeService.verifyCheckoutSession(sessionId);
+  const stripeSession = await runEffect(
+    StripeService.verifyCheckoutSession(sessionId),
+  );
 
   if (stripeSession?.payment_status !== "paid") {
     throw data({ message: "Payment verification failed" }, { status: 400 });
@@ -31,14 +33,16 @@ export async function loader({ request }: Route.LoaderArgs) {
   const currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
   // Update subscription to paid tier with real Stripe data
-  await SubscriptionService.createOrUpdateSubscription({
-    guild_id: guildId,
-    stripe_customer_id: stripeSession.customer ?? undefined,
-    stripe_subscription_id: stripeSession.subscription ?? undefined,
-    product_tier: "paid",
-    status: "active",
-    current_period_end: currentPeriodEnd.toISOString(),
-  });
+  await runEffect(
+    SubscriptionService.createOrUpdateSubscription({
+      guild_id: guildId,
+      stripe_customer_id: stripeSession.customer ?? undefined,
+      stripe_subscription_id: stripeSession.subscription ?? undefined,
+      product_tier: "paid",
+      status: "active",
+      current_period_end: currentPeriodEnd.toISOString(),
+    }),
+  );
   await runEffect(syncGuildGroup(guildId));
 
   return redirect(`/app/${guildId}/settings/upgrade?success`);

@@ -7,7 +7,9 @@ import {
   useSearchParams,
 } from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
 import { log } from "#~/helpers/observability";
+import { requestOrigin } from "#~/helpers/request.server";
 import { requireUser } from "#~/models/session.server";
 import { StripeService } from "#~/models/stripe.server";
 import {
@@ -26,8 +28,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     throw data({ message: "Guild ID is required" }, { status: 400 });
   }
 
-  const subscription = await SubscriptionService.getGuildSubscription(guildId);
-  const currentTier = await SubscriptionService.getProductTier(guildId);
+  const subscription = await runEffect(
+    SubscriptionService.getGuildSubscription(guildId),
+  );
+  const currentTier = await runEffect(
+    SubscriptionService.getProductTier(guildId),
+  );
 
   return {
     guildId,
@@ -54,8 +60,9 @@ export async function action({ request }: Route.ActionArgs) {
       userId: user.id,
     });
 
-    const subscription =
-      await SubscriptionService.getGuildSubscription(guildId);
+    const subscription = await runEffect(
+      SubscriptionService.getGuildSubscription(guildId),
+    );
 
     if (!subscription?.stripe_subscription_id) {
       return {
@@ -66,8 +73,8 @@ export async function action({ request }: Route.ActionArgs) {
       };
     }
 
-    const cancelled = await StripeService.cancelSubscription(
-      subscription.stripe_subscription_id,
+    const cancelled = await runEffect(
+      StripeService.cancelSubscription(subscription.stripe_subscription_id),
     );
 
     if (!cancelled) {
@@ -79,7 +86,9 @@ export async function action({ request }: Route.ActionArgs) {
       };
     }
 
-    await SubscriptionService.updateSubscriptionStatus(guildId, "cancelled");
+    await runEffect(
+      SubscriptionService.updateSubscriptionStatus(guildId, "cancelled"),
+    );
 
     log("info", "Upgrade", "Subscription cancelled successfully", {
       guildId,
@@ -105,17 +114,19 @@ export async function action({ request }: Route.ActionArgs) {
     });
 
     try {
-      // Get base URL from request
-      const url = new URL(request.url);
-      const baseUrl = `${url.protocol}//${url.host}`;
+      // Honor reverse-proxy forwarded headers so Stripe return URLs point at
+      // the public origin, not the pod's internal host.
+      const baseUrl = requestOrigin(request);
 
       // Create Stripe checkout session
-      const checkoutUrl = await StripeService.createCheckoutSession(
-        variant,
-        coupon,
-        guildId,
-        baseUrl,
-        user.email ?? undefined,
+      const checkoutUrl = await runEffect(
+        StripeService.createCheckoutSession(
+          variant,
+          coupon,
+          guildId,
+          baseUrl,
+          user.email ?? undefined,
+        ),
       );
 
       log("info", "Upgrade", "Redirecting to Stripe checkout", {
@@ -125,12 +136,23 @@ export async function action({ request }: Route.ActionArgs) {
 
       // Redirect to Stripe checkout
       return redirect(checkoutUrl);
-    } catch (error) {
+    } catch (caught) {
       log("error", "Upgrade", "Failed to create checkout session", {
         guildId,
         userId: user.id,
-        error,
+        error: caught,
       });
+
+      // StripeService now rejects with a typed StripeError whose `.cause` is the
+      // raw Stripe SDK error; unwrap it so config-error detection sees the same
+      // shape it did before the Effect migration.
+      const error =
+        typeof caught === "object" &&
+        caught !== null &&
+        "_tag" in caught &&
+        (caught as { _tag: unknown })._tag === "StripeError"
+          ? (caught as unknown as { cause: unknown }).cause
+          : caught;
 
       // Check for Stripe configuration errors (missing/empty lookup key)
       const isStripeConfigError =
@@ -317,7 +339,7 @@ export default function Upgrade({ actionData }: Route.ComponentProps) {
             </div>
           ) : (
             <a
-              href="mailto:support@euno.reactiflux.com?subject=Custom%20Euno%20Plan"
+              href="mailto:hello+eunosales@reactiflux.com?subject=Custom%20Euno%20Plan"
               className="inline-block rounded-md border border-stone-600 bg-transparent px-6 py-2 text-lg font-medium text-stone-200 shadow-sm hover:bg-stone-800 focus:ring-2 focus:ring-stone-500 focus:ring-offset-2 focus:outline-none"
             >
               Contact Sales

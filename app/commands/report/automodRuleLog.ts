@@ -11,7 +11,7 @@ import { AUDIT_LOG_WINDOW_MS, fetchAuditLogEntry } from "#~/discord/auditLog";
 import { fetchChannelFromClient, sendMessage } from "#~/effects/discordSdk";
 import { logEffect } from "#~/effects/observability";
 import { truncateMessage } from "#~/helpers/string";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -108,9 +108,7 @@ const buildUpdateDiff = (
 
 const fetchModLogChannel = (rule: AutoModerationRule) =>
   Effect.gen(function* () {
-    const { modLog } = yield* fetchSettingsEffect(rule.guild.id, [
-      SETTINGS.modLog,
-    ]);
+    const { modLog } = yield* fetchSettings(rule.guild.id, [SETTINGS.modLog]);
     if (!modLog) {
       yield* logEffect(
         "debug",
@@ -154,7 +152,7 @@ export const logAutomodRuleCreate = (rule: AutoModerationRule) =>
     }),
     Effect.catchAll((error) =>
       logEffect("error", "AutomodRuleLog", "Failed to log rule create", {
-        error: String(error),
+        error,
         ruleId: rule.id,
         guildId: rule.guild.id,
       }),
@@ -187,7 +185,7 @@ export const logAutomodRuleDelete = (rule: AutoModerationRule) =>
     }),
     Effect.catchAll((error) =>
       logEffect("error", "AutomodRuleLog", "Failed to log rule delete", {
-        error: String(error),
+        error,
         ruleId: rule.id,
         guildId: rule.guild.id,
       }),
@@ -225,7 +223,7 @@ export const logAutomodRuleUpdate = (
     }),
     Effect.catchAll((error) =>
       logEffect("error", "AutomodRuleLog", "Failed to log rule update", {
-        error: String(error),
+        error,
         ruleId: newRule.id,
         guildId: newRule.guild.id,
       }),

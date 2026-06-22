@@ -1,7 +1,8 @@
-import { data, Link } from "react-router";
+import { data } from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
 import { GuildSettingsForm } from "#~/components/GuildSettingsForm";
-import { fetchGuildData, type GuildData } from "#~/helpers/guildData.server";
+import { fetchGuildData } from "#~/helpers/guildData.server";
 import { log, trackPerformance } from "#~/helpers/observability";
 import { fetchSettings, setSettings, SETTINGS } from "#~/models/guilds.server";
 import { requireUser } from "#~/models/session.server";
@@ -20,18 +21,14 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   // Fetch current guild settings
   const [currentSettings, { roles, channels }] = await Promise.all([
-    fetchSettings(guildId, [
-      SETTINGS.modLog,
-      SETTINGS.moderator,
-      SETTINGS.restricted,
-    ]).catch(() => undefined),
-    fetchGuildData(guildId).catch(
-      () =>
-        ({
-          roles: [],
-          channels: [],
-        }) as GuildData,
-    ),
+    runEffect(
+      fetchSettings(guildId, [
+        SETTINGS.modLog,
+        SETTINGS.moderator,
+        SETTINGS.restricted,
+      ]),
+    ).catch(() => undefined),
+    runEffect(fetchGuildData(guildId)),
   ]);
 
   return {
@@ -48,30 +45,21 @@ export default function Settings({
   return (
     <div className="space-y-8">
       {/* Settings Form */}
-      {currentSettings ? (
-        <GuildSettingsForm
-          guildId={guildId}
-          roles={roles}
-          channels={channels}
-          buttonText="Save Settings"
-          defaultValues={{
-            moderatorRole: currentSettings.moderator,
-            modLogChannel: currentSettings.modLog,
-            restrictedRole: currentSettings.restricted,
-          }}
-        />
-      ) : (
-        <>
-          You haven’t finished setting the bot up for this server yet!{" "}
-          <Link
-            className="text-amber-400 underline hover:text-amber-300"
-            to={`/app/${guildId}/onboard`}
-          >
-            Finish onboarding
-          </Link>{" "}
-          first.
-        </>
-      )}
+      <GuildSettingsForm
+        guildId={guildId}
+        roles={roles}
+        channels={channels}
+        buttonText="Save Settings"
+        defaultValues={
+          currentSettings
+            ? {
+                moderatorRole: currentSettings.moderator,
+                modLogChannel: currentSettings.modLog,
+                restrictedRole: currentSettings.restricted,
+              }
+            : undefined
+        }
+      />
     </div>
   );
 }
@@ -104,11 +92,13 @@ export async function action({ request }: Route.ActionArgs) {
 
   try {
     await trackPerformance("guilds.setSettings", () =>
-      setSettings(guildId, {
-        [SETTINGS.modLog]: modLogChannel,
-        [SETTINGS.moderator]: moderatorRole,
-        [SETTINGS.restricted]: restrictedRole || undefined,
-      }),
+      runEffect(
+        setSettings(guildId, {
+          [SETTINGS.modLog]: modLogChannel,
+          [SETTINGS.moderator]: moderatorRole,
+          [SETTINGS.restricted]: restrictedRole || undefined,
+        }),
+      ),
     );
 
     log("info", "settings", "Settings updated successfully", {

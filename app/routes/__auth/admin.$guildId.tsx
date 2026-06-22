@@ -1,6 +1,7 @@
 import { Routes, type APIGuild } from "discord-api-types/v10";
 import { Link } from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
 import { Page } from "#~/basics/page.js";
 import { ssrDiscordSdk } from "#~/discord/api.js";
 import {
@@ -29,7 +30,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   await requireAdmin(request);
   const { guildId } = params;
 
-  const subscription = await SubscriptionService.getGuildSubscription(guildId);
+  const subscription = await runEffect(
+    SubscriptionService.getGuildSubscription(guildId),
+  );
 
   // Fetch guild info from Discord
   let guildInfo: { name: string; icon: string | null; memberCount: number } = {
@@ -53,7 +56,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     });
   }
 
-  const featureFlags = await fetchFeatureFlags(guildId);
+  const featureFlags = await runEffect(fetchFeatureFlags(guildId));
 
   let paymentMethods: PaymentMethods = [];
   let invoices: Invoices = [];
@@ -61,8 +64,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let stripeSubscriptionUrl: string | null = null;
 
   if (subscription?.stripe_customer_id) {
-    ({ paymentMethods, invoices } = await fetchStripeDetails(
-      subscription.stripe_customer_id,
+    ({ paymentMethods, invoices } = await runEffect(
+      fetchStripeDetails(subscription.stripe_customer_id),
     ));
     stripeCustomerUrl = `https://dashboard.stripe.com/customers/${subscription.stripe_customer_id}`;
   }

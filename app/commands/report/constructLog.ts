@@ -1,15 +1,15 @@
 import { formatDistanceToNowStrict } from "date-fns";
-import { type Message, type MessageCreateOptions } from "discord.js";
+import { type MessageCreateOptions } from "discord.js";
 import { Effect } from "effect";
 
-import { DiscordApiError } from "#~/effects/errors";
+import { TransientError } from "#~/effects/errors";
 import {
   constructDiscordLink,
-  isForwardedMessage,
   getMessageContent,
+  isForwardedMessage,
 } from "#~/helpers/discord";
 import { truncateMessage } from "#~/helpers/string";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 import { ReportReasons, type Report } from "#~/models/reportedMessages";
 
 export const ReadableReasons: Record<ReportReasons, string> = {
@@ -30,7 +30,8 @@ export const constructLog = ({
     const lastReport = logs.at(-1);
     if (!lastReport?.message.guild) {
       return yield* Effect.fail(
-        new DiscordApiError({
+        new TransientError({
+          source: "discord",
           operation: "constructLog",
           cause: new Error(
             "Something went wrong when trying to retrieve last report",
@@ -40,15 +41,15 @@ export const constructLog = ({
     }
     const { message } = lastReport;
     const { author } = message;
-    const { moderator } = yield* fetchSettingsEffect(
-      lastReport.message.guild.id,
-      [SETTINGS.moderator],
-    );
+    const { moderator } = yield* fetchSettings(lastReport.message.guild.id, [
+      SETTINGS.moderator,
+    ]);
 
     // This should never be possible but we gotta satisfy types
     if (!moderator) {
       return yield* Effect.fail(
-        new DiscordApiError({
+        new TransientError({
+          source: "discord",
           operation: "constructLog",
           cause: new Error("No role configured to be used as moderator"),
         }),

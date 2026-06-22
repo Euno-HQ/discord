@@ -73,7 +73,7 @@ export const automodPipeline: Effect.Effect<void, never, RuntimeContext> =
           Effect.catchAll((err) =>
             logEffect("warn", "Automod", "Pipeline handler failed", {
               ...logContext(e),
-              error: String(err),
+              error: err,
             }),
           ),
         ),

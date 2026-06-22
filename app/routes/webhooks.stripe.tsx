@@ -29,7 +29,9 @@ export async function action({ request }: Route.ActionArgs) {
     const body = await request.text();
 
     // Verify webhook signature and construct event
-    const event = StripeService.constructWebhookEvent(body, signature);
+    const event = await runEffect(
+      StripeService.constructWebhookEvent(body, signature),
+    );
 
     log("info", "Webhook", "Received Stripe webhook", {
       type: event.type,
@@ -119,18 +121,20 @@ async function handleCheckoutSessionCompleted(
   // Get subscription details to calculate period end
   const currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-  await SubscriptionService.createOrUpdateSubscription({
-    guild_id: guildId,
-    stripe_customer_id:
-      typeof session.customer === "string" ? session.customer : undefined,
-    stripe_subscription_id:
-      typeof session.subscription === "string"
-        ? session.subscription
-        : undefined,
-    product_tier: "paid",
-    status: "active",
-    current_period_end: currentPeriodEnd.toISOString(),
-  });
+  await runEffect(
+    SubscriptionService.createOrUpdateSubscription({
+      guild_id: guildId,
+      stripe_customer_id:
+        typeof session.customer === "string" ? session.customer : undefined,
+      stripe_subscription_id:
+        typeof session.subscription === "string"
+          ? session.subscription
+          : undefined,
+      product_tier: "paid",
+      status: "active",
+      current_period_end: currentPeriodEnd.toISOString(),
+    }),
+  );
   await runEffect(syncGuildGroup(guildId));
 
   log("info", "Webhook", "Checkout session processed successfully", {
@@ -172,17 +176,19 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
     ? new Date(currentPeriodEndTimestamp * 1000).toISOString()
     : null;
 
-  await SubscriptionService.createOrUpdateSubscription({
-    guild_id: guildId,
-    stripe_customer_id:
-      typeof subscription.customer === "string"
-        ? subscription.customer
-        : undefined,
-    stripe_subscription_id: subscription.id,
-    product_tier: subscription.status === "active" ? "paid" : "free",
-    status,
-    current_period_end: currentPeriodEnd ?? undefined,
-  });
+  await runEffect(
+    SubscriptionService.createOrUpdateSubscription({
+      guild_id: guildId,
+      stripe_customer_id:
+        typeof subscription.customer === "string"
+          ? subscription.customer
+          : undefined,
+      stripe_subscription_id: subscription.id,
+      product_tier: subscription.status === "active" ? "paid" : "free",
+      status,
+      current_period_end: currentPeriodEnd ?? undefined,
+    }),
+  );
   await runEffect(syncGuildGroup(guildId));
 
   log("info", "Webhook", "Subscription update processed successfully", {
@@ -212,17 +218,19 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
   });
 
   // Downgrade to free tier
-  await SubscriptionService.createOrUpdateSubscription({
-    guild_id: guildId,
-    stripe_customer_id:
-      typeof subscription.customer === "string"
-        ? subscription.customer
-        : undefined,
-    stripe_subscription_id: subscription.id,
-    product_tier: "free",
-    status: "inactive",
-    current_period_end: new Date().toISOString(),
-  });
+  await runEffect(
+    SubscriptionService.createOrUpdateSubscription({
+      guild_id: guildId,
+      stripe_customer_id:
+        typeof subscription.customer === "string"
+          ? subscription.customer
+          : undefined,
+      stripe_subscription_id: subscription.id,
+      product_tier: "free",
+      status: "inactive",
+      current_period_end: new Date().toISOString(),
+    }),
+  );
   await runEffect(syncGuildGroup(guildId));
 
   log("info", "Webhook", "Subscription deletion processed successfully", {
@@ -257,14 +265,16 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
 
   // Payment succeeded - subscription should already be updated via subscription.updated event
   // This is mainly for logging/monitoring purposes
-  await SubscriptionService.auditSubscriptionChanges(
-    subscriptionId,
-    "payment_succeeded",
-    {
-      invoiceId: invoice.id,
-      amountPaid: invoice.amount_paid,
-      currency: invoice.currency,
-    },
+  await runEffect(
+    SubscriptionService.auditSubscriptionChanges(
+      subscriptionId,
+      "payment_succeeded",
+      {
+        invoiceId: invoice.id,
+        amountPaid: invoice.amount_paid,
+        currency: invoice.currency,
+      },
+    ),
   );
 
   log("info", "Webhook", "Payment success processed", {
@@ -300,14 +310,16 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
 
   // Payment failed - log for monitoring
   // Stripe will automatically retry and update subscription status if needed
-  await SubscriptionService.auditSubscriptionChanges(
-    subscriptionId,
-    "payment_failed",
-    {
-      invoiceId: invoice.id,
-      attemptCount: invoice.attempt_count,
-      amountDue: invoice.amount_due,
-    },
+  await runEffect(
+    SubscriptionService.auditSubscriptionChanges(
+      subscriptionId,
+      "payment_failed",
+      {
+        invoiceId: invoice.id,
+        attemptCount: invoice.attempt_count,
+        amountDue: invoice.amount_due,
+      },
+    ),
   );
 
   log("warn", "Webhook", "Payment failure logged", {

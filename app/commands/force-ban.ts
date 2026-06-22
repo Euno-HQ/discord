@@ -6,9 +6,12 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { interactionReply } from "#~/effects/discordSdk.ts";
+import { toUserResponse } from "#~/effects/errorHandling";
 import { logEffect } from "#~/effects/observability.ts";
 import type { UserContextCommand } from "#~/helpers/discord";
+import { formatError } from "#~/helpers/formatError";
 import { commandStats } from "#~/helpers/metrics";
 
 export const Command = {
@@ -48,7 +51,7 @@ export const Command = {
         return;
       }
 
-      yield* Effect.tryPromise(() =>
+      yield* tryDiscord("forceBan", () =>
         guild.bans.create(targetUser, {
           reason: "Force banned by staff",
         }),
@@ -71,23 +74,24 @@ export const Command = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
-
           yield* logEffect("error", "Commands", "Force ban failed", {
             guildId: interaction.guildId,
             moderatorUserId: interaction.user.id,
             targetUserId: interaction.targetUser.id,
             targetUsername: interaction.targetUser.username,
-            error: err.message,
-            stack: err.stack,
+            error,
           });
 
-          commandStats.commandFailed(interaction, "force-ban", err.message);
+          commandStats.commandFailed(
+            interaction,
+            "force-ban",
+            formatError(error),
+          );
 
+          const reply = toUserResponse(error);
           yield* interactionReply(interaction, {
-            flags: [MessageFlags.Ephemeral],
-            content:
-              "Failed to ban user, try checking the bot's permissions. If they look okay, make sure that the bot's role is near the top of the roles list — bots can't ban users with roles above their own.",
+            content: reply.content,
+            flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
           }).pipe(Effect.catchAll(() => Effect.void));
         }),
       ),

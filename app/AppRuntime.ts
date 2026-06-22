@@ -10,16 +10,18 @@ import {
   FeatureFlagServiceLive,
   type BooleanFlag,
 } from "#~/effects/featureFlags";
+import { JsonLoggerLayer } from "#~/effects/logger";
 import { PostHogService, PostHogServiceLive } from "#~/effects/posthog";
 import { SupervisorServiceLive } from "#~/effects/supervisor";
 import { TracingLive } from "#~/effects/tracing.js";
 import { SpamDetectionServiceLive } from "#~/features/spam/service.ts";
 import { isProd } from "#~/helpers/env.server.js";
+import { UserServiceLive } from "#~/models/user.server";
 
 // Infrastructure layer: tracing + structured logging + prod log level
 const InfraLayer = Layer.mergeAll(
   TracingLive,
-  Logger.json,
+  JsonLoggerLayer,
   isProd()
     ? Logger.minimumLogLevel(LogLevel.Info)
     : Logger.minimumLogLevel(LogLevel.All),
@@ -37,6 +39,7 @@ const AppLayer = Layer.mergeAll(
   MessageCacheServiceLive,
   SupervisorServiceLive,
   DiscordEventBusLive,
+  Layer.provide(UserServiceLive, DatabaseLayer),
   InfraLayer,
 );
 
@@ -51,12 +54,59 @@ export type RuntimeContext = ManagedRuntime.ManagedRuntime.Context<
   typeof runtime
 >;
 
-// Extract the PostHog client for use by metrics.ts (null when no API key configured).
-export const [posthogClient, db]: [PostHog | null, EffectKysely] =
-  await Promise.all([
+// Lazily-warmed runtime handles. Importing AppRuntime has NO side effect; the
+// PostHog client + DB connection are resolved once at the process entry point
+// via warmRuntime() (called from app/server.ts). This keeps the import graph
+// free of an import-time DB open, so tests that transitively import AppRuntime
+// don't open the real database.
+let _realDb: EffectKysely | undefined;
+let _posthog: PostHog | null = null;
+let _warmed = false;
+
+const NOT_WARMED =
+  "AppRuntime not warmed — call warmRuntime() at startup before using db/getPosthog()";
+
+/**
+ * Resolve the PostHog client and DB connection once. Called at the process
+ * entry point (app/server.ts) before any request/event is served. Idempotent,
+ * so HMR re-execution is safe.
+ *
+ * NOT safe against concurrent first-callers: the `if (_warmed) return;` guard
+ * only short-circuits AFTER a prior call has resolved, so two callers racing
+ * before either settles would both run `Promise.all` (a second connection).
+ * This relies on the single serial top-level `await warmRuntime()` in
+ * server.ts being the only caller. If a second caller is ever added, cache the
+ * in-flight promise (`let _warming: Promise<void> | undefined`) and return it.
+ */
+export const warmRuntime = async (): Promise<void> => {
+  if (_warmed) return;
+  const [posthog, realDb] = await Promise.all([
     runtime.runPromise(PostHogService),
     runtime.runPromise(DatabaseService),
   ]);
+  _posthog = posthog;
+  _realDb = realDb;
+  _warmed = true;
+};
+
+/** The PostHog client (null when no API key). Throws if used before warmRuntime(). */
+export const getPosthog = (): PostHog | null => {
+  if (!_warmed) throw new Error(NOT_WARMED);
+  return _posthog;
+};
+
+/**
+ * Lazy EffectKysely handle for legacy async/await code. Forwards to the real
+ * instance once warmRuntime() has run; throws a clear error if used before then.
+ * Keeps the `db` name + type so existing consumers are unchanged.
+ */
+export const db: EffectKysely = new Proxy({} as EffectKysely, {
+  get(_target, prop) {
+    if (!_warmed || !_realDb) throw new Error(NOT_WARMED);
+    const value = _realDb[prop as keyof EffectKysely];
+    return typeof value === "function" ? value.bind(_realDb) : value;
+  },
+});
 
 // --- Bridge functions for legacy async/await code ---
 
@@ -127,7 +177,7 @@ export const runGatedFeature = <A>(
       const flags = yield* FeatureFlagService;
       const enabled = yield* flags.isPostHogEnabled(flag, guildId);
       if (!enabled) {
-        posthogClient?.capture({
+        getPosthog()?.capture({
           distinctId: guildId,
           event: "premium gate hit",
           properties: { flag, $groups: { guild: guildId } },

@@ -90,7 +90,7 @@ export const activityTrackerPipeline: Effect.Effect<
         Effect.catchAll((err) =>
           logEffect("warn", "ActivityTracker", "Pipeline handler failed", {
             eventType: e.type,
-            error: String(err),
+            error: err,
           }),
         ),
       );

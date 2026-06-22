@@ -1,7 +1,7 @@
 import { sql } from "kysely";
 import { partition } from "lodash-es";
 
-import { run } from "#~/AppRuntime";
+import { db, run } from "#~/AppRuntime";
 import type { CodeStats } from "#~/helpers/discord";
 import { descriptiveStats, percentile } from "#~/helpers/statistics";
 import { createMessageStatsQuery } from "#~/models/activity.server";
@@ -266,7 +266,7 @@ export async function getCohortMetrics(
   minMessageThreshold = 10,
 ): Promise<UserCohortMetrics[]> {
   // Get aggregated user data
-  const userStatsQuery = createMessageStatsQuery(guildId, start, end)
+  const userStatsQuery = createMessageStatsQuery(db, guildId, start, end)
     .select((eb) => [
       "author_id",
       eb.fn.count<number>("author_id").as("message_count"),
@@ -285,7 +285,7 @@ export async function getCohortMetrics(
   const userStats = await run(userStatsQuery);
 
   // Get daily activity for streak calculation
-  const dailyActivityQuery = createMessageStatsQuery(guildId, start, end)
+  const dailyActivityQuery = createMessageStatsQuery(db, guildId, start, end)
     .select(({ fn, eb, lit }) => [
       "author_id",
       fn.count<number>("author_id").as("message_count"),

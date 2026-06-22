@@ -10,19 +10,24 @@ import {
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
   type Message,
+  type ThreadChannel,
 } from "discord.js";
-import { Effect } from "effect";
+import { Effect, Ref } from "effect";
 
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import {
+  deleteMessage,
   interactionEditReply,
   interactionReply,
   interactionUpdate,
 } from "#~/effects/discordSdk.ts";
+import { toUserResponse } from "#~/effects/errorHandling";
 import { logEffect } from "#~/effects/observability.ts";
 import type {
   MessageComponentCommand,
   UserContextCommand,
 } from "#~/helpers/discord";
+import { formatError } from "#~/helpers/formatError";
 import { commandStats } from "#~/helpers/metrics";
 
 // Duration options mirror Discord's "delete messages on ban" increments.
@@ -133,7 +138,6 @@ export const PurgeMessagesCommand = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
           yield* logEffect(
             "error",
             "Commands",
@@ -142,13 +146,13 @@ export const PurgeMessagesCommand = {
               guildId: interaction.guildId,
               moderatorUserId: interaction.user.id,
               targetUserId: interaction.targetUser.id,
-              error: err.message,
+              error,
             },
           );
           commandStats.commandFailed(
             interaction,
             "purge-messages",
-            err.message,
+            formatError(error),
           );
         }),
       ),
@@ -192,7 +196,6 @@ export const PurgeMessagesSelectHandler = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
           yield* logEffect(
             "error",
             "Commands",
@@ -200,7 +203,7 @@ export const PurgeMessagesSelectHandler = {
             {
               guildId: interaction.guildId,
               moderatorUserId: interaction.user.id,
-              error: err.message,
+              error,
             },
           );
         }),
@@ -259,7 +262,7 @@ export const PurgeMessagesConfirmHandler = {
         return;
       }
 
-      let deletedCount = 0;
+      const deletedRef = yield* Ref.make(0);
 
       // Collect all text channels and active threads.
       const textChannels = guild.channels.cache.filter(
@@ -270,29 +273,38 @@ export const PurgeMessagesConfirmHandler = {
       );
 
       // Also include active threads (public and private).
-      const activeThreads = yield* Effect.tryPromise(() =>
+      const activeThreads = yield* tryDiscord("fetchActiveThreads", () =>
         guild.channels.fetchActiveThreads(),
-      ).pipe(Effect.orElseSucceed(() => ({ threads: new Map() })));
+      ).pipe(
+        Effect.orElseSucceed(() => ({
+          threads: new Map<string, ThreadChannel>(),
+        })),
+      );
 
       const channelsToScan = [
         ...textChannels.values(),
         ...activeThreads.threads.values(),
       ];
 
-      // Scan channels in an async function so we can use await + per-channel
-      // try/catch to gracefully skip channels the bot cannot access.
-      yield* Effect.tryPromise(async () => {
-        for (const channel of channelsToScan) {
-          if (!channel.isTextBased()) continue;
-          try {
+      // Scan channels sequentially. Each channel's scan is wrapped in
+      // `catchAll` so a channel the bot cannot read/manage is gracefully
+      // skipped instead of aborting the whole run.
+      yield* Effect.forEach(
+        channelsToScan,
+        (channel) => {
+          if (!channel.isTextBased()) return Effect.void;
+
+          // Paginate through channel history oldest-first within the window.
+          const scanChannel = Effect.gen(function* () {
             let lastId: string | undefined;
 
-            // Paginate through channel history oldest-first within the window.
             for (;;) {
-              const messages = await channel.messages.fetch({
-                limit: 100,
-                ...(lastId ? { before: lastId } : {}),
-              });
+              const messages = yield* tryDiscord("fetchMessages", () =>
+                channel.messages.fetch({
+                  limit: 100,
+                  ...(lastId ? { before: lastId } : {}),
+                }),
+              );
 
               if (messages.size === 0) break;
 
@@ -304,13 +316,15 @@ export const PurgeMessagesConfirmHandler = {
 
               if (toDelete.size > 0) {
                 if (toDelete.size === 1) {
-                  await toDelete.first()!.delete();
+                  yield* deleteMessage(toDelete.first()!);
                 } else {
                   // bulkDelete requires messages < 2 weeks old; our max window
                   // is 7 days so this is always safe.
-                  await channel.bulkDelete(toDelete);
+                  yield* tryDiscord("bulkDelete", () =>
+                    channel.bulkDelete(toDelete),
+                  );
                 }
-                deletedCount += toDelete.size;
+                yield* Ref.update(deletedRef, (n) => n + toDelete.size);
               }
 
               // Stop paging if we've gone past the time window.
@@ -318,12 +332,16 @@ export const PurgeMessagesConfirmHandler = {
               if (!oldest || oldest.createdTimestamp < since) break;
               lastId = oldest.id;
             }
-          } catch {
-            // Skip channels the bot lacks permission to read/manage.
-            // This is expected for some channels and should not abort the whole run.
-          }
-        }
-      });
+          });
+
+          // Skip channels the bot lacks permission to read/manage. This is
+          // expected for some channels and should not abort the whole run.
+          return scanChannel.pipe(Effect.catchAll(() => Effect.void));
+        },
+        { concurrency: 1 },
+      );
+
+      const deletedCount = yield* Ref.get(deletedRef);
 
       yield* logEffect("info", "Commands", "Purge messages completed", {
         guildId: interaction.guildId,
@@ -340,7 +358,6 @@ export const PurgeMessagesConfirmHandler = {
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          const err = error instanceof Error ? error : new Error(String(error));
           yield* logEffect(
             "error",
             "Commands",
@@ -348,11 +365,12 @@ export const PurgeMessagesConfirmHandler = {
             {
               guildId: interaction.guildId,
               moderatorUserId: interaction.user.id,
-              error: err.message,
+              error,
             },
           );
+          const reply = toUserResponse(error);
           yield* interactionEditReply(interaction, {
-            content: "Something went wrong while purging messages.",
+            content: reply.content,
             components: [],
           }).pipe(Effect.catchAll(() => Effect.void));
         }),

@@ -14,7 +14,11 @@ import {
   messageReply,
   sendMessage,
 } from "#~/effects/discordSdk.ts";
-import { DiscordApiError, type NotFoundError } from "#~/effects/errors";
+import {
+  TransientError,
+  type DiscordError,
+  type NotFoundError,
+} from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import {
   describeAttachments,
@@ -24,7 +28,7 @@ import {
   quoteAndEscape,
   quoteAndEscapePoll,
 } from "#~/helpers/discord";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 import {
   getReportsForMessage,
   getUserReportStats,
@@ -63,14 +67,15 @@ export function logUserMessage({
     allReportedMessages: Report[];
     reportId: string;
   },
-  DiscordApiError | SqlError | NotFoundError,
+  DiscordError | SqlError | NotFoundError,
   DatabaseService
 > {
   return Effect.gen(function* () {
     const { guild, author } = message;
     if (!guild) {
       return yield* Effect.fail(
-        new DiscordApiError({
+        new TransientError({
+          source: "discord",
           operation: "logUserMessage",
           cause: new Error("Tried to log a message without a guild"),
         }),
@@ -80,7 +85,7 @@ export function logUserMessage({
     // Check if this exact message has already been reported
     const [existingReports, { modLog }, logBody, thread] = yield* Effect.all([
       getReportsForMessage(message.id, guild.id),
-      fetchSettingsEffect(guild.id, [SETTINGS.modLog]),
+      fetchSettings(guild.id, [SETTINGS.modLog]),
       constructLog({
         extra,
         logs: [{ message, reason, staff }],

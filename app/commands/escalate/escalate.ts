@@ -13,7 +13,7 @@ import {
   fetchMessage,
   sendMessage,
 } from "#~/effects/discordSdk";
-import { DiscordApiError } from "#~/effects/errors";
+import { TransientError } from "#~/effects/errors";
 import { FeatureFlagService, guardFeature } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability";
 import { calculateScheduledFor } from "#~/helpers/escalationVotes";
@@ -21,7 +21,7 @@ import type { Features } from "#~/helpers/featuresFlags";
 import { votingStrategies, type Resolution } from "#~/helpers/modResponse";
 import {
   DEFAULT_QUORUM,
-  fetchSettingsEffect,
+  fetchSettings,
   SETTINGS,
 } from "#~/models/guilds.server";
 
@@ -54,10 +54,10 @@ export const createEscalationEffect = (
     const features: Features[] = [];
 
     // Get settings
-    const { moderator: modRoleId, restricted } = yield* fetchSettingsEffect(
-      guildId,
-      [SETTINGS.moderator, SETTINGS.restricted],
-    );
+    const { moderator: modRoleId, restricted } = yield* fetchSettings(guildId, [
+      SETTINGS.moderator,
+      SETTINGS.restricted,
+    ]);
 
     if (restricted) {
       features.push("restrict");
@@ -69,7 +69,8 @@ export const createEscalationEffect = (
 
     if (!channel || !("send" in channel)) {
       return yield* Effect.fail(
-        new DiscordApiError({
+        new TransientError({
+          source: "discord",
           operation: "validateChannel",
           cause: new Error("Invalid channel - cannot send messages"),
         }),
@@ -170,10 +171,10 @@ export const upgradeToMajorityEffect = (
     const features: Features[] = [];
 
     // Get settings
-    const { moderator: modRoleId, restricted } = yield* fetchSettingsEffect(
-      guildId,
-      [SETTINGS.moderator, SETTINGS.restricted],
-    );
+    const { moderator: modRoleId, restricted } = yield* fetchSettings(guildId, [
+      SETTINGS.moderator,
+      SETTINGS.restricted,
+    ]);
 
     if (restricted) {
       features.push("restrict");

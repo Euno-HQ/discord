@@ -1,5 +1,9 @@
 import type { RecentMessage } from "./recentActivityTracker";
-import { analyzeVelocity, getPriorDuplicates } from "./velocityAnalyzer";
+import {
+  analyzeVelocity,
+  getPriorDuplicates,
+  VELOCITY_TUNING,
+} from "./velocityAnalyzer";
 
 const makeMessage = (
   overrides: Partial<RecentMessage> = {},
@@ -12,15 +16,54 @@ const makeMessage = (
   ...overrides,
 });
 
-test("detects channel hopping (3+ channels in 60 seconds)", () => {
+test("down-weights channel hopping on distinct content (3+ channels in 60s)", () => {
+  // Distinct content across channels (no duplicate signal in the window) is
+  // common legitimate onboarding behaviour, so channel_hop_fast uses its
+  // down-weighted base — not enough on its own + tenure to clear the low tier.
   const now = Date.now();
   const messages: RecentMessage[] = [
-    makeMessage({ channelId: "ch-1", timestamp: now - 10000 }),
-    makeMessage({ channelId: "ch-2", timestamp: now - 5000 }),
-    makeMessage({ channelId: "ch-3", timestamp: now - 1000 }),
+    makeMessage({
+      channelId: "ch-1",
+      contentHash: "a",
+      timestamp: now - 10000,
+    }),
+    makeMessage({ channelId: "ch-2", contentHash: "b", timestamp: now - 5000 }),
+    makeMessage({ channelId: "ch-3", contentHash: "c", timestamp: now - 1000 }),
   ];
 
   const signals = analyzeVelocity(messages, "new content");
+  const hopSignal = signals.find((s) => s.name === "channel_hop_fast");
+  expect(hopSignal).toBeDefined();
+  expect(hopSignal!.score).toBe(2);
+});
+
+test("keeps full channel-hop weight when duplicate content co-occurs", () => {
+  // 3 channels in 60s with 2 prior duplicates of the current hash — below the
+  // cross_channel_spam combo (needs 3 dups) but clearly content-spammy, so
+  // channel_hop_fast keeps its full base.
+  const now = Date.now();
+  const hash = "dup content";
+  const messages: RecentMessage[] = [
+    makeMessage({
+      channelId: "ch-1",
+      contentHash: hash,
+      timestamp: now - 10000,
+    }),
+    makeMessage({
+      channelId: "ch-2",
+      contentHash: hash,
+      timestamp: now - 5000,
+    }),
+    makeMessage({
+      channelId: "ch-3",
+      contentHash: "other",
+      timestamp: now - 1000,
+    }),
+  ];
+
+  const signals = analyzeVelocity(messages, hash);
+  // cross_channel_spam needs 3+ duplicates; only 2 here, so it must not fire
+  expect(signals.find((s) => s.name === "cross_channel_spam")).toBeUndefined();
   const hopSignal = signals.find((s) => s.name === "channel_hop_fast");
   expect(hopSignal).toBeDefined();
   expect(hopSignal!.score).toBe(4);
@@ -255,4 +298,252 @@ test("getPriorDuplicates respects a custom window", () => {
   const priors = getPriorDuplicates(messages, currentId, hash, 60000);
   expect(priors).toHaveLength(1);
   expect(priors[0].messageId).toBe("msg-2");
+});
+
+// ── Scaled velocity signal tests ──
+
+describe("channel_hop_fast scaling", () => {
+  // Space messages 3000ms apart so all 15 fit inside the 60s window
+  // (furthest message: 15 * 3000 = 45000ms ago, well under 60s)
+  function makeHopMessages(channelCount: number): RecentMessage[] {
+    const now = Date.now();
+    return Array.from({ length: channelCount }, (_, i) =>
+      makeMessage({ channelId: `ch-${i}`, timestamp: now - (i + 1) * 3000 }),
+    );
+  }
+
+  // These fixtures use distinct content (no duplicate signal), so they exercise
+  // the down-weighted distinctBase. Magnitude scaling is base-independent; the
+  // full-base path is covered by "keeps full channel-hop weight ..." above.
+  test("3 channels → distinct base score (no bonus)", () => {
+    const signals = analyzeVelocity(makeHopMessages(3), "new content");
+    const s = signals.find((x) => x.name === "channel_hop_fast");
+    expect(s).toBeDefined();
+    expect(s!.score).toBe(VELOCITY_TUNING.channelHopFast.distinctBase);
+  });
+
+  test("5 channels → distinct base + 2", () => {
+    const signals = analyzeVelocity(makeHopMessages(5), "new content");
+    const s = signals.find((x) => x.name === "channel_hop_fast");
+    expect(s).toBeDefined();
+    expect(s!.score).toBe(VELOCITY_TUNING.channelHopFast.distinctBase + 2);
+  });
+
+  test("11 channels → distinct base + 8 (bonusCap)", () => {
+    const signals = analyzeVelocity(makeHopMessages(11), "new content");
+    const s = signals.find((x) => x.name === "channel_hop_fast");
+    expect(s).toBeDefined();
+    expect(s!.score).toBe(
+      VELOCITY_TUNING.channelHopFast.distinctBase +
+        VELOCITY_TUNING.channelHopFast.bonusCap,
+    );
+  });
+
+  test("15 channels → capped at distinct base + bonusCap", () => {
+    const signals = analyzeVelocity(makeHopMessages(15), "new content");
+    const s = signals.find((x) => x.name === "channel_hop_fast");
+    expect(s).toBeDefined();
+    expect(s!.score).toBe(
+      VELOCITY_TUNING.channelHopFast.distinctBase +
+        VELOCITY_TUNING.channelHopFast.bonusCap,
+    );
+  });
+});
+
+describe("rapid_fire scaling", () => {
+  // Space messages 2s apart so all fit within the 30s window
+  function makeRapidMessages(count: number): RecentMessage[] {
+    const now = Date.now();
+    return Array.from({ length: count }, (_, i) =>
+      makeMessage({ contentHash: `msg-${i}`, timestamp: now - i * 2000 }),
+    );
+  }
+
+  test("5 msgs → base score (no bonus)", () => {
+    const signals = analyzeVelocity(makeRapidMessages(5), "new content");
+    const s = signals.find((x) => x.name === "rapid_fire");
+    expect(s).toBeDefined();
+    expect(s!.score).toBe(VELOCITY_TUNING.rapidFire.base);
+  });
+
+  test("8 msgs → base + 3", () => {
+    const signals = analyzeVelocity(makeRapidMessages(8), "new content");
+    const s = signals.find((x) => x.name === "rapid_fire");
+    expect(s).toBeDefined();
+    expect(s!.score).toBe(VELOCITY_TUNING.rapidFire.base + 3);
+  });
+
+  test("10 msgs → base + 5 (bonusCap)", () => {
+    const signals = analyzeVelocity(makeRapidMessages(10), "new content");
+    const s = signals.find((x) => x.name === "rapid_fire");
+    expect(s).toBeDefined();
+    expect(s!.score).toBe(
+      VELOCITY_TUNING.rapidFire.base + VELOCITY_TUNING.rapidFire.bonusCap,
+    );
+  });
+
+  test("14 msgs → capped at base + bonusCap", () => {
+    const signals = analyzeVelocity(makeRapidMessages(14), "new content");
+    const s = signals.find((x) => x.name === "rapid_fire");
+    expect(s).toBeDefined();
+    expect(s!.score).toBe(
+      VELOCITY_TUNING.rapidFire.base + VELOCITY_TUNING.rapidFire.bonusCap,
+    );
+  });
+});
+
+describe("channel_hop_slow scaling", () => {
+  // Make messages spread over 5 minutes (not 60s), so channelsIn60s < 3
+  function makeSlowHopMessages(channelCount: number): RecentMessage[] {
+    const now = Date.now();
+    return Array.from({ length: channelCount }, (_, i) =>
+      makeMessage({
+        channelId: `ch-${i}`,
+        // spread over ~4 minutes so they are within 5m but outside 60s
+        timestamp: now - 70000 - i * 15000,
+      }),
+    );
+  }
+
+  test("5 channels in 5m (slow) → base score", () => {
+    const signals = analyzeVelocity(makeSlowHopMessages(5), "new content");
+    const s = signals.find((x) => x.name === "channel_hop_slow");
+    expect(s).toBeDefined();
+    expect(s!.score).toBe(VELOCITY_TUNING.channelHopSlow.base);
+  });
+
+  test("9 channels in 5m (slow) → base + 4 (capped)", () => {
+    const signals = analyzeVelocity(makeSlowHopMessages(9), "new content");
+    const s = signals.find((x) => x.name === "channel_hop_slow");
+    expect(s).toBeDefined();
+    expect(s!.score).toBe(
+      VELOCITY_TUNING.channelHopSlow.base +
+        VELOCITY_TUNING.channelHopSlow.bonusCap,
+    );
+  });
+});
+
+describe("attachment_burst signal", () => {
+  test("fires when a velocity signal is present (channel-hop + 2 attachments)", () => {
+    const now = Date.now();
+    const messages = [
+      makeMessage({ channelId: "ch-1", timestamp: now - 10000 }),
+      makeMessage({ channelId: "ch-2", timestamp: now - 5000 }),
+      makeMessage({ channelId: "ch-3", timestamp: now - 1000 }),
+    ];
+    const signals = analyzeVelocity(messages, "new content", 2);
+    expect(signals.find((s) => s.name === "channel_hop_fast")).toBeDefined();
+    const burst = signals.find((s) => s.name === "attachment_burst");
+    expect(burst).toBeDefined();
+    expect(burst!.score).toBe(2);
+  });
+
+  test("does NOT fire when no velocity signal is present (lone message with attachments)", () => {
+    const signals = analyzeVelocity([], "new content", 3);
+    expect(signals.find((s) => s.name === "attachment_burst")).toBeUndefined();
+  });
+
+  test("attachment_burst score is capped at bonusCap", () => {
+    const now = Date.now();
+    const messages = [
+      makeMessage({ channelId: "ch-1", timestamp: now - 10000 }),
+      makeMessage({ channelId: "ch-2", timestamp: now - 5000 }),
+      makeMessage({ channelId: "ch-3", timestamp: now - 1000 }),
+    ];
+    // 10 attachments, bonusCap is 4
+    const signals = analyzeVelocity(messages, "new content", 10);
+    const burst = signals.find((s) => s.name === "attachment_burst");
+    expect(burst).toBeDefined();
+    expect(burst!.score).toBe(VELOCITY_TUNING.attachmentBurst.bonusCap);
+  });
+
+  test("does NOT appear on cross_channel_spam path (early return)", () => {
+    const now = Date.now();
+    const hash = "spam content";
+    const messages = [
+      makeMessage({
+        contentHash: hash,
+        channelId: "ch-1",
+        timestamp: now - 10000,
+      }),
+      makeMessage({
+        contentHash: hash,
+        channelId: "ch-2",
+        timestamp: now - 20000,
+      }),
+      makeMessage({
+        contentHash: hash,
+        channelId: "ch-3",
+        timestamp: now - 30000,
+      }),
+    ];
+    // cross_channel_spam should fire and early-return — no attachment_burst
+    const signals = analyzeVelocity(messages, hash, 3);
+    expect(signals.find((s) => s.name === "cross_channel_spam")).toBeDefined();
+    expect(signals).toHaveLength(1);
+    expect(signals.find((s) => s.name === "attachment_burst")).toBeUndefined();
+  });
+});
+
+describe("scenario fixtures (velocity-only totals)", () => {
+  test("Scenario C: 15 channels/60s + 14 msgs/30s, distinct content → sum 18 (still high)", () => {
+    const now = Date.now();
+    // 15 unique channels in 60s, varied content, 14 msgs in 30s
+    const messages = Array.from({ length: 14 }, (_, i) =>
+      makeMessage({
+        channelId: `ch-${i % 15}`,
+        contentHash: `unique-${i}`,
+        timestamp: now - (i + 1) * 2000, // within 30s
+      }),
+    );
+    // Add one more unique channel to reach 15 distinct (i%15 covers 0–13 = 14 channels already)
+    // With 14 msgs and channelId ch-0..ch-13, we have 14 channels; need 15
+    const extra = makeMessage({
+      channelId: "ch-14",
+      contentHash: "unique-extra",
+      timestamp: now - 1000,
+    });
+    const allMessages = [...messages, extra];
+    const signals = analyzeVelocity(allMessages, "new content", 0);
+    const hopFast = signals.find((s) => s.name === "channel_hop_fast");
+    const rapid = signals.find((s) => s.name === "rapid_fire");
+    expect(hopFast).toBeDefined();
+    expect(rapid).toBeDefined();
+    // distinct content → down-weighted base 2:
+    // channel_hop_fast: scaledScore(2, 15, 3, 1, 8) = 2 + min(12, 8) = 10
+    expect(hopFast!.score).toBe(10);
+    // rapid_fire: scaledScore(3, 15, 5, 1, 5) = 3 + min(10, 5) = 8
+    expect(rapid!.score).toBe(8);
+    const velocitySum = signals
+      .filter((s) => ["channel_hop_fast", "rapid_fire"].includes(s.name))
+      .reduce((acc, s) => acc + s.score, 0);
+    // 18 ≥ high threshold (15): a 15-channel/14-msg flood still escalates even
+    // with distinct content, so the down-weight doesn't weaken enforcement.
+    expect(velocitySum).toBe(18);
+  });
+
+  test("Scenario E: 5 channels/60s + 5 msgs/30s, distinct content → velocity sum 7", () => {
+    const now = Date.now();
+    const messages = Array.from({ length: 5 }, (_, i) =>
+      makeMessage({
+        channelId: `ch-${i}`,
+        contentHash: `unique-${i}`,
+        timestamp: now - (i + 1) * 4000, // within 30s (i=4 → 20s ago)
+      }),
+    );
+    const signals = analyzeVelocity(messages, "new content", 0);
+    const hopFast = signals.find((s) => s.name === "channel_hop_fast");
+    const rapid = signals.find((s) => s.name === "rapid_fire");
+    expect(hopFast).toBeDefined();
+    expect(rapid).toBeDefined();
+    // distinct content → down-weighted base 2:
+    // channel_hop_fast: scaledScore(2, 5, 3, 1, 8) = 2 + 2 = 4
+    expect(hopFast!.score).toBe(4);
+    // rapid_fire: scaledScore(3, 5, 5, 1, 5) = 3 + 0 = 3
+    expect(rapid!.score).toBe(3);
+    const velocitySum = signals
+      .filter((s) => ["channel_hop_fast", "rapid_fire"].includes(s.name))
+      .reduce((acc, s) => acc + s.score, 0);
+    expect(velocitySum).toBe(7);
+  });
 });

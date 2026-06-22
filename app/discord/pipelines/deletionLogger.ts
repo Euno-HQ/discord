@@ -52,7 +52,7 @@ export const deletionLoggerPipeline: Effect.Effect<
               Effect.catchAll((err) =>
                 logEffect("warn", "DeletionLogger", "Failed to cache message", {
                   messageId: e.message.id,
-                  error: String(err),
+                  error: err,
                 }),
               ),
             );
@@ -65,7 +65,7 @@ export const deletionLoggerPipeline: Effect.Effect<
                   "warn",
                   "DeletionLogger",
                   "Failed to touch cached message",
-                  { messageId: e.newMessage.id, error: String(err) },
+                  { messageId: e.newMessage.id, error: err },
                 ),
               ),
             );
@@ -92,7 +92,7 @@ export const deletionLoggerPipeline: Effect.Effect<
         Effect.catchAll((err) =>
           logEffect("warn", "DeletionLogger", "Pipeline handler failed", {
             eventType: e.type,
-            error: String(err),
+            error: err,
           }),
         ),
       );

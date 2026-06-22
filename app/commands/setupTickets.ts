@@ -5,12 +5,9 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
-  ComponentType,
   InteractionType,
   MessageFlags,
   ModalBuilder,
-  PermissionFlagsBits,
-  SlashCommandBuilder,
   TextInputBuilder,
 } from "discord.js";
 import { Effect } from "effect";
@@ -28,132 +25,11 @@ import {
   quoteMessageContent,
   type MessageComponentCommand,
   type ModalCommand,
-  type SlashCommand,
 } from "#~/helpers/discord";
 import { featureStats } from "#~/helpers/metrics";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
-
-export const DEFAULT_BUTTON_TEXT = "Open a private ticket with the moderators";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 export const Command = [
-  {
-    command: new SlashCommandBuilder()
-      .setName("tickets-channel")
-      .addRoleOption((o) => {
-        o.setName("role");
-        o.setDescription(
-          "Which role (if any) should be pinged when a ticket is created?",
-        );
-        o.setRequired(false);
-        return o;
-      })
-      .addStringOption((o) => {
-        o.setName("button-text");
-        o.setDescription(
-          `What should the button say? If left blank, it will say "${DEFAULT_BUTTON_TEXT}"`,
-        );
-        return o;
-      })
-      .addChannelOption((o) => {
-        o.setName("channel");
-        o.setDescription(
-          "Which channel (if not this one) should tickets be created in?",
-        );
-        return o;
-      })
-      .setDescription(
-        "Set up a new button for creating private tickets with moderators",
-      )
-      .setDefaultMemberPermissions(
-        PermissionFlagsBits.Administrator,
-      ) as SlashCommandBuilder,
-
-    handler: (interaction) =>
-      Effect.gen(function* () {
-        if (!interaction.guild) {
-          yield* Effect.fail(new Error("Interaction has no guild"));
-          return;
-        }
-
-        const pingableRole = interaction.options.getRole("role");
-        const ticketChannel = interaction.options.getChannel("channel");
-        const buttonText =
-          interaction.options.getString("button-text") ?? DEFAULT_BUTTON_TEXT;
-
-        if (ticketChannel && ticketChannel.type !== ChannelType.GuildText) {
-          yield* interactionReply(interaction, {
-            content: `The channel configured must be a text channel! Tickets will be created as private threads.`,
-          });
-          return;
-        }
-
-        const interactionResponse = yield* interactionReply(interaction, {
-          components: [
-            {
-              type: ComponentType.ActionRow,
-              components: [
-                {
-                  type: ComponentType.Button,
-                  label: buttonText,
-                  style: ButtonStyle.Primary,
-                  customId: "open-ticket",
-                },
-              ],
-            },
-          ],
-        });
-
-        const producedMessage = yield* Effect.tryPromise(() =>
-          interactionResponse.fetch(),
-        );
-
-        let roleId = pingableRole?.id;
-        if (!roleId) {
-          const { [SETTINGS.moderator]: mod } = yield* fetchSettingsEffect(
-            interaction.guild.id,
-            [SETTINGS.moderator, SETTINGS.modLog],
-          );
-          roleId = mod;
-        }
-
-        const db = yield* DatabaseService;
-        yield* db.insertInto("tickets_config").values({
-          message_id: producedMessage.id,
-          channel_id: ticketChannel?.id,
-          role_id: roleId,
-        });
-
-        featureStats.ticketChannelSetup(
-          interaction.guild.id,
-          interaction.user.id,
-          ticketChannel?.id ?? interaction.channelId,
-        );
-      }).pipe(
-        Effect.catchAll((error) =>
-          Effect.gen(function* () {
-            yield* logEffect(
-              "error",
-              "TicketsSetup",
-              "Error setting up tickets",
-              { error },
-            );
-
-            yield* interactionReply(interaction, {
-              content:
-                "Failed to set up tickets. Check bot permissions and try again.",
-              flags: MessageFlags.Ephemeral,
-            }).pipe(Effect.catchAll(() => Effect.void));
-          }),
-        ),
-        Effect.withSpan("ticketsChannelCommand", {
-          attributes: {
-            guildId: interaction.guildId,
-            userId: interaction.user.id,
-          },
-        }),
-      ),
-  } satisfies SlashCommand,
-
   {
     command: { type: InteractionType.MessageComponent, name: "open-ticket" },
     handler: (interaction) =>
@@ -240,7 +116,7 @@ export const Command = [
 
         // If there's no config, that means that the button was set up before the db was set up. Add one with default values
         if (!config) {
-          const { [SETTINGS.moderator]: mod } = yield* fetchSettingsEffect(
+          const { [SETTINGS.moderator]: mod } = yield* fetchSettings(
             interaction.guild.id,
             [SETTINGS.moderator, SETTINGS.modLog],
           );
@@ -366,7 +242,7 @@ export const Command = [
           return;
         }
 
-        const { [SETTINGS.modLog]: modLog } = yield* fetchSettingsEffect(
+        const { [SETTINGS.modLog]: modLog } = yield* fetchSettings(
           interaction.guild.id,
           [SETTINGS.modLog],
         );

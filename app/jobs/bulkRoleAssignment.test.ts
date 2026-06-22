@@ -10,6 +10,7 @@ import {
   vi,
 } from "vitest";
 
+import { DiscordAPIError } from "@discordjs/rest";
 import * as Reactivity from "@effect/experimental/Reactivity";
 import { SqlClient } from "@effect/sql";
 import * as Sqlite from "@effect/sql-kysely/Sqlite";
@@ -25,6 +26,18 @@ import {
   scanFinalCursorEffect,
 } from "./bulkRoleAssignment";
 import type { Job } from "./jobRunner";
+
+// Helper to construct a DiscordAPIError with a given HTTP status.
+// 403 → ForbiddenError (non-retriable), 404 → ResourceMissingError (recovered).
+const makeDiscordApiError = (status: number) =>
+  new DiscordAPIError(
+    { code: 0, message: "x" },
+    0,
+    status,
+    "PUT",
+    "https://discord/x",
+    { body: undefined, files: undefined },
+  );
 
 const { mockGet, mockPut, mockPatch } = vi.hoisted(() => {
   const mockGet = vi.fn();
@@ -196,9 +209,11 @@ describe("processBatchEffect", () => {
       { user: { id: "1099511627776", bot: false } },
       { user: { id: "1099511627777", bot: false } },
     ]);
+    // Use a non-retriable 403 (ForbiddenError) so the failure is immediate;
+    // a plain Error would be classified as TransientError and retried up to 4×.
     mockPut
       .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("left guild"));
+      .mockRejectedValueOnce(makeDiscordApiError(403));
 
     const result = await Effect.runPromise(
       processBatchEffect({
@@ -250,6 +265,56 @@ describe("processBatchEffect", () => {
 
     expect(result.done).toBe(true);
     expect(result.assigned).toBe(0);
+  });
+
+  it("a missing member is recovered (not counted as error)", async () => {
+    // 404 → ResourceMissingError; the pipeline recovers it with Effect.void
+    // (success-equivalent). The batch should complete without errors.
+    mockGet.mockResolvedValue([
+      { user: { id: "1099511627776", bot: false } },
+      { user: { id: "1099511627777", bot: false } },
+    ]);
+    mockPut
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(makeDiscordApiError(404));
+
+    const result = await Effect.runPromise(
+      processBatchEffect({
+        guildId: "guild-1",
+        roleId: "role-1",
+        cursor: { after: "0" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 2 },
+        batchSize: 1000,
+      }),
+    );
+
+    expect(result.errors).toBe(0);
+    // The recovered member counts as success-equivalent
+    expect(result.assigned).toBe(2);
+  });
+
+  it("a forbidden member is counted and the batch continues", async () => {
+    // 403 → ForbiddenError; not retried, counted as error, batch continues.
+    mockGet.mockResolvedValue([
+      { user: { id: "1099511627776", bot: false } },
+      { user: { id: "1099511627777", bot: false } },
+    ]);
+    mockPut
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(makeDiscordApiError(403));
+
+    const result = await Effect.runPromise(
+      processBatchEffect({
+        guildId: "guild-1",
+        roleId: "role-1",
+        cursor: { after: "0" },
+        finalCursor: { lastMemberId: "9999999999999999999", memberCount: 2 },
+        batchSize: 1000,
+      }),
+    );
+
+    expect(result.assigned).toBe(1);
+    expect(result.errors).toBe(1);
   });
 });
 
@@ -398,7 +463,9 @@ describe("executeJobEffect", () => {
         // batch
         { user: { id: "1099511627776", bot: false } },
       ]);
-    mockPut.mockRejectedValue(new Error("Discord error"));
+    // Use a non-retriable 403 (ForbiddenError) so the failure is immediate;
+    // a plain Error would be classified as TransientError and retried, making this slow.
+    mockPut.mockRejectedValue(makeDiscordApiError(403));
 
     await runTest(executeJobEffect(makeJob() as unknown as Job));
 

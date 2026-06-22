@@ -1,6 +1,6 @@
 import { data, Link, useLoaderData } from "react-router";
 
-import { db, run } from "#~/AppRuntime";
+import { db, run, runEffect } from "#~/AppRuntime";
 import { Sparkline } from "#~/components/Sparkline";
 import { ssrDiscordSdk, userDiscordSdkFromRequest } from "#~/discord/api";
 import { getCachedGuilds } from "#~/helpers/guildCache.server";
@@ -33,7 +33,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   }
 
   const userRest = await userDiscordSdkFromRequest(request);
-  const guilds = await getCachedGuilds(user.id, userRest, ssrDiscordSdk);
+  const guilds = await runEffect(
+    getCachedGuilds(user.id, userRest, ssrDiscordSdk),
+  );
   const guild = guilds.find((g) => g.id === guildId);
 
   if (!guild?.hasBot) {
@@ -106,7 +108,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     ),
 
     // Subscription tier
-    SubscriptionService.getProductTier(guildId),
+    runEffect(SubscriptionService.getProductTier(guildId)),
   ]);
 
   // Build sparkline array (30 days, zero-filled)
@@ -280,12 +282,6 @@ export default function GuildOverview() {
           className="text-sm font-medium text-stone-400 transition-colors hover:text-stone-100"
         >
           Settings
-        </Link>
-        <Link
-          to={`/app/${guild.id}/onboard`}
-          className="text-sm font-medium text-stone-400 transition-colors hover:text-stone-100"
-        >
-          Onboarding
         </Link>
       </div>
     </main>

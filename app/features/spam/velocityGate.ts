@@ -28,6 +28,7 @@ export const gatedVelocitySignals = (
   guildId: string,
   recentMessages: Parameters<typeof analyzeVelocity>[0],
   contentHash: string,
+  attachmentCount = 0,
   opts: GateOpts = {},
 ) =>
   Effect.gen(function* () {
@@ -55,5 +56,7 @@ export const gatedVelocitySignals = (
       );
     }
 
-    return enabled ? analyzeVelocity(recentMessages, contentHash) : [];
+    return enabled
+      ? analyzeVelocity(recentMessages, contentHash, attachmentCount)
+      : [];
   });

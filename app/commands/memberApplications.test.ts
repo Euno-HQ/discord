@@ -17,10 +17,10 @@ vi.mock("#~/discord/api", () => ({
   },
 }));
 
-// Mock fetchSettingsEffect so resolveLogMessage doesn't need a guilds table
+// Mock fetchSettings so resolveLogMessage doesn't need a guilds table
 vi.mock("#~/models/guilds.server", () => ({
   SETTINGS: { modLog: "modLog" },
-  fetchSettingsEffect: () => Effect.succeed({ modLog: "fake-mod-log-channel" }),
+  fetchSettings: () => Effect.succeed({ modLog: "fake-mod-log-channel" }),
 }));
 
 // The apply-to-join handler now imports FeatureFlagService, so loading this
@@ -32,6 +32,16 @@ vi.mock("#~/models/guilds.server", () => ({
 // only thing tested here — never touches subscriptions, so a stub is safe.
 vi.mock("#~/models/subscriptions.server", () => ({
   SubscriptionService: {},
+}));
+
+// The command also reaches AppRuntime through bulkRoleAssignment → jobRunner
+// (which imports `runEffect`). Without this stub, importing the command builds
+// the real AppRuntime — opening the on-disk SQLite DB and contending on its
+// busy_timeout, which makes this suite time out under parallel load. The tested
+// effect runs against this file's own in-memory runtime and never calls
+// runEffect, so stubbing AppRuntime is safe.
+vi.mock("#~/AppRuntime", () => ({
+  runEffect: vi.fn(),
 }));
 
 let runtime: ManagedRuntime.ManagedRuntime<

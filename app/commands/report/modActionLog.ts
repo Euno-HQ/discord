@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import { forwardMessageSafe, sendMessage } from "#~/effects/discordSdk";
 import { logEffect } from "#~/effects/observability";
 import { truncateMessage } from "#~/helpers/string";
-import { fetchSettingsEffect, SETTINGS } from "#~/models/guilds.server";
+import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 import { recordModAction } from "#~/models/modActions";
 import { getOrCreateUserThread } from "#~/models/userThreads.ts";
 
@@ -64,7 +64,7 @@ export const logModAction = (report: ModActionReport) =>
     const thread = yield* getOrCreateUserThread(guild, user);
 
     // Get mod log for forwarding
-    const { modLog, moderator } = yield* fetchSettingsEffect(guild.id, [
+    const { modLog, moderator } = yield* fetchSettings(guild.id, [
       SETTINGS.modLog,
       SETTINGS.moderator,
     ]);

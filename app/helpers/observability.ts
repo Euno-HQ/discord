@@ -1,3 +1,4 @@
+import { errorReplacer } from "#~/helpers/formatError";
 import Sentry from "#~/helpers/sentry.server";
 
 // Structured logging with consistent format
@@ -19,23 +20,7 @@ export const log = (
 
   // Use structured logging for better parsing
   // Error objects have non-enumerable properties, so we need a replacer
-  console.log(
-    JSON.stringify(logEntry, (key, value) => {
-      if (value instanceof Error) {
-        const errorObj: Record<string, unknown> = {
-          name: value.name,
-          message: value.message,
-          stack: value.stack,
-        };
-        const cause = (value as { cause?: unknown }).cause;
-        if (cause !== undefined) {
-          errorObj.cause = cause;
-        }
-        return errorObj;
-      }
-      return value;
-    }),
-  );
+  console.log(JSON.stringify(logEntry, errorReplacer));
 };
 
 // Performance tracking helper

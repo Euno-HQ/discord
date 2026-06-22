@@ -25,36 +25,27 @@ import type {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { DiscordApiError } from "#~/effects/errors";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
+import type { DiscordError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 
 export const createChannel = (
   guild: Guild,
   options: GuildChannelCreateOptions,
 ) =>
-  Effect.tryPromise({
-    try: () => guild.channels.create(options),
-    catch: (error) =>
-      new DiscordApiError({ operation: "createChannel", cause: error }),
-  }).pipe(
+  tryDiscord("createChannel", () => guild.channels.create(options)).pipe(
     Effect.withSpan("discord.createChannel", {
       attributes: { guildId: guild.id, channelName: options.name },
     }),
   );
 
 export const fetchGuild = (client: Client, guildId: string) =>
-  Effect.tryPromise({
-    try: () => client.guilds.fetch(guildId),
-    catch: (error) =>
-      new DiscordApiError({ operation: "fetchGuild", cause: error }),
-  }).pipe(Effect.withSpan("discord.fetchGuild", { attributes: { guildId } }));
+  tryDiscord("fetchGuild", () => client.guilds.fetch(guildId)).pipe(
+    Effect.withSpan("discord.fetchGuild", { attributes: { guildId } }),
+  );
 
 export const fetchChannel = (guild: Guild, channelId: string) =>
-  Effect.tryPromise({
-    try: () => guild.channels.fetch(channelId),
-    catch: (error) =>
-      new DiscordApiError({ operation: "fetchChannel", cause: error }),
-  }).pipe(
+  tryDiscord("fetchChannel", () => guild.channels.fetch(channelId)).pipe(
     Effect.withSpan("discord.fetchChannel", { attributes: { channelId } }),
   );
 
@@ -62,22 +53,19 @@ export const fetchChannelFromClient = <T = GuildTextBasedChannel>(
   client: Client,
   channelId: string,
 ) =>
-  Effect.tryPromise({
-    try: () => client.channels.fetch(channelId) as Promise<T>,
-    catch: (error) =>
-      new DiscordApiError({ operation: "fetchChannel", cause: error }),
-  }).pipe(
+  tryDiscord(
+    "fetchChannel",
+    () => client.channels.fetch(channelId) as Promise<T>,
+  ).pipe(
     Effect.withSpan("discord.fetchChannel", {
       attributes: { channelId, variant: "fromClient" },
     }),
   );
 
 export const fetchMember = (guild: Guild, userId: string) =>
-  Effect.tryPromise({
-    try: () => guild.members.fetch(userId),
-    catch: (error) =>
-      new DiscordApiError({ operation: "fetchMember", cause: error }),
-  }).pipe(Effect.withSpan("discord.fetchMember", { attributes: { userId } }));
+  tryDiscord("fetchMember", () => guild.members.fetch(userId)).pipe(
+    Effect.withSpan("discord.fetchMember", { attributes: { userId } }),
+  );
 
 export const fetchMemberOrNull = (
   guild: Guild,
@@ -97,11 +85,9 @@ export const fetchMemberOrNull = (
   );
 
 export const fetchUser = (client: Client, userId: string) =>
-  Effect.tryPromise({
-    try: () => client.users.fetch(userId),
-    catch: (error) =>
-      new DiscordApiError({ operation: "fetchUser", cause: error }),
-  }).pipe(Effect.withSpan("discord.fetchUser", { attributes: { userId } }));
+  tryDiscord("fetchUser", () => client.users.fetch(userId)).pipe(
+    Effect.withSpan("discord.fetchUser", { attributes: { userId } }),
+  );
 
 export const fetchUserOrNull = (
   client: Client,
@@ -124,22 +110,14 @@ export const fetchMessage = (
   channel: GuildTextBasedChannel | ThreadChannel,
   messageId: string,
 ) =>
-  Effect.tryPromise({
-    try: () => channel.messages.fetch(messageId),
-    catch: (error) =>
-      new DiscordApiError({ operation: "fetchMessage", cause: error }),
-  }).pipe(
+  tryDiscord("fetchMessage", () => channel.messages.fetch(messageId)).pipe(
     Effect.withSpan("discord.fetchMessage", {
       attributes: { messageId, channelId: channel.id },
     }),
   );
 
 export const deleteMessage = (message: Message | PartialMessage) =>
-  Effect.tryPromise({
-    try: () => message.delete(),
-    catch: (error) =>
-      new DiscordApiError({ operation: "deleteMessage", cause: error }),
-  }).pipe(
+  tryDiscord("deleteMessage", () => message.delete()).pipe(
     Effect.withSpan("discord.deleteMessage", {
       attributes: { messageId: message.id },
     }),
@@ -149,11 +127,7 @@ export const sendMessage = (
   channel: GuildTextBasedChannel | ThreadChannel,
   options: Parameters<typeof channel.send>[0],
 ) =>
-  Effect.tryPromise({
-    try: () => channel.send(options),
-    catch: (error) =>
-      new DiscordApiError({ operation: "sendMessage", cause: error }),
-  }).pipe(
+  tryDiscord("sendMessage", () => channel.send(options)).pipe(
     Effect.withSpan("discord.sendMessage", {
       attributes: { channelId: channel.id },
     }),
@@ -163,11 +137,7 @@ export const editMessage = (
   message: Message,
   options: Parameters<typeof message.edit>[0],
 ) =>
-  Effect.tryPromise({
-    try: () => message.edit(options),
-    catch: (error) =>
-      new DiscordApiError({ operation: "editMessage", cause: error }),
-  }).pipe(
+  tryDiscord("editMessage", () => message.edit(options)).pipe(
     Effect.withSpan("discord.editMessage", {
       attributes: { messageId: message.id },
     }),
@@ -180,7 +150,7 @@ export const forwardMessageSafe = (message: Message, targetChannelId: string) =>
   }).pipe(
     Effect.catchAll((error) =>
       logEffect("error", "Discord SDK", "failed to forward to modLog", {
-        error: String(error),
+        error,
         messageId: message.id,
         targetChannelId,
       }),
@@ -194,11 +164,7 @@ export const messageReply = (
   message: Message,
   options: Parameters<Message["reply"]>[0],
 ) =>
-  Effect.tryPromise({
-    try: () => message.reply(options),
-    catch: (error) =>
-      new DiscordApiError({ operation: "messageReply", cause: error }),
-  }).pipe(
+  tryDiscord("messageReply", () => message.reply(options)).pipe(
     Effect.withSpan("discord.messageReply", {
       attributes: { messageId: message.id },
     }),
@@ -240,16 +206,9 @@ export const replyAndForwardSafe = (
  */
 export const resolveMessagePartial = (
   msg: Message | PartialMessage,
-): Effect.Effect<Message, DiscordApiError, never> =>
+): Effect.Effect<Message, DiscordError, never> =>
   (msg.partial
-    ? Effect.tryPromise({
-        try: () => msg.fetch(),
-        catch: (error) =>
-          new DiscordApiError({
-            operation: "resolveMessagePartial",
-            cause: error,
-          }),
-      })
+    ? tryDiscord("resolveMessagePartial", () => msg.fetch())
     : Effect.succeed(msg)
   ).pipe(
     Effect.withSpan("discord.resolveMessagePartial", {
@@ -266,11 +225,9 @@ export const interactionReply = (
     | MessageContextMenuCommandInteraction,
   options: Parameters<typeof interaction.reply>[0],
 ) =>
-  Effect.tryPromise({
-    try: () => interaction.reply(options),
-    catch: (error) =>
-      new DiscordApiError({ operation: "interactionReply", cause: error }),
-  }).pipe(Effect.withSpan("discord.interactionReply"));
+  tryDiscord("interactionReply", () => interaction.reply(options)).pipe(
+    Effect.withSpan("discord.interactionReply"),
+  );
 
 export const interactionDeferReply = (
   interaction:
@@ -280,11 +237,9 @@ export const interactionDeferReply = (
     | MessageContextMenuCommandInteraction,
   options?: Parameters<typeof interaction.deferReply>[0],
 ) =>
-  Effect.tryPromise({
-    try: () => interaction.deferReply(options),
-    catch: (error) =>
-      new DiscordApiError({ operation: "interactionDeferReply", cause: error }),
-  }).pipe(Effect.withSpan("discord.interactionDeferReply"));
+  tryDiscord("interactionDeferReply", () =>
+    interaction.deferReply(options),
+  ).pipe(Effect.withSpan("discord.interactionDeferReply"));
 
 export const interactionEditReply = (
   interaction:
@@ -294,11 +249,9 @@ export const interactionEditReply = (
     | MessageContextMenuCommandInteraction,
   options: Parameters<typeof interaction.editReply>[0],
 ) =>
-  Effect.tryPromise({
-    try: () => interaction.editReply(options),
-    catch: (error) =>
-      new DiscordApiError({ operation: "interactionEditReply", cause: error }),
-  }).pipe(Effect.withSpan("discord.interactionEditReply"));
+  tryDiscord("interactionEditReply", () => interaction.editReply(options)).pipe(
+    Effect.withSpan("discord.interactionEditReply"),
+  );
 
 export const interactionFollowUp = (
   interaction:
@@ -308,34 +261,25 @@ export const interactionFollowUp = (
     | MessageContextMenuCommandInteraction,
   options: Parameters<typeof interaction.followUp>[0],
 ) =>
-  Effect.tryPromise({
-    try: () => interaction.followUp(options),
-    catch: (error) =>
-      new DiscordApiError({ operation: "interactionFollowUp", cause: error }),
-  }).pipe(Effect.withSpan("discord.interactionFollowUp"));
+  tryDiscord("interactionFollowUp", () => interaction.followUp(options)).pipe(
+    Effect.withSpan("discord.interactionFollowUp"),
+  );
 
 export const interactionUpdate = (
   interaction: MessageComponentInteraction,
   options: Parameters<typeof interaction.update>[0],
 ) =>
-  Effect.tryPromise({
-    try: () => interaction.update(options),
-    catch: (error) =>
-      new DiscordApiError({ operation: "interactionUpdate", cause: error }),
-  }).pipe(Effect.withSpan("discord.interactionUpdate"));
+  tryDiscord("interactionUpdate", () => interaction.update(options)).pipe(
+    Effect.withSpan("discord.interactionUpdate"),
+  );
 
 export const interactionDeferUpdate = (
   interaction: MessageComponentInteraction,
   options?: Parameters<typeof interaction.deferUpdate>[0],
 ) =>
-  Effect.tryPromise({
-    try: () => interaction.deferUpdate(options),
-    catch: (error) =>
-      new DiscordApiError({
-        operation: "interactionDeferUpdate",
-        cause: error,
-      }),
-  }).pipe(Effect.withSpan("discord.interactionDeferUpdate"));
+  tryDiscord("interactionDeferUpdate", () =>
+    interaction.deferUpdate(options),
+  ).pipe(Effect.withSpan("discord.interactionDeferUpdate"));
 
 /**
  * Softban a member: ban to delete their recent messages, then immediately
@@ -343,7 +287,7 @@ export const interactionDeferUpdate = (
  * server-side based on `deleteMessageSeconds`.
  *
  * If `ban` succeeds but `unban` fails, the user is left BANNED. This case is
- * logged at error level inside the helper before the `DiscordApiError`
+ * logged at error level inside the helper before the `DiscordError`
  * propagates, so the operational incident is never lost even if a caller
  * forgets to handle it. Callers can distinguish the failure mode by checking
  * `error.operation` — `softbanMember.ban` vs `softbanMember.unban`.
@@ -352,32 +296,22 @@ export const softbanMember = (
   member: GuildMember,
   reason: string,
   deleteMessageSeconds: number,
-): Effect.Effect<void, DiscordApiError, never> =>
+): Effect.Effect<void, DiscordError, never> =>
   Effect.gen(function* () {
-    yield* Effect.tryPromise({
-      try: () => member.ban({ reason, deleteMessageSeconds }),
-      catch: (error) =>
-        new DiscordApiError({
-          operation: "softbanMember.ban",
-          cause: error,
-        }),
-    });
+    yield* tryDiscord("softbanMember.ban", () =>
+      member.ban({ reason, deleteMessageSeconds }),
+    );
 
-    yield* Effect.tryPromise({
-      try: () => member.guild.members.unban(member, reason),
-      catch: (error) =>
-        new DiscordApiError({
-          operation: "softbanMember.unban",
-          cause: error,
-        }),
-    }).pipe(
+    yield* tryDiscord("softbanMember.unban", () =>
+      member.guild.members.unban(member, reason),
+    ).pipe(
       Effect.tapError((error) =>
         logEffect(
           "error",
           "Discord",
           "Softban: ban succeeded but unban failed — user is BANNED",
           {
-            error: String(error.cause),
+            error,
             userId: member.id,
             guildId: member.guild.id,
           },

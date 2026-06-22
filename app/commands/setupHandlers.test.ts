@@ -1,23 +1,20 @@
-import { ButtonStyle } from "discord-api-types/v10";
 import { ComponentType } from "discord.js";
 import { vi } from "vitest";
 
 import type { SetupPermissionCheckResult } from "#~/helpers/setupPermissionCheck";
 
 import {
-  buildFeatureToggleRow,
   buildPermWarnings,
   buildSetupConfirmMessage,
+  buildSetupScreen1Message,
+  buildSetupScreen2Message,
   channelValue,
   defaultSetup,
+  renderScreen,
   type PendingSetup,
 } from "./setupHandlers";
 
 // Mock modules with side effects before importing the module under test
-vi.mock("#~/AppRuntime", () => ({
-  db: {},
-  runTakeFirst: vi.fn(),
-}));
 vi.mock("#~/effects/discordSdk", () => ({}));
 vi.mock("#~/effects/observability", () => ({
   log: () => {
@@ -51,6 +48,36 @@ function makePendingSetup(overrides: Partial<PendingSetup> = {}): PendingSetup {
     createdAt: Date.now(),
     ...overrides,
   };
+}
+
+// --- Shared test helpers ---
+
+function getTextDisplays(result: unknown): { content: string }[] {
+  const r = result as {
+    components: [{ components: { type: number; content: string }[] }];
+  };
+  return r.components[0].components.filter(
+    (c) => c.type === (ComponentType.TextDisplay as number),
+  ) as { content: string }[];
+}
+
+function getButtons(
+  result: unknown,
+): { type: number; label: string; disabled?: boolean; custom_id: string }[] {
+  const r = result as {
+    components: [
+      { components: { type: number; components?: { type: number }[] }[] },
+    ];
+  };
+  return r.components[0].components
+    .filter((c) => c.type === (ComponentType.ActionRow as number))
+    .flatMap((c) => c.components ?? [])
+    .filter((c) => c.type === (ComponentType.Button as number)) as {
+    type: number;
+    label: string;
+    disabled?: boolean;
+    custom_id: string;
+  }[];
 }
 
 // --- channelValue ---
@@ -153,38 +180,26 @@ describe("buildPermWarnings", () => {
   });
 });
 
-// --- buildFeatureToggleRow ---
+// --- renderScreen ---
 
-describe("buildFeatureToggleRow", () => {
-  test("disabled feature uses Danger style and '✗' prefix", () => {
-    const state = makePendingSetup({ honeypotChannel: null });
-    const row = buildFeatureToggleRow("guild-1", state);
-
-    expect(row.type).toBe(ComponentType.ActionRow);
-    // Honeypot is at index 1 in OPTIONAL_CHANNELS
-    const honeypotBtn = row.components[1];
-    expect(honeypotBtn.label).toContain("✗");
-    expect(honeypotBtn.style).toBe(ButtonStyle.Danger);
-    expect(honeypotBtn.custom_id).toContain("enable");
+describe("renderScreen", () => {
+  test("screen '1' routes to the screen-1 renderer (has Next button)", () => {
+    const r = renderScreen("g", makePendingSetup(), "1");
+    expect(getButtons(r).some((b) => b.custom_id === "setup-next|g")).toBe(
+      true,
+    );
   });
-
-  test("enabled feature uses Success style and '✓' prefix", () => {
-    const state = makePendingSetup({
-      deletionLogChannel: CREATE_SENTINEL,
-    });
-    const row = buildFeatureToggleRow("guild-1", state);
-
-    // Deletion Log is at index 0
-    const deletionBtn = row.components[0];
-    expect(deletionBtn.label).toContain("✓");
-    expect(deletionBtn.style).toBe(ButtonStyle.Success);
-    expect(deletionBtn.custom_id).toContain("disable");
+  test("screen '2' routes to the screen-2 renderer (has Back-core + Review)", () => {
+    const r = renderScreen("g", makePendingSetup(), "2");
+    const ids = getButtons(r).map((b) => b.custom_id);
+    expect(ids).toContain("setup-back-core|g");
+    expect(ids).toContain("setup-continue|g");
   });
-
-  test("produces 4 buttons for the 4 optional channels", () => {
-    const state = makePendingSetup();
-    const row = buildFeatureToggleRow("guild-1", state);
-    expect(row.components).toHaveLength(4);
+  test("unknown screen defaults to screen 1", () => {
+    const r = renderScreen("g", makePendingSetup(), "");
+    expect(getButtons(r).some((b) => b.custom_id === "setup-next|g")).toBe(
+      true,
+    );
   });
 });
 
@@ -210,34 +225,6 @@ describe("defaultSetup", () => {
 // --- buildSetupConfirmMessage ---
 
 describe("buildSetupConfirmMessage", () => {
-  function getTextDisplays(result: unknown): string[] {
-    const r = result as {
-      components: [{ components: { type: number; content: string }[] }];
-    };
-    return r.components[0].components
-      .filter((c) => c.type === (ComponentType.TextDisplay as number))
-      .map((c) => c.content);
-  }
-
-  function getButtons(
-    result: unknown,
-  ): { type: number; label: string; disabled?: boolean; custom_id: string }[] {
-    const r = result as {
-      components: [
-        { components: { type: number; components?: { type: number }[] }[] },
-      ];
-    };
-    return r.components[0].components
-      .filter((c) => c.type === (ComponentType.ActionRow as number))
-      .flatMap((c) => c.components ?? [])
-      .filter((c) => c.type === (ComponentType.Button as number)) as {
-      type: number;
-      label: string;
-      disabled?: boolean;
-      custom_id: string;
-    }[];
-  }
-
   test("all CREATE_SENTINEL channels listed in 'Create' section", () => {
     const state = makePendingSetup({
       modLogChannel: CREATE_SENTINEL,
@@ -246,7 +233,7 @@ describe("buildSetupConfirmMessage", () => {
       ticketChannel: CREATE_SENTINEL,
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     const changesText = texts.find((t) => t.includes("Changes Euno will make"));
 
     expect(changesText).toBeDefined();
@@ -265,7 +252,7 @@ describe("buildSetupConfirmMessage", () => {
       ticketChannel: "existing-ch-4",
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     const changesText = texts.find((t) => t.includes("Changes Euno will make"));
 
     // No channels to create and no application channel, so no delta section
@@ -281,7 +268,7 @@ describe("buildSetupConfirmMessage", () => {
       applicationChannel: null,
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     const changesText = texts.find((t) => t.includes("Changes Euno will make"));
 
     expect(changesText).toBeUndefined();
@@ -297,7 +284,7 @@ describe("buildSetupConfirmMessage", () => {
       memberRoleId: undefined,
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     const changesText = texts.find((t) => t.includes("Changes Euno will make"));
 
     expect(changesText).toBeDefined();
@@ -317,7 +304,7 @@ describe("buildSetupConfirmMessage", () => {
       memberRoleId: "role-456",
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     const changesText = texts.find((t) => t.includes("Changes Euno will make"));
 
     expect(changesText).toBeDefined();
@@ -364,7 +351,7 @@ describe("buildSetupConfirmMessage", () => {
       restrictedRoleId: "role-restricted",
     });
     const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result);
+    const texts = getTextDisplays(result).map((t) => t.content);
     // The config list is the text display that contains "Moderator Role"
     const configText = texts.find((t) => t.includes("Moderator Role"));
 
@@ -375,5 +362,84 @@ describe("buildSetupConfirmMessage", () => {
     expect(configText).toContain("Create new #honeypot");
     expect(configText).toContain("<#ch-tickets>");
     expect(configText).toContain("<@&role-restricted>");
+  });
+});
+
+// --- buildSetupScreen1Message ---
+
+describe("buildSetupScreen1Message", () => {
+  test("renders the moderator-role and mod-log selects and a Next button", () => {
+    const result = buildSetupScreen1Message("guild-1", makePendingSetup());
+    const buttons = getButtons(result);
+    expect(buttons.some((b) => b.label === "Next →")).toBe(true);
+    expect(buttons.some((b) => b.custom_id === "setup-next|guild-1")).toBe(
+      true,
+    );
+  });
+
+  test("renders the four feature toggle buttons", () => {
+    const result = buildSetupScreen1Message("guild-1", makePendingSetup());
+    const labels = getButtons(result).map((b) => b.label);
+    for (const f of [
+      "Deletion Log",
+      "Honeypot",
+      "Tickets",
+      "Member Applications",
+    ]) {
+      expect(labels.some((l) => l?.includes(f))).toBe(true);
+    }
+  });
+
+  test("surfaces an error string when provided", () => {
+    const result = buildSetupScreen1Message(
+      "guild-1",
+      makePendingSetup(),
+      "Pick a mod role",
+    );
+    const texts = getTextDisplays(result)
+      .map((t) => t.content)
+      .join("\n");
+    expect(texts).toContain("Pick a mod role");
+  });
+
+  test("does NOT render per-feature channel selects (those live on screen 2)", () => {
+    const result = buildSetupScreen1Message("guild-1", makePendingSetup());
+    const ids = getButtons(result)
+      .map((b) => b.custom_id)
+      .join(" ");
+    expect(ids).not.toContain("setup-sel|guild-1|deletionLog");
+  });
+});
+
+// --- buildSetupScreen2Message ---
+
+describe("buildSetupScreen2Message", () => {
+  test("renders Back and Review buttons", () => {
+    const result = buildSetupScreen2Message("guild-1", makePendingSetup());
+    const ids = getButtons(result).map((b) => b.custom_id);
+    expect(ids).toContain("setup-back-core|guild-1");
+    expect(ids).toContain("setup-continue|guild-1");
+  });
+
+  test("renders application channel + member role selects only when applications enabled", () => {
+    const off = buildSetupScreen2Message(
+      "guild-1",
+      makePendingSetup({ applicationChannel: null }),
+    );
+    const on = buildSetupScreen2Message(
+      "guild-1",
+      makePendingSetup({ applicationChannel: CREATE_SENTINEL }),
+    );
+    const idsOff = JSON.stringify(off);
+    const idsOn = JSON.stringify(on);
+    expect(idsOff).not.toContain("setup-sel|guild-1|applications");
+    expect(idsOn).toContain("setup-sel|guild-1|applications");
+  });
+
+  test("always renders the restricted-role select", () => {
+    const result = buildSetupScreen2Message("guild-1", makePendingSetup());
+    expect(JSON.stringify(result)).toContain(
+      "setup-sel|guild-1|restrictedRole",
+    );
   });
 });

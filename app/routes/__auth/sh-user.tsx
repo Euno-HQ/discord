@@ -19,8 +19,9 @@ import {
   YAxis,
 } from "recharts";
 
+import { runEffect } from "#~/AppRuntime";
 import { getUserCohortAnalysis } from "#~/helpers/cohortAnalysis.js";
-import { getUserMessageAnalytics } from "#~/models/activity.server";
+import { getUserMessageAnalyticsEffect } from "#~/models/activity.server";
 
 import type { Route } from "./+types/sh-user";
 
@@ -47,7 +48,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const [analysis, data] = await Promise.all([
     getUserCohortAnalysis(guildId, userId, start, end, minThreshold),
-    getUserMessageAnalytics(guildId, userId, start, end),
+    runEffect(getUserMessageAnalyticsEffect(guildId, userId, start, end)),
   ]);
 
   return {

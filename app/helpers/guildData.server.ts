@@ -4,9 +4,11 @@ import {
   type APIChannel,
   type APIRole,
 } from "discord-api-types/v10";
+import { Effect } from "effect";
 
 import { ssrDiscordSdk } from "#~/discord/api";
-import { log, trackPerformance } from "#~/helpers/observability";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
+import { logEffect } from "#~/effects/observability";
 
 export interface GuildRole {
   id: string;
@@ -44,18 +46,26 @@ function toGuildChannel(ch: APIChannel): GuildChannel {
   };
 }
 
-export async function fetchGuildData(guildId: string): Promise<GuildData> {
-  try {
-    const [apiRoles, apiChannels] = await trackPerformance(
-      "discord.fetchGuildData",
-      () =>
-        Promise.all([
+const EMPTY_RESULT: GuildData = { roles: [], channels: [] };
+
+export function fetchGuildData(
+  guildId: string,
+): Effect.Effect<GuildData, never, never> {
+  return Effect.gen(function* () {
+    const [apiRoles, apiChannels] = yield* Effect.all([
+      tryDiscord(
+        "fetchGuildRoles",
+        () =>
           ssrDiscordSdk.get(Routes.guildRoles(guildId)) as Promise<APIRole[]>,
+      ),
+      tryDiscord(
+        "fetchGuildChannels",
+        () =>
           ssrDiscordSdk.get(Routes.guildChannels(guildId)) as Promise<
             APIChannel[]
           >,
-        ]),
-    );
+      ),
+    ]);
 
     const roles = apiRoles
       .filter((role) => role.name !== "@everyone")
@@ -83,7 +93,7 @@ export async function fetchGuildData(guildId: string): Promise<GuildData> {
           ("position" in b ? (b.position ?? 0) : 0),
       );
 
-    log("info", "guildData", "Guild data fetched successfully", {
+    yield* logEffect("info", "guildData", "Guild data fetched successfully", {
       guildId,
       rolesCount: roles.length,
       channelsCount: textChannels.length,
@@ -115,11 +125,13 @@ export async function fetchGuildData(guildId: string): Promise<GuildData> {
     ];
 
     return { roles, channels };
-  } catch (error) {
-    log("error", "guildData", "Failed to fetch guild data", {
-      guildId,
-      error,
-    });
-    return { roles: [], channels: [] };
-  }
+  }).pipe(
+    Effect.withSpan("guildData.fetch", { attributes: { guildId } }),
+    Effect.catchAll((e) =>
+      logEffect("error", "guildData", "Failed to fetch guild data", {
+        guildId,
+        error: e,
+      }).pipe(Effect.as(EMPTY_RESULT)),
+    ),
+  );
 }

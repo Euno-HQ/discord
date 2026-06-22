@@ -164,16 +164,6 @@ export function DiscordLayout({
               >
                 ⚙️ Settings
               </Link>
-              <Link
-                to={`/app/${guildId}/onboard`}
-                className={`group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                  isActive(`/app/${guildId}/onboard`)
-                    ? "bg-surface-overlay text-stone-100"
-                    : "hover:bg-surface-overlay text-stone-400 hover:text-stone-100"
-                }`}
-              >
-                🆕 Onboarding flow
-              </Link>
             </>
           ) : null}
         </nav>

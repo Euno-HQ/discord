@@ -27,7 +27,7 @@ if (isValidDsn) {
 
   console.log("Sentry initialized:", sentryOptions);
   Sentry.init(sentryOptions);
-} else {
+} else if (process.env.NODE_ENV !== "test") {
   console.log("Sentry disabled: No valid DSN configured");
 }
 

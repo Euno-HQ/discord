@@ -25,7 +25,7 @@ import prettyBytes from "pretty-bytes";
 
 import type { RuntimeContext } from "#~/AppRuntime";
 import { resolveMessagePartial } from "#~/effects/discordSdk";
-import { NotFoundError, type DiscordApiError } from "#~/effects/errors.ts";
+import { NotFoundError, type DiscordError } from "#~/effects/errors.ts";
 import {
   getChars,
   getWords,
@@ -218,7 +218,7 @@ export interface MessageStats {
  */
 export const getMessageStats = (
   msg: Message | PartialMessage,
-): Effect.Effect<MessageStats, NotFoundError | DiscordApiError, never> =>
+): Effect.Effect<MessageStats, NotFoundError | DiscordError, never> =>
   Effect.gen(function* () {
     const message = yield* resolveMessagePartial(msg);
 

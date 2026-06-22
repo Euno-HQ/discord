@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import type { RuntimeContext } from "#~/AppRuntime";
 import { DatabaseService } from "#~/Database";
 import type { MessageReactionAddEvent } from "#~/discord/events";
-import { DiscordApiError } from "#~/effects/errors";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { logEffect } from "#~/effects/observability";
 import { featureStats } from "#~/helpers/metrics";
 
@@ -13,11 +13,7 @@ export const handleReactionAdd = (
   Effect.gen(function* () {
     // Fetch partial reaction if needed
     const reaction = e.reaction.partial
-      ? yield* Effect.tryPromise({
-          try: () => e.reaction.fetch(),
-          catch: (error) =>
-            new DiscordApiError({ operation: "fetchReaction", cause: error }),
-        })
+      ? yield* tryDiscord("fetchReaction", () => e.reaction.fetch())
       : e.reaction;
 
     // Skip bot reactions
@@ -73,14 +69,9 @@ export const handleReactionAdd = (
     });
 
     // Fetch the target channel
-    const targetChannel = yield* Effect.tryPromise({
-      try: () => message.guild!.channels.fetch(config.channel_id),
-      catch: (error) =>
-        new DiscordApiError({
-          operation: "fetchTargetChannel",
-          cause: error,
-        }),
-    });
+    const targetChannel = yield* tryDiscord("fetchTargetChannel", () =>
+      message.guild!.channels.fetch(config.channel_id),
+    );
 
     if (!targetChannel?.isTextBased()) {
       yield* logEffect(
@@ -97,29 +88,18 @@ export const handleReactionAdd = (
 
     // Fetch the full message if partial
     const fullMessage = message.partial
-      ? yield* Effect.tryPromise({
-          try: () => message.fetch(),
-          catch: (error) =>
-            new DiscordApiError({
-              operation: "fetchFullMessage",
-              cause: error,
-            }),
-        })
+      ? yield* tryDiscord("fetchFullMessage", () => message.fetch())
       : message;
 
     // Forward the message using Discord's native forwarding
-    yield* Effect.tryPromise({
-      try: () => fullMessage.forward(targetChannel),
-      catch: (error) =>
-        new DiscordApiError({ operation: "forwardMessage", cause: error }),
-    });
+    yield* tryDiscord("forwardMessage", () =>
+      fullMessage.forward(targetChannel),
+    );
 
     // Get all users who reacted with this emoji
-    const reactors = yield* Effect.tryPromise({
-      try: () => reaction.users.fetch(),
-      catch: (error) =>
-        new DiscordApiError({ operation: "fetchReactors", cause: error }),
-    });
+    const reactors = yield* tryDiscord("fetchReactors", () =>
+      reaction.users.fetch(),
+    );
 
     const reactorMentions = reactors
       .filter((u) => !u.bot)
@@ -127,18 +107,12 @@ export const handleReactionAdd = (
       .join(", ");
 
     // Send a message indicating who triggered the forward
-    yield* Effect.tryPromise({
-      try: () =>
-        targetChannel.send({
-          content: `Forwarded by ${reactorMentions} reacting with ${emoji}`,
-          allowedMentions: { users: [] },
-        }),
-      catch: (error) =>
-        new DiscordApiError({
-          operation: "sendForwardSummary",
-          cause: error,
-        }),
-    });
+    yield* tryDiscord("sendForwardSummary", () =>
+      targetChannel.send({
+        content: `Forwarded by ${reactorMentions} reacting with ${emoji}`,
+        allowedMentions: { users: [] },
+      }),
+    );
 
     featureStats.reactjiTriggered(guildId, e.user.id, emoji, message.id);
 
@@ -157,7 +131,7 @@ export const handleReactionAdd = (
     Effect.catchAll((err) =>
       logEffect("warn", "ReactjiChanneler", "Pipeline handler failed", {
         messageId: e.reaction.message.id,
-        error: String(err),
+        error: err,
       }),
     ),
     Effect.withSpan("ReactjiChanneler.reactionAdd"),

@@ -9,6 +9,7 @@ import { Effect } from "effect";
 import { logUserMessage } from "#~/commands/report/userLog.ts";
 import { client } from "#~/discord/client.server.ts";
 import { deleteMessage, softbanMember } from "#~/effects/discordSdk.ts";
+import { isDiscordError } from "#~/effects/errorHandling.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import { featureStats } from "#~/helpers/metrics.ts";
 import { applyRestriction, timeout } from "#~/models/discord.server.ts";
@@ -73,19 +74,19 @@ export const executeResponse = (
     // Medium and high: delete the message first
     yield* deleteMessage(message).pipe(
       Effect.tap(() => markMessageAsDeleted(message.id, guildId)),
-      Effect.catchTag("DiscordApiError", (e) =>
+      Effect.catchIf(isDiscordError, (e) =>
         logEffect("warn", "SpamResponse", "Failed to delete spam message", {
-          error: String(e.cause),
+          error: e,
         }),
       ),
     );
 
     if (verdict.tier === "medium") {
       // Apply restricted role
-      yield* Effect.tryPromise(() => applyRestriction(member)).pipe(
+      yield* applyRestriction(member).pipe(
         Effect.catchAll((error) =>
           logEffect("warn", "SpamResponse", "Failed to apply restriction", {
-            error: String(error),
+            error,
           }),
         ),
       );
@@ -94,12 +95,10 @@ export const executeResponse = (
 
     if (verdict.tier === "high") {
       // Timeout user in the originating guild
-      yield* Effect.tryPromise(() =>
-        timeout(member, "Automated spam detection"),
-      ).pipe(
+      yield* timeout(member, "Automated spam detection").pipe(
         Effect.catchAll((error) =>
           logEffect("warn", "SpamResponse", "Failed to timeout user", {
-            error: String(error),
+            error,
           }),
         ),
       );
@@ -119,9 +118,9 @@ export const executeResponse = (
           "Autokicked for repeated spam (1h message cleanup)",
           3600,
         ).pipe(
-          Effect.catchTag("DiscordApiError", (error) =>
+          Effect.catchIf(isDiscordError, (error) =>
             logEffect("warn", "SpamResponse", "Failed to softban spammer", {
-              error: String(error.cause),
+              error,
               operation: error.operation,
             }),
           ),
@@ -135,7 +134,7 @@ export const executeResponse = (
               "warn",
               "SpamResponse",
               "Failed to delete reported messages after autokick",
-              { error: String(error), userId, guildId },
+              { error, userId, guildId },
             ),
           ),
         );
@@ -201,7 +200,7 @@ const checkCrossGuildSpam = (userId: string) =>
               "warn",
               "SpamResponse",
               "Failed to apply cross-guild timeout",
-              { error: String(error), guildId: guild.id, userId },
+              { error, guildId: guild.id, userId },
             ),
           ),
         ),
@@ -228,7 +227,7 @@ const checkCrossGuildSpam = (userId: string) =>
             "warn",
             "SpamResponse",
             "Failed to send cross-guild DM to user",
-            { error: String(error), userId },
+            { error, userId },
           ),
         ),
       );
@@ -253,7 +252,7 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
             "SpamResponse",
             "Failed to log spam report",
             {
-              error: String(error),
+              error,
             },
           );
           return null;
@@ -354,9 +353,9 @@ const executeSoftban = (
 ) =>
   Effect.gen(function* () {
     yield* softbanMember(member, "honeypot spam detected", 604800).pipe(
-      Effect.catchTag("DiscordApiError", (error) =>
+      Effect.catchIf(isDiscordError, (error) =>
         logEffect("error", "SpamResponse", "Failed to softban user", {
-          error: String(error.cause),
+          error,
           operation: error.operation,
           userId: member.id,
           guildId: message.guild!.id,

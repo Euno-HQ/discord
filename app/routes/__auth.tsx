@@ -1,5 +1,11 @@
-import { Outlet, useLoaderData, useLocation } from "react-router";
+import {
+  Outlet,
+  useLoaderData,
+  useLocation,
+  useSearchParams,
+} from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
 import { Login } from "#~/basics/login";
 import { DiscordLayout } from "#~/components/DiscordLayout";
 import { ssrDiscordSdk, userDiscordSdkFromRequest } from "#~/discord/api.js";
@@ -25,7 +31,9 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   try {
     const userRest = await userDiscordSdkFromRequest(request);
-    const guilds = await getCachedGuilds(user.id, userRest, ssrDiscordSdk);
+    const guilds = await runEffect(
+      getCachedGuilds(user.id, userRest, ssrDiscordSdk),
+    );
     const manageableGuilds = guilds.filter((g) => g.hasBot);
 
     log("info", "auth", "Guilds fetched for authenticated user", {
@@ -51,13 +59,19 @@ export async function loader({ request }: Route.LoaderArgs) {
 export default function Auth() {
   const user = useOptionalUser();
   const { pathname, search, hash } = useLocation();
+  const [searchParams] = useSearchParams();
   const { guilds, manageableGuilds } = useLoaderData();
 
   if (!user) {
+    // When `requireUser` bounces here it sets `?redirectTo=<original path>`.
+    // Prefer that over the current location, which is `/login?redirectTo=…`
+    // and would otherwise strand the user on /login after OAuth (#373).
+    const redirectTo =
+      searchParams.get("redirectTo") ?? `${pathname}${search}${hash}`;
     return (
       <div className="flex min-h-full flex-col justify-center">
         <div className="mx-auto w-full max-w-md px-8">
-          <Login redirectTo={`${pathname}${search}${hash}`} />
+          <Login redirectTo={redirectTo} />
         </div>
       </div>
     );
