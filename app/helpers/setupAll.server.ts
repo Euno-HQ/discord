@@ -18,11 +18,13 @@ import {
   runEffect,
   runTakeFirst,
 } from "#~/AppRuntime";
-import { DEFAULT_MESSAGE_TEXT } from "#~/commands/setupHoneypot";
-import { DEFAULT_BUTTON_TEXT } from "#~/commands/setupTickets";
 import { ssrDiscordSdk } from "#~/discord/api";
 import { applicationId } from "#~/helpers/env.server";
 import { log } from "#~/helpers/observability";
+import {
+  DEFAULT_BUTTON_TEXT,
+  DEFAULT_MESSAGE_TEXT,
+} from "#~/helpers/setupDefaults";
 import { createJob } from "#~/jobs/jobRunner";
 import { registerGuild, setSettings, SETTINGS } from "#~/models/guilds.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";

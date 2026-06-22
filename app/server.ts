@@ -17,7 +17,6 @@ import { PurgeMessagesCommands } from "#~/commands/purgeMessages";
 import { Command as report } from "#~/commands/report";
 import { Command as setup } from "#~/commands/setup";
 import { SetupComponentCommands } from "#~/commands/setupHandlers";
-import { Command as setupHoneypot } from "#~/commands/setupHoneypot";
 import { Command as setupReactjiChannel } from "#~/commands/setupReactjiChannel";
 import { Command as setupTicket } from "#~/commands/setupTickets";
 import { Command as track } from "#~/commands/track";
@@ -113,7 +112,6 @@ const startup = Effect.gen(function* () {
     registerCommand(setupTicket),
     registerCommand(setupReactjiChannel),
     registerCommand(EscalationCommands),
-    registerCommand(setupHoneypot),
     registerCommand(SetupComponentCommands),
     registerCommand(checkRequirements),
     registerCommand(modreport),

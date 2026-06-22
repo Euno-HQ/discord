@@ -91,30 +91,22 @@ export function channelValue(
   return `<#${value}>`;
 }
 
+function channelDefaultValues(value: string | null) {
+  return value !== null && value !== CREATE_SENTINEL
+    ? [{ id: value, type: "channel" as const }]
+    : undefined;
+}
+
+function roleDefaultValues(roleId: string | undefined) {
+  return roleId ? [{ id: roleId, type: "role" as const }] : undefined;
+}
+
 const OPTIONAL_CHANNELS = [
   { field: "deletionLog", label: "Deletion Log" },
   { field: "honeypot", label: "Honeypot" },
   { field: "tickets", label: "Tickets" },
   { field: "applications", label: "Member Applications" },
 ] as const;
-
-export function buildFeatureToggleRow(guildId: string, state: PendingSetup) {
-  return {
-    type: ComponentType.ActionRow,
-    components: OPTIONAL_CHANNELS.map(({ field, label }) => {
-      const value = (state as unknown as Record<string, string | null>)[
-        FIELD_MAP[field]
-      ];
-      const isDisabled = value === null;
-      return {
-        type: ComponentType.Button,
-        custom_id: `setup-sel|${guildId}|${field}|${isDisabled ? "enable" : "disable"}`,
-        label: `${isDisabled ? "✗" : "✓"} ${label}`,
-        style: isDisabled ? ButtonStyle.Danger : ButtonStyle.Success,
-      };
-    }),
-  };
-}
 
 function v2Payload(payload: object) {
   return payload as unknown as InteractionUpdateOptions;
@@ -180,23 +172,40 @@ export async function initSetupForm(
 
   const state: PendingSetup = { ...defaults, createdAt: Date.now() };
   pendingSetups.set(setupKey(guildId, userId), state);
-  return buildSetupFormMessage(guildId, state);
+  return buildSetupScreen1Message(guildId, state);
 }
 
-function buildSetupFormMessage(
+export function renderScreen(
+  guildId: string,
+  state: PendingSetup,
+  screen: string,
+  errorText?: string,
+): InteractionUpdateOptions {
+  return screen === "2"
+    ? buildSetupScreen2Message(guildId, state, errorText)
+    : buildSetupScreen1Message(guildId, state, errorText);
+}
+
+export function buildSetupScreen1Message(
   guildId: string,
   state: PendingSetup,
   errorText?: string,
-) {
-  function channelDefaultValues(value: string | null) {
-    return value !== null && value !== CREATE_SENTINEL
-      ? [{ id: value, type: "channel" as const }]
-      : undefined;
-  }
-
-  function roleDefaultValues(roleId: string | undefined) {
-    return roleId ? [{ id: roleId, type: "role" as const }] : undefined;
-  }
+): InteractionUpdateOptions {
+  const toggleRow = {
+    type: ComponentType.ActionRow,
+    components: OPTIONAL_CHANNELS.map(({ field, label }) => {
+      const value = (state as unknown as Record<string, string | null>)[
+        FIELD_MAP[field]
+      ];
+      const isDisabled = value === null;
+      return {
+        type: ComponentType.Button,
+        custom_id: `setup-toggle|${guildId}|${field}|${isDisabled ? "enable" : "disable"}|1`,
+        label: `${isDisabled ? "✗" : "✓"} ${label}`,
+        style: isDisabled ? ButtonStyle.Danger : ButtonStyle.Success,
+      };
+    }),
+  };
 
   return v2Update({
     flags: MessageFlags.IsComponentsV2,
@@ -224,7 +233,7 @@ function buildSetupFormMessage(
             components: [
               {
                 type: ComponentType.RoleSelect,
-                custom_id: `setup-sel|${guildId}|modRole`,
+                custom_id: `setup-sel|${guildId}|modRole||1`,
                 placeholder: "Select a moderator role…",
                 ...(state.modRoleId
                   ? { default_values: roleDefaultValues(state.modRoleId) }
@@ -237,7 +246,7 @@ function buildSetupFormMessage(
             components: [
               {
                 type: ComponentType.ChannelSelect,
-                custom_id: `setup-sel|${guildId}|modLog`,
+                custom_id: `setup-sel|${guildId}|modLog||1`,
                 placeholder: "Create new #mod-log (default)",
                 channel_types: [ChannelType.GuildText],
                 ...(channelDefaultValues(state.modLogChannel)
@@ -251,94 +260,136 @@ function buildSetupFormMessage(
           { type: ComponentType.Separator },
           {
             type: ComponentType.TextDisplay,
-            content:
-              "**Deletion Log** — Captures deleted messages\n**Honeypot** — Trap channel; bots that post here are auto-banned\n**Ticket Channel** — Where members open private tickets\n**Restricted Role** *(optional)* — Assigned to muted/restricted members",
-          },
-          {
-            type: ComponentType.ActionRow,
-            components: [
-              {
-                type: ComponentType.ChannelSelect,
-                custom_id: `setup-sel|${guildId}|deletionLog`,
-                placeholder:
-                  state.deletionLogChannel === null
-                    ? "Disabled"
-                    : "Create new #deletion-log (default)",
-                disabled: state.deletionLogChannel === null,
-                channel_types: [ChannelType.GuildText],
-                ...(channelDefaultValues(state.deletionLogChannel)
-                  ? {
-                      default_values: channelDefaultValues(
-                        state.deletionLogChannel,
-                      ),
-                    }
-                  : {}),
-              },
-            ],
-          },
-          {
-            type: ComponentType.ActionRow,
-            components: [
-              {
-                type: ComponentType.ChannelSelect,
-                custom_id: `setup-sel|${guildId}|honeypot`,
-                placeholder:
-                  state.honeypotChannel === null
-                    ? "Disabled"
-                    : "Create new #honeypot (default)",
-                disabled: state.honeypotChannel === null,
-                channel_types: [ChannelType.GuildText],
-                ...(channelDefaultValues(state.honeypotChannel)
-                  ? {
-                      default_values: channelDefaultValues(
-                        state.honeypotChannel,
-                      ),
-                    }
-                  : {}),
-              },
-            ],
-          },
-          {
-            type: ComponentType.ActionRow,
-            components: [
-              {
-                type: ComponentType.ChannelSelect,
-                custom_id: `setup-sel|${guildId}|tickets`,
-                placeholder:
-                  state.ticketChannel === null
-                    ? "Disabled"
-                    : "Create new #contact-mods (default)",
-                disabled: state.ticketChannel === null,
-                channel_types: [ChannelType.GuildText],
-                ...(channelDefaultValues(state.ticketChannel)
-                  ? {
-                      default_values: channelDefaultValues(state.ticketChannel),
-                    }
-                  : {}),
-              },
-            ],
-          },
-          {
-            type: ComponentType.ActionRow,
-            components: [
-              {
-                type: ComponentType.RoleSelect,
-                custom_id: `setup-sel|${guildId}|restrictedRole`,
-                placeholder: "None — skip (default)",
-                ...(state.restrictedRoleId
-                  ? {
-                      default_values: roleDefaultValues(state.restrictedRoleId),
-                    }
-                  : {}),
-              },
-            ],
-          },
-          { type: ComponentType.Separator },
-          {
-            type: ComponentType.TextDisplay,
             content: "**Enabled features**",
           },
-          buildFeatureToggleRow(guildId, state),
+          toggleRow,
+          { type: ComponentType.Separator },
+          ...(errorText
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content: `⛔ ${errorText}`,
+                },
+              ]
+            : []),
+          {
+            type: ComponentType.ActionRow,
+            components: [
+              {
+                type: ComponentType.Button,
+                custom_id: `setup-next|${guildId}`,
+                label: "Next →",
+                style: ButtonStyle.Primary,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+}
+
+export function buildSetupScreen2Message(
+  guildId: string,
+  state: PendingSetup,
+  errorText?: string,
+): InteractionUpdateOptions {
+  return v2Update({
+    flags: MessageFlags.IsComponentsV2,
+    components: [
+      {
+        type: ComponentType.Container,
+        components: [
+          {
+            type: ComponentType.TextDisplay,
+            content: "## Configure Euno — Feature Details",
+          },
+          {
+            type: ComponentType.TextDisplay,
+            content:
+              "Configure channels and roles for the features you enabled. Channels left on 'Create new' will be auto-created.",
+          },
+          { type: ComponentType.Separator, spacing: 2 },
+          ...(state.deletionLogChannel !== null
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content: "**Deletion Log** — Captures deleted messages",
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.ChannelSelect,
+                      custom_id: `setup-sel|${guildId}|deletionLog||2`,
+                      placeholder: "Create new #deletion-log (default)",
+                      channel_types: [ChannelType.GuildText],
+                      ...(channelDefaultValues(state.deletionLogChannel)
+                        ? {
+                            default_values: channelDefaultValues(
+                              state.deletionLogChannel,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
+                },
+              ]
+            : []),
+          ...(state.honeypotChannel !== null
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content:
+                    "**Honeypot** — Trap channel; bots that post here are auto-banned",
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.ChannelSelect,
+                      custom_id: `setup-sel|${guildId}|honeypot||2`,
+                      placeholder: "Create new #honeypot (default)",
+                      channel_types: [ChannelType.GuildText],
+                      ...(channelDefaultValues(state.honeypotChannel)
+                        ? {
+                            default_values: channelDefaultValues(
+                              state.honeypotChannel,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
+                },
+              ]
+            : []),
+          ...(state.ticketChannel !== null
+            ? [
+                {
+                  type: ComponentType.TextDisplay,
+                  content:
+                    "**Ticket Channel** — Where members open private tickets",
+                },
+                {
+                  type: ComponentType.ActionRow,
+                  components: [
+                    {
+                      type: ComponentType.ChannelSelect,
+                      custom_id: `setup-sel|${guildId}|tickets||2`,
+                      placeholder: "Create new #contact-mods (default)",
+                      channel_types: [ChannelType.GuildText],
+                      ...(channelDefaultValues(state.ticketChannel)
+                        ? {
+                            default_values: channelDefaultValues(
+                              state.ticketChannel,
+                            ),
+                          }
+                        : {}),
+                    },
+                  ],
+                },
+              ]
+            : []),
           ...(state.applicationChannel !== null
             ? [
                 {
@@ -351,7 +402,7 @@ function buildSetupFormMessage(
                   components: [
                     {
                       type: ComponentType.ChannelSelect,
-                      custom_id: `setup-sel|${guildId}|applications`,
+                      custom_id: `setup-sel|${guildId}|applications||2`,
                       placeholder: "Create new #apply-here (default)",
                       channel_types: [ChannelType.GuildText],
                       ...(channelDefaultValues(state.applicationChannel)
@@ -369,7 +420,7 @@ function buildSetupFormMessage(
                   components: [
                     {
                       type: ComponentType.RoleSelect,
-                      custom_id: `setup-sel|${guildId}|memberRole`,
+                      custom_id: `setup-sel|${guildId}|memberRole||2`,
                       placeholder: "Create new @Member role (default)",
                       ...(state.memberRoleId
                         ? {
@@ -383,6 +434,26 @@ function buildSetupFormMessage(
                 },
               ]
             : []),
+          {
+            type: ComponentType.TextDisplay,
+            content:
+              "**Restricted Role** *(optional)* — Assigned to muted/restricted members",
+          },
+          {
+            type: ComponentType.ActionRow,
+            components: [
+              {
+                type: ComponentType.RoleSelect,
+                custom_id: `setup-sel|${guildId}|restrictedRole||2`,
+                placeholder: "None — skip (default)",
+                ...(state.restrictedRoleId
+                  ? {
+                      default_values: roleDefaultValues(state.restrictedRoleId),
+                    }
+                  : {}),
+              },
+            ],
+          },
           { type: ComponentType.Separator },
           ...(errorText
             ? [
@@ -397,8 +468,14 @@ function buildSetupFormMessage(
             components: [
               {
                 type: ComponentType.Button,
+                custom_id: `setup-back-core|${guildId}`,
+                label: "← Back",
+                style: ButtonStyle.Secondary,
+              },
+              {
+                type: ComponentType.Button,
                 custom_id: `setup-continue|${guildId}`,
-                label: "Continue →",
+                label: "Review →",
                 style: ButtonStyle.Primary,
               },
             ],
@@ -586,7 +663,7 @@ const button = (name: string) => ({
 });
 
 export const SetupComponentCommands: MessageComponentCommand[] = [
-  // 1. setup-sel — update one state field, deferUpdate to preserve UI
+  // 1. setup-sel — update one state field (select menus only), re-render the screen
   {
     command: button("setup-sel"),
     handler: (interaction) =>
@@ -594,6 +671,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         const parts = interaction.customId.split("|");
         const guildId = parts[1];
         const field = parts[2] as FieldKey;
+        const screen = parts[4] ?? "1";
 
         if (!guildId || !field || !(field in FIELD_MAP)) {
           // @effect-diagnostics-next-line globalErrorInEffectFailure:off
@@ -604,19 +682,6 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         const state = pendingSetups.get(key);
         if (!state) {
           yield* interactionUpdate(interaction, EXPIRED_MESSAGE);
-          return;
-        }
-
-        const action = parts[3]; // "disable" | "enable" | undefined
-
-        if (action === "disable" || action === "enable") {
-          const stateKey = FIELD_MAP[field];
-          (state as unknown as Record<string, string | null>)[stateKey] =
-            action === "disable" ? null : CREATE_SENTINEL;
-          yield* interactionUpdate(
-            interaction,
-            buildSetupFormMessage(guildId, state),
-          );
           return;
         }
 
@@ -635,7 +700,10 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           (state as unknown as Record<string, string>)[stateKey] = value;
         }
 
-        yield* interactionDeferUpdate(interaction);
+        yield* interactionUpdate(
+          interaction,
+          renderScreen(guildId, state, screen),
+        );
       }).pipe(
         Effect.catchAll((error) =>
           Effect.gen(function* () {
@@ -648,9 +716,55 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       ),
   },
 
-  // 3. setup-continue — validate modRoleId, show confirmation
+  // 2. setup-toggle — toggle optional feature on/off, re-render screen 1
   {
-    command: button("setup-continue"),
+    command: button("setup-toggle"),
+    handler: (interaction) =>
+      Effect.gen(function* () {
+        const parts = interaction.customId.split("|");
+        const guildId = parts[1];
+        const field = parts[2] as FieldKey;
+        const action = parts[3]; // "enable" | "disable"
+        const screen = parts[4] ?? "1";
+
+        if (!guildId || !field || !(field in FIELD_MAP)) {
+          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
+          return yield* Effect.fail(new Error("Invalid customId"));
+        }
+
+        const key = setupKey(guildId, interaction.user.id);
+        const state = pendingSetups.get(key);
+        if (!state) {
+          yield* interactionUpdate(interaction, EXPIRED_MESSAGE);
+          return;
+        }
+
+        const stateKey = FIELD_MAP[field];
+        (state as unknown as Record<string, string | null>)[stateKey] =
+          action === "disable" ? null : CREATE_SENTINEL;
+
+        yield* interactionUpdate(
+          interaction,
+          renderScreen(guildId, state, screen),
+        );
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            yield* logEffect(
+              "error",
+              "Commands",
+              "setup-toggle handler failed",
+              { error },
+            );
+          }),
+        ),
+        Effect.withSpan("setupToggleHandler"),
+      ),
+  },
+
+  // 3. setup-next — validate required core fields, advance to screen 2
+  {
+    command: button("setup-next"),
     handler: (interaction) =>
       Effect.gen(function* () {
         const guildId = interaction.customId.split("|")[1];
@@ -669,7 +783,91 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         if (!state.modRoleId) {
           yield* interactionUpdate(
             interaction,
-            buildSetupFormMessage(
+            buildSetupScreen1Message(
+              guildId,
+              state,
+              "Please select a Moderator Role before continuing.",
+            ),
+          );
+          return;
+        }
+
+        yield* interactionUpdate(
+          interaction,
+          buildSetupScreen2Message(guildId, state),
+        );
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            yield* logEffect("error", "Commands", "setup-next handler failed", {
+              error,
+            });
+          }),
+        ),
+        Effect.withSpan("setupNextHandler"),
+      ),
+  },
+
+  // 4. setup-back-core — go back to screen 1 from screen 2
+  {
+    command: button("setup-back-core"),
+    handler: (interaction) =>
+      Effect.gen(function* () {
+        const guildId = interaction.customId.split("|")[1];
+        if (!guildId) {
+          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
+          return yield* Effect.fail(new Error("Missing guildId in customId"));
+        }
+
+        const key = setupKey(guildId, interaction.user.id);
+        const state = pendingSetups.get(key);
+        if (!state) {
+          yield* interactionUpdate(interaction, EXPIRED_MESSAGE);
+          return;
+        }
+
+        yield* interactionUpdate(
+          interaction,
+          buildSetupScreen1Message(guildId, state),
+        );
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            yield* logEffect(
+              "error",
+              "Commands",
+              "setup-back-core handler failed",
+              { error },
+            );
+          }),
+        ),
+        Effect.withSpan("setupBackCoreHandler"),
+      ),
+  },
+
+  // 5. setup-continue — permission check + advance to confirm (from screen 2)
+  {
+    command: button("setup-continue"),
+    handler: (interaction) =>
+      Effect.gen(function* () {
+        const guildId = interaction.customId.split("|")[1];
+        if (!guildId) {
+          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
+          return yield* Effect.fail(new Error("Missing guildId in customId"));
+        }
+
+        const key = setupKey(guildId, interaction.user.id);
+        const state = pendingSetups.get(key);
+        if (!state) {
+          yield* interactionUpdate(interaction, EXPIRED_MESSAGE);
+          return;
+        }
+
+        // Defensive re-check: modRoleId must be set (normally validated on setup-next)
+        if (!state.modRoleId) {
+          yield* interactionUpdate(
+            interaction,
+            buildSetupScreen1Message(
               guildId,
               state,
               "Please select a Moderator Role before continuing.",
@@ -725,7 +923,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       ),
   },
 
-  // 4. setup-back — rebuild form with current state (pre-populated selects)
+  // 6. setup-back — go back to screen 2 from confirm
   {
     command: button("setup-back"),
     handler: (interaction) =>
@@ -745,7 +943,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
 
         yield* interactionUpdate(
           interaction,
-          buildSetupFormMessage(guildId, state),
+          buildSetupScreen2Message(guildId, state),
         );
       }).pipe(
         Effect.catchAll((error) =>
@@ -759,7 +957,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       ),
   },
 
-  // 5. setup-exec — defer, execute setupAll, show results
+  // 7. setup-exec — defer, execute setupAll, show results
   {
     command: button("setup-exec"),
     handler: (interaction) =>
