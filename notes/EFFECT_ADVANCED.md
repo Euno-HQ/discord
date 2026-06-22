@@ -1,10 +1,29 @@
 # Effect Advanced Patterns
 
-Some of these patterns are now used in the codebase (Streams, Queues) while
-others remain documented for future reference. For patterns we actually use, see
-[EFFECT.md](./EFFECT.md) and [EFFECT_REFERENCE.md](./EFFECT_REFERENCE.md).
+Deeper reference for constructs beyond the day-to-day. Each section is tagged:
+
+- **🟢 Core** — load-bearing in the codebase; the real usage is documented in
+  [EFFECT.md](./EFFECT.md) / [EFFECT_REFERENCE.md](./EFFECT_REFERENCE.md) and this
+  section is just extra background.
+- **🟡 Used** — appears in a few places.
+- **⚪ Not used yet** — documented for when we need it; no current call sites.
+
+| Pattern | Status | Where it lives |
+| --- | --- | --- |
+| Stream processing | 🟢 Core | `app/discord/eventBus.ts`, `app/discord/pipelines/*` |
+| Queues | 🟢 Core | the broadcast queue in `eventBus.ts` |
+| Schedule combinators | 🟡 Used | `withRetry` (`errorHandling.ts`), 6h integrity repeat (`Database.ts`) |
+| Ref | 🟡 Used | single-flight dedup (`models/userThreads.ts`), in-memory caches |
+| Fiber supervision | 🟡 Used | `forkDaemon` pipelines + `SupervisorService` (`supervisor.ts`) |
+| Sink | ⚪ Not used yet | — |
+| Config module | ⚪ Not used yet | env read via `app/helpers/env.server.ts` instead |
+| `acquireUseRelease` | ⚪ Not used yet | `Layer.scoped` + `acquireRelease` used at the Layer level instead |
 
 ## Stream Processing
+
+🟢 **Core.** This is the bot's event-processing backbone. The walkthrough below
+is background; for the actual pipeline pattern you should copy, see EFFECT.md →
+"Event Pipelines (Streams)".
 
 For large or potentially infinite data pipelines:
 
@@ -50,6 +69,10 @@ to process events. See the design spec at
 
 ## Sink Patterns
 
+⚪ **Not used yet.** Our pipelines all terminate in `Stream.runDrain` (process
+forever, discard output). Custom `Sink` accumulation would only matter if we
+needed to collect/fold a finite stream — documented here for that day.
+
 Custom accumulation logic for Streams:
 
 ```typescript
@@ -68,7 +91,10 @@ const customSink = Sink.fold(
 
 ## Schedule Combinators
 
-For retry and repeat logic beyond simple patterns:
+🟡 **Used.** Our retry policy `withRetry` (`app/effects/errorHandling.ts`) is
+`Schedule.exponential("200 millis", 2) |> jittered |> compose(recurs(3))`, and
+`Database.ts` repeats the integrity check on `Schedule.fixed("6 hours")`. More
+combinators, for reference:
 
 | Pattern             | Schedule                             | Use Case                    |
 | ------------------- | ------------------------------------ | --------------------------- |
@@ -92,6 +118,10 @@ effect.pipe(Effect.retry(policy));
 
 ## Config Module
 
+⚪ **Not used yet.** Environment access currently goes through
+`app/helpers/env.server.ts`, not Effect's `Config`. If we want validated,
+typed, redacted config wired into the layer graph, this is the path.
+
 Type-safe configuration from environment variables:
 
 ```typescript
@@ -105,6 +135,12 @@ const config = yield* Config.struct({
 ```
 
 ## Resource Management
+
+⚪ **Not used at the effect level.** We manage resource lifetimes at the **Layer**
+boundary instead — `Layer.scoped` + `Effect.acquireRelease` (e.g.
+`PostHogService` flush-on-shutdown in `app/effects/posthog.ts`, the SQLite client
+in `app/Database.ts`). Reach for `acquireUseRelease` only for a resource scoped
+to a single operation rather than the app lifetime.
 
 Safe acquire/use/release pattern:
 
@@ -121,7 +157,7 @@ const managed = Effect.acquireUseRelease(
 
 ## Queue Patterns
 
-Bounded and unbounded queues for producer/consumer patterns:
+🟢 **Core.** Bounded and unbounded queues for producer/consumer patterns:
 
 ```typescript
 import { Queue } from "effect";
@@ -144,7 +180,10 @@ Effect without blocking.
 
 ## Ref / TRef State Management
 
-Mutable references for state within Effect:
+🟡 **Used.** Mutable references for state within Effect. In the codebase, `Ref`
++ `Deferred` implement cross-request single-flight (so two concurrent requests
+for the same thread don't both create it) in `app/models/userThreads.ts` and
+`app/models/deletionLogThreads.ts`.
 
 ```typescript
 import { Ref } from "effect";
@@ -154,22 +193,38 @@ yield* Ref.update(counter, (n) => n + 1);
 const value = yield* Ref.get(counter);
 ```
 
+> Note: the in-memory caches (`guildCache.server.ts`, the spam honeypot cache)
+> currently use a plain `TTLCache`/`Map` read inside the Effect, **not** `Ref`.
+> That's a known inconsistency, not the recommended target — prefer `Ref` (or
+> `SynchronizedRef` for compute-on-miss) for new mutable state so access goes
+> through the Effect runtime.
+
 ## Fiber Supervision
 
-For advanced concurrent execution control:
+🟡 **Used.** The six event pipelines are `Effect.forkDaemon`ed at startup and
+`Fiber.interrupt`ed + re-forked on HMR (`app/server.ts`); `SupervisorService`
+(`app/effects/supervisor.ts`) registers an Effect `Supervisor` so background job
+fibers are observable. Note the distinction: **`forkDaemon`** (not `fork`) for
+anything that must outlive the fiber that spawned it — see EFFECT.md →
+"Runtime & Boundaries".
 
 ```typescript
-// Fork a background task
+// Fork a background task tied to the current scope
 const fiber = yield* Effect.fork(backgroundTask);
 
-// Wait for it later
-const result = yield* Fiber.join(fiber);
+// Fork a daemon that outlives the spawning fiber (what the pipelines use)
+const daemon = yield* Effect.forkDaemon(longLivedTask);
 
-// Or interrupt it
-yield* Fiber.interrupt(fiber);
+// Wait for it later, or interrupt it
+const result = yield* Fiber.join(fiber);
+yield* Fiber.interrupt(daemon);
 ```
 
-## Migration: Callback-based Code
+## Adapting Callback-based APIs
+
+⚪ **Rare.** The Promise→Effect migration is essentially complete; most external
+APIs we touch are Promise-based (use `Effect.tryPromise` / `tryDiscord`). Reach
+for `Effect.async` only for a genuinely callback-style API (no Promise):
 
 ```typescript
 // Convert callback-based APIs to Effect
@@ -182,7 +237,13 @@ const readFile = (path: string): Effect.Effect<string, FileError, never> =>
   });
 ```
 
-## Migration: Class-based Services
+## Class-based Service → Effect Service
+
+🟡 This is exactly how `UserService` (`app/models/user.server.ts`) is built — it
+captures `db` once at layer construction, so its methods require nothing
+(`R = never`). It's the one model-layer `Context.Tag`; the rest of the models are
+free functions (see EFFECT.md → "Data Access"). Keep this shape in mind when a
+class needs to become a service:
 
 ```typescript
 // Before: class-based
