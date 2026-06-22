@@ -29,7 +29,9 @@ export async function action({ request }: Route.ActionArgs) {
     const body = await request.text();
 
     // Verify webhook signature and construct event
-    const event = StripeService.constructWebhookEvent(body, signature);
+    const event = await runEffect(
+      StripeService.constructWebhookEvent(body, signature),
+    );
 
     log("info", "Webhook", "Received Stripe webhook", {
       type: event.type,

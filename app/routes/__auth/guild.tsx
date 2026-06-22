@@ -33,7 +33,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   }
 
   const userRest = await userDiscordSdkFromRequest(request);
-  const guilds = await getCachedGuilds(user.id, userRest, ssrDiscordSdk);
+  const guilds = await runEffect(
+    getCachedGuilds(user.id, userRest, ssrDiscordSdk),
+  );
   const guild = guilds.find((g) => g.id === guildId);
 
   if (!guild?.hasBot) {

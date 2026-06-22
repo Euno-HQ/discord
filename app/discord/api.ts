@@ -1,6 +1,7 @@
 import { REST } from "discord.js";
 import { redirect } from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
 import { discordToken } from "#~/helpers/env.server";
 import { log } from "#~/helpers/observability";
 import {
@@ -11,7 +12,7 @@ import {
 export const ssrDiscordSdk = new REST({ version: "10" }).setToken(discordToken);
 
 export async function userDiscordSdkFromRequest(request: Request) {
-  const userToken = await retrieveDiscordToken(request);
+  const userToken = await runEffect(retrieveDiscordToken(request));
 
   if (userToken.expired()) {
     log(
@@ -23,7 +24,9 @@ export async function userDiscordSdkFromRequest(request: Request) {
       // Persist the refreshed token to the DB session and get the new cookie.
       // We redirect back to the same URL so the next request reads the new token
       // from the session instead of finding the expired one again.
-      const refreshCookie = await refreshAndPersistDiscordSession(request);
+      const refreshCookie = await runEffect(
+        refreshAndPersistDiscordSession(request),
+      );
       const url = new URL(request.url);
       throw redirect(url.pathname + url.search, {
         headers: { "Set-Cookie": refreshCookie },

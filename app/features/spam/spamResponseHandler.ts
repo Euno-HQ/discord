@@ -83,7 +83,7 @@ export const executeResponse = (
 
     if (verdict.tier === "medium") {
       // Apply restricted role
-      yield* Effect.tryPromise(() => applyRestriction(member)).pipe(
+      yield* applyRestriction(member).pipe(
         Effect.catchAll((error) =>
           logEffect("warn", "SpamResponse", "Failed to apply restriction", {
             error,
@@ -95,9 +95,7 @@ export const executeResponse = (
 
     if (verdict.tier === "high") {
       // Timeout user in the originating guild
-      yield* Effect.tryPromise(() =>
-        timeout(member, "Automated spam detection"),
-      ).pipe(
+      yield* timeout(member, "Automated spam detection").pipe(
         Effect.catchAll((error) =>
           logEffect("warn", "SpamResponse", "Failed to timeout user", {
             error,

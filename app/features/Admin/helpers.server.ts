@@ -1,9 +1,14 @@
+import { Effect } from "effect";
 import { data } from "react-router";
 
 import { getPosthog } from "#~/AppRuntime";
+import type { StripeError } from "#~/effects/errors.ts";
 import { requireUser } from "#~/models/session.server";
 import { StripeService } from "#~/models/stripe.server";
 
+// requireAdmin throws redirect()/logout() Responses (via requireUser) and a
+// `data(..., { status: 403 })` Response for non-admins. Thrown Responses are
+// React-Router control flow that runEffect cannot carry, so this stays async.
 export async function requireAdmin(request: Request) {
   const user = await requireUser(request);
   if (!user.email?.endsWith("@reactiflux.com")) {
@@ -12,23 +17,37 @@ export async function requireAdmin(request: Request) {
   return user;
 }
 
-export async function fetchFeatureFlags(guildId: string) {
+export const fetchFeatureFlags = (
+  guildId: string,
+): Effect.Effect<Record<string, string | boolean> | null, never, never> => {
   const posthog = getPosthog();
-  if (!posthog) return null;
-  return (await posthog.getAllFlags(guildId, {
-    groups: { guild: guildId },
-  })) as Record<string, string | boolean>;
-}
+  if (!posthog) return Effect.succeed(null);
+  return Effect.promise(
+    () =>
+      posthog.getAllFlags(guildId, {
+        groups: { guild: guildId },
+      }) as Promise<Record<string, string | boolean>>,
+  );
+};
 
-export async function fetchStripeDetails(stripeCustomerId: string) {
-  const [paymentMethods, invoices] = await Promise.all([
-    StripeService.listPaymentMethods(stripeCustomerId),
-    StripeService.listInvoices(stripeCustomerId),
-  ]);
-  return { paymentMethods, invoices };
-}
+export const fetchStripeDetails = (
+  stripeCustomerId: string,
+): Effect.Effect<
+  { paymentMethods: PaymentMethods; invoices: Invoices },
+  StripeError,
+  never
+> =>
+  Effect.gen(function* () {
+    const [paymentMethods, invoices] = yield* Effect.all([
+      StripeService.listPaymentMethods(stripeCustomerId),
+      StripeService.listInvoices(stripeCustomerId),
+    ]);
+    return { paymentMethods, invoices };
+  });
 
-export type PaymentMethods = Awaited<
+export type PaymentMethods = Effect.Effect.Success<
   ReturnType<typeof StripeService.listPaymentMethods>
 >;
-export type Invoices = Awaited<ReturnType<typeof StripeService.listInvoices>>;
+export type Invoices = Effect.Effect.Success<
+  ReturnType<typeof StripeService.listInvoices>
+>;

@@ -978,22 +978,20 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         pendingSetups.delete(key);
         yield* interactionDeferUpdate(interaction);
 
-        const result = yield* Effect.tryPromise(() =>
-          setupAll({
-            guildId,
-            moderatorRoleId: state.modRoleId!,
-            restrictedRoleId: state.restrictedRoleId,
-            modLogChannel: state.modLogChannel,
-            deletionLogChannel: state.deletionLogChannel ?? undefined,
-            honeypotChannel: state.honeypotChannel ?? undefined,
-            ticketChannel: state.ticketChannel ?? undefined,
-            applicationChannel: state.applicationChannel ?? undefined,
-            memberRoleId:
-              state.applicationChannel !== null && !state.memberRoleId
-                ? CREATE_SENTINEL
-                : state.memberRoleId,
-          }),
-        );
+        const result = yield* setupAll({
+          guildId,
+          moderatorRoleId: state.modRoleId!,
+          restrictedRoleId: state.restrictedRoleId,
+          modLogChannel: state.modLogChannel,
+          deletionLogChannel: state.deletionLogChannel ?? undefined,
+          honeypotChannel: state.honeypotChannel ?? undefined,
+          ticketChannel: state.ticketChannel ?? undefined,
+          applicationChannel: state.applicationChannel ?? undefined,
+          memberRoleId:
+            state.applicationChannel !== null && !state.memberRoleId
+              ? CREATE_SENTINEL
+              : state.memberRoleId,
+        });
 
         yield* logEffect(
           "info",

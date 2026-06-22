@@ -21,7 +21,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   // Verify Stripe session
-  const stripeSession = await StripeService.verifyCheckoutSession(sessionId);
+  const stripeSession = await runEffect(
+    StripeService.verifyCheckoutSession(sessionId),
+  );
 
   if (stripeSession?.payment_status !== "paid") {
     throw data({ message: "Payment verification failed" }, { status: 400 });

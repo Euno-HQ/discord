@@ -34,7 +34,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const userRest = await userDiscordSdkFromRequest(request);
-  const guilds = await getCachedGuilds(user.id, userRest, ssrDiscordSdk);
+  const guilds = await runEffect(
+    getCachedGuilds(user.id, userRest, ssrDiscordSdk),
+  );
 
   const manageable = guilds.filter((g) => g.hasBot);
   const invitable = guilds.filter((g) => !g.hasBot);

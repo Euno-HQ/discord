@@ -56,7 +56,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     });
   }
 
-  const featureFlags = await fetchFeatureFlags(guildId);
+  const featureFlags = await runEffect(fetchFeatureFlags(guildId));
 
   let paymentMethods: PaymentMethods = [];
   let invoices: Invoices = [];
@@ -64,8 +64,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let stripeSubscriptionUrl: string | null = null;
 
   if (subscription?.stripe_customer_id) {
-    ({ paymentMethods, invoices } = await fetchStripeDetails(
-      subscription.stripe_customer_id,
+    ({ paymentMethods, invoices } = await runEffect(
+      fetchStripeDetails(subscription.stripe_customer_id),
     ));
     stripeCustomerUrl = `https://dashboard.stripe.com/customers/${subscription.stripe_customer_id}`;
   }

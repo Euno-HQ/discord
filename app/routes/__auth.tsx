@@ -5,6 +5,7 @@ import {
   useSearchParams,
 } from "react-router";
 
+import { runEffect } from "#~/AppRuntime";
 import { Login } from "#~/basics/login";
 import { DiscordLayout } from "#~/components/DiscordLayout";
 import { ssrDiscordSdk, userDiscordSdkFromRequest } from "#~/discord/api.js";
@@ -30,7 +31,9 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   try {
     const userRest = await userDiscordSdkFromRequest(request);
-    const guilds = await getCachedGuilds(user.id, userRest, ssrDiscordSdk);
+    const guilds = await runEffect(
+      getCachedGuilds(user.id, userRest, ssrDiscordSdk),
+    );
     const manageableGuilds = guilds.filter((g) => g.hasBot);
 
     log("info", "auth", "Guilds fetched for authenticated user", {

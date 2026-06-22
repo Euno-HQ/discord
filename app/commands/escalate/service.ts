@@ -333,36 +333,45 @@ export const EscalationServiceLive = Layer.effect(
             return;
           }
 
-          yield* Effect.tryPromise({
-            try: async () => {
-              switch (resolution) {
-                case "track":
-                  // No action needed
-                  break;
-                case "timeout":
-                  await timeout(reportedMember, "voted resolution");
-                  break;
-                case "restrict":
-                  await applyRestriction(reportedMember);
-                  break;
-                case "kick":
-                  await kick(reportedMember, "voted resolution");
-                  break;
-                case "ban":
-                  await ban(reportedMember, "voted resolution");
-                  break;
-              }
-            },
-            catch: (caught) =>
-              new ResolutionExecutionError({
-                escalationId: escalation.id,
-                resolution,
-                cause:
-                  caught instanceof Error
-                    ? caught
-                    : new Error(formatError(caught)),
-              }),
+          const action = Effect.gen(function* () {
+            switch (resolution) {
+              case "track":
+                // No action needed
+                break;
+              case "timeout":
+                yield* timeout(reportedMember, "voted resolution");
+                break;
+              case "restrict":
+                yield* applyRestriction(reportedMember);
+                break;
+              case "kick":
+                yield* kick(reportedMember, "voted resolution");
+                break;
+              case "ban":
+                yield* ban(reportedMember, "voted resolution");
+                break;
+            }
           });
+
+          // Fold the typed DiscordError/SqlError/NotFoundError failures of the
+          // action Effects into the public ResolutionExecutionError contract.
+          // applyRestriction requires DatabaseService — satisfy it from the
+          // `db` captured in this Layer's closure so executeResolution keeps a
+          // `never` Requirements channel per IEscalationService.
+          yield* action.pipe(
+            Effect.provideService(DatabaseService, db),
+            Effect.mapError(
+              (caught) =>
+                new ResolutionExecutionError({
+                  escalationId: escalation.id,
+                  resolution,
+                  cause:
+                    caught instanceof Error
+                      ? caught
+                      : new Error(formatError(caught)),
+                }),
+            ),
+          );
 
           yield* logEffect("info", "EscalationService", "Resolution executed");
         }).pipe(

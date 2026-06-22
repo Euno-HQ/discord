@@ -4,7 +4,6 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { fetchMember } from "#~/effects/discordSdk";
 import { NotAuthorizedError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
@@ -99,9 +98,7 @@ export const kickUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute kick
-    yield* tryDiscord("kick", () =>
-      kick(reportedMember, "single moderator decision"),
-    );
+    yield* kick(reportedMember, "single moderator decision");
 
     yield* logEffect("info", "DirectActions", "Kicked user", {
       reportedUserId,
@@ -150,9 +147,7 @@ export const banUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute ban
-    yield* tryDiscord("ban", () =>
-      ban(reportedMember, "single moderator decision"),
-    );
+    yield* ban(reportedMember, "single moderator decision");
 
     yield* logEffect("info", "DirectActions", "Banned user", {
       reportedUserId,
@@ -205,8 +200,10 @@ export const banUserAndDeleteMessages = (
     );
 
     // Execute ban with message deletion
-    yield* tryDiscord("ban", () =>
-      ban(reportedMember, "single moderator decision", DELETE_MESSAGE_SECONDS),
+    yield* ban(
+      reportedMember,
+      "single moderator decision",
+      DELETE_MESSAGE_SECONDS,
     ).pipe(
       Effect.withSpan("discord.ban", {
         attributes: {
@@ -269,9 +266,7 @@ export const restrictUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute restriction
-    yield* tryDiscord("applyRestriction", () =>
-      applyRestriction(reportedMember),
-    );
+    yield* applyRestriction(reportedMember);
 
     yield* logEffect("info", "DirectActions", "Restricted user", {
       reportedUserId,
@@ -320,9 +315,7 @@ export const timeoutUser = (interaction: MessageComponentInteraction) =>
     );
 
     // Execute timeout
-    yield* tryDiscord("timeout", () =>
-      timeout(reportedMember, "single moderator decision"),
-    );
+    yield* timeout(reportedMember, "single moderator decision");
 
     yield* logEffect("info", "DirectActions", "Timed out user", {
       reportedUserId,

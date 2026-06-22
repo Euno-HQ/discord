@@ -73,8 +73,8 @@ export async function action({ request }: Route.ActionArgs) {
       };
     }
 
-    const cancelled = await StripeService.cancelSubscription(
-      subscription.stripe_subscription_id,
+    const cancelled = await runEffect(
+      StripeService.cancelSubscription(subscription.stripe_subscription_id),
     );
 
     if (!cancelled) {
@@ -119,12 +119,14 @@ export async function action({ request }: Route.ActionArgs) {
       const baseUrl = requestOrigin(request);
 
       // Create Stripe checkout session
-      const checkoutUrl = await StripeService.createCheckoutSession(
-        variant,
-        coupon,
-        guildId,
-        baseUrl,
-        user.email ?? undefined,
+      const checkoutUrl = await runEffect(
+        StripeService.createCheckoutSession(
+          variant,
+          coupon,
+          guildId,
+          baseUrl,
+          user.email ?? undefined,
+        ),
       );
 
       log("info", "Upgrade", "Redirecting to Stripe checkout", {
@@ -134,12 +136,23 @@ export async function action({ request }: Route.ActionArgs) {
 
       // Redirect to Stripe checkout
       return redirect(checkoutUrl);
-    } catch (error) {
+    } catch (caught) {
       log("error", "Upgrade", "Failed to create checkout session", {
         guildId,
         userId: user.id,
-        error,
+        error: caught,
       });
+
+      // StripeService now rejects with a typed StripeError whose `.cause` is the
+      // raw Stripe SDK error; unwrap it so config-error detection sees the same
+      // shape it did before the Effect migration.
+      const error =
+        typeof caught === "object" &&
+        caught !== null &&
+        "_tag" in caught &&
+        (caught as { _tag: unknown })._tag === "StripeError"
+          ? (caught as unknown as { cause: unknown }).cause
+          : caught;
 
       // Check for Stripe configuration errors (missing/empty lookup key)
       const isStripeConfigError =

@@ -72,9 +72,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       };
 
       const [featureFlags, stripeData] = await Promise.all([
-        fetchFeatureFlags(guildId),
+        runEffect(fetchFeatureFlags(guildId)),
         sub?.stripe_customer_id
-          ? fetchStripeDetails(sub.stripe_customer_id)
+          ? runEffect(fetchStripeDetails(sub.stripe_customer_id))
           : Promise.resolve({
               paymentMethods: [] as PaymentMethods,
               invoices: [] as Invoices,

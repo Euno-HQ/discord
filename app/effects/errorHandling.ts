@@ -90,6 +90,18 @@ export const toUserResponse = (
           "Discord is having trouble right now — please try again shortly.",
         ephemeral: true,
       };
+    case "OAuthFetchError":
+      return {
+        content:
+          "We couldn't verify your Discord login — please try signing in again.",
+        ephemeral: true,
+      };
+    case "StripeError":
+      return {
+        content:
+          "We hit a billing error — please try again shortly or contact support if it persists.",
+        ephemeral: true,
+      };
     // ClientError, ServerError, ConfigError, SqlError, DatabaseCorruptionError,
     // NotFoundError, AlreadyResolvedError, NoLeaderError, ResolutionExecutionError
     default:
