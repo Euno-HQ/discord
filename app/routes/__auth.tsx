@@ -13,7 +13,7 @@ import {
   getCachedGuilds,
   type CachedGuild,
 } from "#~/helpers/guildCache.server";
-import { log } from "#~/helpers/observability";
+import { logEffect } from "#~/effects/observability";
 import { getUser } from "#~/models/session.server";
 import { useOptionalUser } from "#~/utils";
 
@@ -36,11 +36,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     );
     const manageableGuilds = guilds.filter((g) => g.hasBot);
 
-    log("info", "auth", "Guilds fetched for authenticated user", {
-      userId: user.id,
-      totalGuilds: guilds.length,
-      manageableGuilds: manageableGuilds.length,
-    });
+    void runEffect(
+      logEffect("info", "auth", "Guilds fetched for authenticated user", {
+        userId: user.id,
+        totalGuilds: guilds.length,
+        manageableGuilds: manageableGuilds.length,
+      }),
+    );
 
     return { guilds, manageableGuilds };
   } catch (error) {
@@ -48,7 +50,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     // Router can handle them instead of silently swallowing them.
     if (error instanceof Response) throw error;
 
-    log("error", "auth", "Failed to fetch guilds", { userId: user.id, error });
+    void runEffect(
+      logEffect("error", "auth", "Failed to fetch guilds", {
+        userId: user.id,
+        error,
+      }),
+    );
     return {
       guilds: [] as CachedGuild[],
       manageableGuilds: [] as CachedGuild[],

@@ -23,7 +23,7 @@ import {
   type Invoices,
   type PaymentMethods,
 } from "#~/features/Admin/helpers.server.js";
-import { log } from "#~/helpers/observability";
+import { logEffect } from "#~/effects/observability";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
 import type { Route } from "./+types/admin";
@@ -89,10 +89,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   );
   const expandedDetails = Object.fromEntries(expandedEntries);
 
-  log("info", "admin", "Admin page accessed", {
-    guildCount: guilds.length,
-    expandedCount: expandedGuildIds.length,
-  });
+  void runEffect(
+    logEffect("info", "admin", "Admin page accessed", {
+      guildCount: guilds.length,
+      expandedCount: expandedGuildIds.length,
+    }),
+  );
 
   return { guilds, expandedGuildIds, expandedDetails };
 }

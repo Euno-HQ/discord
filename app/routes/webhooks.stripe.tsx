@@ -2,7 +2,7 @@ import type Stripe from "stripe";
 
 import { runEffect } from "#~/AppRuntime";
 import { syncGuildGroup } from "#~/effects/posthog";
-import { log } from "#~/helpers/observability";
+import { logEffect } from "#~/effects/observability";
 import { StripeService } from "#~/models/stripe.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
@@ -20,7 +20,9 @@ export async function action({ request }: Route.ActionArgs) {
 
   const signature = request.headers.get("stripe-signature");
   if (!signature) {
-    log("warn", "Webhook", "Missing Stripe signature header", {});
+    void runEffect(
+      logEffect("warn", "Webhook", "Missing Stripe signature header", {}),
+    );
     return new Response("Missing signature", { status: 400 });
   }
 
@@ -33,10 +35,12 @@ export async function action({ request }: Route.ActionArgs) {
       StripeService.constructWebhookEvent(body, signature),
     );
 
-    log("info", "Webhook", "Received Stripe webhook", {
-      type: event.type,
-      eventId: event.id,
-    });
+    void runEffect(
+      logEffect("info", "Webhook", "Received Stripe webhook", {
+        type: event.type,
+        eventId: event.id,
+      }),
+    );
 
     // Handle the event based on type
     switch (event.type) {
@@ -72,10 +76,12 @@ export async function action({ request }: Route.ActionArgs) {
       }
 
       default:
-        log("debug", "Webhook", "Unhandled webhook event type", {
-          type: event.type,
-          eventId: event.id,
-        });
+        void runEffect(
+          logEffect("debug", "Webhook", "Unhandled webhook event type", {
+            type: event.type,
+            eventId: event.id,
+          }),
+        );
     }
 
     // Return 200 to acknowledge receipt
@@ -84,7 +90,9 @@ export async function action({ request }: Route.ActionArgs) {
       headers: { "Content-Type": "application/json" },
     });
   } catch (error) {
-    log("error", "Webhook", "Failed to process webhook", { error });
+    void runEffect(
+      logEffect("error", "Webhook", "Failed to process webhook", { error }),
+    );
     return new Response(
       JSON.stringify({ error: "Webhook processing failed" }),
       {
@@ -105,18 +113,22 @@ async function handleCheckoutSessionCompleted(
   const guildId = session.client_reference_id ?? session.metadata?.guild_id;
 
   if (!guildId) {
-    log("warn", "Webhook", "Missing guild_id in checkout session", {
-      sessionId: session.id,
-    });
+    void runEffect(
+      logEffect("warn", "Webhook", "Missing guild_id in checkout session", {
+        sessionId: session.id,
+      }),
+    );
     return;
   }
 
-  log("info", "Webhook", "Processing checkout session completed", {
-    sessionId: session.id,
-    guildId,
-    customerId: session.customer,
-    subscriptionId: session.subscription,
-  });
+  void runEffect(
+    logEffect("info", "Webhook", "Processing checkout session completed", {
+      sessionId: session.id,
+      guildId,
+      customerId: session.customer,
+      subscriptionId: session.subscription,
+    }),
+  );
 
   // Get subscription details to calculate period end
   const currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -137,10 +149,12 @@ async function handleCheckoutSessionCompleted(
   );
   await runEffect(syncGuildGroup(guildId));
 
-  log("info", "Webhook", "Checkout session processed successfully", {
-    sessionId: session.id,
-    guildId,
-  });
+  void runEffect(
+    logEffect("info", "Webhook", "Checkout session processed successfully", {
+      sessionId: session.id,
+      guildId,
+    }),
+  );
 }
 
 /**
@@ -151,9 +165,11 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
   const guildId = subscription.metadata?.guild_id;
 
   if (!guildId) {
-    log("warn", "Webhook", "Missing guild_id in subscription metadata", {
-      subscriptionId: subscription.id,
-    });
+    void runEffect(
+      logEffect("warn", "Webhook", "Missing guild_id in subscription metadata", {
+        subscriptionId: subscription.id,
+      }),
+    );
     return;
   }
 
@@ -163,12 +179,14 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
       ? (subscription.current_period_end as number)
       : undefined;
 
-  log("info", "Webhook", "Processing subscription update", {
-    subscriptionId: subscription.id,
-    guildId,
-    status: subscription.status,
-    currentPeriodEnd: currentPeriodEndTimestamp,
-  });
+  void runEffect(
+    logEffect("info", "Webhook", "Processing subscription update", {
+      subscriptionId: subscription.id,
+      guildId,
+      status: subscription.status,
+      currentPeriodEnd: currentPeriodEndTimestamp,
+    }),
+  );
 
   // Map Stripe status to our status
   const status = subscription.status === "active" ? "active" : "inactive";
@@ -191,11 +209,13 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
   );
   await runEffect(syncGuildGroup(guildId));
 
-  log("info", "Webhook", "Subscription update processed successfully", {
-    subscriptionId: subscription.id,
-    guildId,
-    status,
-  });
+  void runEffect(
+    logEffect("info", "Webhook", "Subscription update processed successfully", {
+      subscriptionId: subscription.id,
+      guildId,
+      status,
+    }),
+  );
 }
 
 /**
@@ -206,16 +226,20 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
   const guildId = subscription.metadata?.guild_id;
 
   if (!guildId) {
-    log("warn", "Webhook", "Missing guild_id in subscription metadata", {
-      subscriptionId: subscription.id,
-    });
+    void runEffect(
+      logEffect("warn", "Webhook", "Missing guild_id in subscription metadata", {
+        subscriptionId: subscription.id,
+      }),
+    );
     return;
   }
 
-  log("info", "Webhook", "Processing subscription deletion", {
-    subscriptionId: subscription.id,
-    guildId,
-  });
+  void runEffect(
+    logEffect("info", "Webhook", "Processing subscription deletion", {
+      subscriptionId: subscription.id,
+      guildId,
+    }),
+  );
 
   // Downgrade to free tier
   await runEffect(
@@ -233,10 +257,12 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
   );
   await runEffect(syncGuildGroup(guildId));
 
-  log("info", "Webhook", "Subscription deletion processed successfully", {
-    subscriptionId: subscription.id,
-    guildId,
-  });
+  void runEffect(
+    logEffect("info", "Webhook", "Subscription deletion processed successfully", {
+      subscriptionId: subscription.id,
+      guildId,
+    }),
+  );
 }
 
 /**
@@ -251,17 +277,21 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
       : null;
 
   if (!subscriptionId) {
-    log("debug", "Webhook", "Invoice not associated with subscription", {
-      invoiceId: invoice.id,
-    });
+    void runEffect(
+      logEffect("debug", "Webhook", "Invoice not associated with subscription", {
+        invoiceId: invoice.id,
+      }),
+    );
     return;
   }
 
-  log("info", "Webhook", "Processing successful payment", {
-    invoiceId: invoice.id,
-    subscriptionId,
-    customerId: invoice.customer,
-  });
+  void runEffect(
+    logEffect("info", "Webhook", "Processing successful payment", {
+      invoiceId: invoice.id,
+      subscriptionId,
+      customerId: invoice.customer,
+    }),
+  );
 
   // Payment succeeded - subscription should already be updated via subscription.updated event
   // This is mainly for logging/monitoring purposes
@@ -277,10 +307,12 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
     ),
   );
 
-  log("info", "Webhook", "Payment success processed", {
-    invoiceId: invoice.id,
-    subscriptionId,
-  });
+  void runEffect(
+    logEffect("info", "Webhook", "Payment success processed", {
+      invoiceId: invoice.id,
+      subscriptionId,
+    }),
+  );
 }
 
 /**
@@ -295,18 +327,22 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
       : null;
 
   if (!subscriptionId) {
-    log("debug", "Webhook", "Invoice not associated with subscription", {
-      invoiceId: invoice.id,
-    });
+    void runEffect(
+      logEffect("debug", "Webhook", "Invoice not associated with subscription", {
+        invoiceId: invoice.id,
+      }),
+    );
     return;
   }
 
-  log("warn", "Webhook", "Processing failed payment", {
-    invoiceId: invoice.id,
-    subscriptionId,
-    customerId: invoice.customer,
-    attemptCount: invoice.attempt_count,
-  });
+  void runEffect(
+    logEffect("warn", "Webhook", "Processing failed payment", {
+      invoiceId: invoice.id,
+      subscriptionId,
+      customerId: invoice.customer,
+      attemptCount: invoice.attempt_count,
+    }),
+  );
 
   // Payment failed - log for monitoring
   // Stripe will automatically retry and update subscription status if needed
@@ -322,9 +358,11 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
     ),
   );
 
-  log("warn", "Webhook", "Payment failure logged", {
-    invoiceId: invoice.id,
-    subscriptionId,
-    attemptCount: invoice.attempt_count,
-  });
+  void runEffect(
+    logEffect("warn", "Webhook", "Payment failure logged", {
+      invoiceId: invoice.id,
+      subscriptionId,
+      attemptCount: invoice.attempt_count,
+    }),
+  );
 }

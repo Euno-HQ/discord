@@ -5,7 +5,8 @@ import {
   runEffect,
   runTakeFirst,
 } from "#~/AppRuntime";
-import { log, trackPerformance } from "#~/helpers/observability";
+import { logEffect } from "#~/effects/observability";
+import { trackPerformance } from "#~/helpers/observability";
 import { requireUser } from "#~/models/session.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
@@ -23,10 +24,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       const url = new URL(request.url);
       const guildId = url.searchParams.get("guild_id");
 
-      log("info", "DataExport", "User requested data export", {
-        userId: user.id,
-        guildId: guildId ?? "none",
-      });
+      void runEffect(
+        logEffect("info", "DataExport", "User requested data export", {
+          userId: user.id,
+          guildId: guildId ?? "none",
+        }),
+      );
 
       // Check if user has premium access (data export is a paid feature)
       if (guildId) {
@@ -59,10 +62,12 @@ export async function loader({ request }: Route.LoaderArgs) {
 
       // If guild_id is provided, export guild-specific data
       if (guildId) {
-        log("info", "DataExport", "Exporting guild data", {
-          userId: user.id,
-          guildId,
-        });
+        void runEffect(
+          logEffect("info", "DataExport", "Exporting guild data", {
+            userId: user.id,
+            guildId,
+          }),
+        );
 
         // Get guild settings
         const guild = await runTakeFirst(
@@ -135,11 +140,13 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
       }
 
-      log("info", "DataExport", "Data export completed successfully", {
-        userId: user.id,
-        guildId: guildId ?? "none",
-        dataSize: JSON.stringify(exportData).length,
-      });
+      void runEffect(
+        logEffect("info", "DataExport", "Data export completed successfully", {
+          userId: user.id,
+          guildId: guildId ?? "none",
+          dataSize: JSON.stringify(exportData).length,
+        }),
+      );
 
       // Return as downloadable JSON file
       const filename = guildId
@@ -173,10 +180,12 @@ export async function action({ request }: Route.ActionArgs) {
       const url = new URL(request.url);
       const guildId = url.searchParams.get("guild_id");
 
-      log("warn", "DataDelete", "User requested data deletion", {
-        userId: user.id,
-        guildId: guildId ?? "none",
-      });
+      void runEffect(
+        logEffect("warn", "DataDelete", "User requested data deletion", {
+          userId: user.id,
+          guildId: guildId ?? "none",
+        }),
+      );
 
       if (!guildId) {
         return new Response(
@@ -210,10 +219,12 @@ export async function action({ request }: Route.ActionArgs) {
       // Delete guild settings
       await run(db.deleteFrom("guilds").where("id", "=", guildId));
 
-      log("info", "DataDelete", "Guild data deleted successfully", {
-        userId: user.id,
-        guildId,
-      });
+      void runEffect(
+        logEffect("info", "DataDelete", "Guild data deleted successfully", {
+          userId: user.id,
+          guildId,
+        }),
+      );
 
       return new Response(
         JSON.stringify({

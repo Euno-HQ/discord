@@ -17,7 +17,6 @@ import type {
   GuildMessageUpdate,
 } from "#~/discord/events";
 import { logEffect } from "#~/effects/observability.ts";
-import { log } from "#~/helpers/observability";
 
 // --- Pure enrichment functions ---
 // Extracted from event callbacks so they can be tested without mocking the
@@ -127,16 +126,18 @@ export const DiscordEventBusLive = Layer.scoped(
         message.inGuild() &&
         !message.member
       ) {
-        log(
-          "debug",
-          "DiscordEventBus",
-          "MessageCreate dropped: member unresolved",
-          {
-            messageId: message.id,
-            authorId: message.author.id,
-            channelId: message.channelId,
-            guildId: message.guildId,
-          },
+        Effect.runFork(
+          logEffect(
+            "debug",
+            "DiscordEventBus",
+            "MessageCreate dropped: member unresolved",
+            {
+              messageId: message.id,
+              authorId: message.author.id,
+              channelId: message.channelId,
+              guildId: message.guildId,
+            },
+          ),
         );
       }
     });

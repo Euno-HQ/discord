@@ -1,9 +1,10 @@
 import { REST } from "discord.js";
+import { Effect } from "effect";
 import { redirect } from "react-router";
 
 import { runEffect } from "#~/AppRuntime";
+import { logEffect } from "#~/effects/observability.ts";
 import { discordToken } from "#~/helpers/env.server";
-import { log } from "#~/helpers/observability";
 import {
   refreshAndPersistDiscordSession,
   retrieveDiscordToken,
@@ -38,10 +39,12 @@ export async function userDiscordSdkFromRequest(request: Request) {
   const userToken = await runEffect(retrieveDiscordToken(request));
 
   if (userToken.expired()) {
-    log(
-      "info",
-      "api",
-      "Discord OAuth token expired, refreshing and persisting",
+    Effect.runFork(
+      logEffect(
+        "info",
+        "api",
+        "Discord OAuth token expired, refreshing and persisting",
+      ),
     );
     try {
       // De-dupe parallel refreshes of the same single-use refresh_token. If
@@ -92,10 +95,12 @@ export async function userDiscordSdkFromRequest(request: Request) {
       try {
         const reReadToken = await runEffect(retrieveDiscordToken(request));
         if (!reReadToken.expired()) {
-          log(
-            "info",
-            "api",
-            "Discord OAuth refresh failed but session now holds a fresh token; proceeding",
+          Effect.runFork(
+            logEffect(
+              "info",
+              "api",
+              "Discord OAuth refresh failed but session now holds a fresh token; proceeding",
+            ),
           );
           return new REST({ version: "10", authPrefix: "Bearer" }).setToken(
             reReadToken.token.access_token as string,
@@ -105,11 +110,13 @@ export async function userDiscordSdkFromRequest(request: Request) {
         // Fall through to the login redirect below.
       }
 
-      log(
-        "warn",
-        "api",
-        "Discord OAuth token refresh failed, redirecting to login",
-        { error: refreshError },
+      Effect.runFork(
+        logEffect(
+          "warn",
+          "api",
+          "Discord OAuth token refresh failed, redirecting to login",
+          { error: refreshError },
+        ),
       );
       // Preserve where the user was so login returns them there (#373).
       const url = new URL(request.url);

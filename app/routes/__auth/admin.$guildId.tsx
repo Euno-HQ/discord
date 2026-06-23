@@ -21,7 +21,7 @@ import {
   type Invoices,
   type PaymentMethods,
 } from "#~/features/Admin/helpers.server.js";
-import { log } from "#~/helpers/observability";
+import { logEffect } from "#~/effects/observability";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
 import type { Route } from "./+types/admin.$guildId";
@@ -50,10 +50,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       memberCount: guild.approximate_member_count ?? 0,
     };
   } catch (e) {
-    log("warn", "admin", "Failed to fetch guild info from Discord", {
-      guildId,
-      error: e,
-    });
+    void runEffect(
+      logEffect("warn", "admin", "Failed to fetch guild info from Discord", {
+        guildId,
+        error: e,
+      }),
+    );
   }
 
   const featureFlags = await runEffect(fetchFeatureFlags(guildId));
@@ -74,11 +76,13 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     stripeSubscriptionUrl = `https://dashboard.stripe.com/subscriptions/${subscription.stripe_subscription_id}`;
   }
 
-  log("info", "admin", "Guild detail page accessed", {
-    guildId,
-    hasSubscription: !!subscription,
-    hasStripeCustomer: !!subscription?.stripe_customer_id,
-  });
+  void runEffect(
+    logEffect("info", "admin", "Guild detail page accessed", {
+      guildId,
+      hasSubscription: !!subscription,
+      hasStripeCustomer: !!subscription?.stripe_customer_id,
+    }),
+  );
 
   const groupProperties = {
     name: guildInfo.name,
