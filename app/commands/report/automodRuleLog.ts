@@ -41,7 +41,56 @@ const timestampSuffix = () => `<t:${Math.floor(Date.now() / 1000)}:R>`;
 
 // ─── Build diff summary for updates ─────────────────────────────────────────
 
-const buildUpdateDiff = (
+/**
+ * Element-level diff for two string lists. Returns the items present in `next`
+ * but not `prev` (added) and the items present in `prev` but not `next`
+ * (removed). Order-insensitive; duplicates collapse via Set semantics.
+ */
+const diffStringLists = (
+  prev: readonly string[],
+  next: readonly string[],
+): { added: string[]; removed: string[] } => {
+  const prevSet = new Set(prev);
+  const nextSet = new Set(next);
+  return {
+    added: next.filter((item) => !prevSet.has(item)),
+    removed: prev.filter((item) => !nextSet.has(item)),
+  };
+};
+
+/** Truncate a long list of changed items so the log line stays readable. */
+const summarizeItems = (items: string[], max = 5): string => {
+  const shown = items.slice(0, max).map((item) => `\`${item}\``);
+  const overflow = items.length - shown.length;
+  return overflow > 0
+    ? `${shown.join(", ")} +${overflow} more`
+    : shown.join(", ");
+};
+
+const formatListChange = (
+  label: string,
+  { added, removed }: { added: string[]; removed: string[] },
+): string | null => {
+  if (added.length === 0 && removed.length === 0) return null;
+  const segments: string[] = [];
+  if (added.length > 0) segments.push(`+${summarizeItems(added)}`);
+  if (removed.length > 0) segments.push(`−${summarizeItems(removed)}`);
+  return `${label}: ${segments.join(" ")}`;
+};
+
+const countDelta = (
+  label: string,
+  oldCount: number,
+  newCount: number,
+): string | null => {
+  const delta = newCount - oldCount;
+  if (delta === 0) return null;
+  const sign = delta > 0 ? "+" : "";
+  const abs = Math.abs(delta);
+  return `${sign}${delta} ${label}${abs !== 1 ? "s" : ""}`;
+};
+
+export const buildUpdateDiff = (
   oldRule: AutoModerationRule | null,
   newRule: AutoModerationRule,
 ): string => {
@@ -61,45 +110,61 @@ const buildUpdateDiff = (
     );
   }
 
-  // Keyword filter count diff
-  const oldKeywords = oldRule.triggerMetadata?.keywordFilter ?? [];
-  const newKeywords = newRule.triggerMetadata?.keywordFilter ?? [];
-  const keywordDelta = newKeywords.length - oldKeywords.length;
-  if (keywordDelta !== 0) {
-    const sign = keywordDelta > 0 ? "+" : "";
-    const abs = Math.abs(keywordDelta);
-    parts.push(`${sign}${keywordDelta} keyword${abs !== 1 ? "s" : ""}`);
-  }
+  // Keyword filter element-level diff (surface the actual added/removed words)
+  const keywordChange = formatListChange(
+    "keywords",
+    diffStringLists(
+      oldRule.triggerMetadata?.keywordFilter ?? [],
+      newRule.triggerMetadata?.keywordFilter ?? [],
+    ),
+  );
+  if (keywordChange) parts.push(keywordChange);
 
-  // Regex pattern count diff
-  const oldPatterns = oldRule.triggerMetadata?.regexPatterns ?? [];
-  const newPatterns = newRule.triggerMetadata?.regexPatterns ?? [];
-  const patternDelta = newPatterns.length - oldPatterns.length;
-  if (patternDelta !== 0) {
-    const sign = patternDelta > 0 ? "+" : "";
-    const abs = Math.abs(patternDelta);
-    parts.push(`${sign}${patternDelta} regex pattern${abs !== 1 ? "s" : ""}`);
-  }
+  // Regex pattern element-level diff
+  const regexChange = formatListChange(
+    "regex",
+    diffStringLists(
+      oldRule.triggerMetadata?.regexPatterns ?? [],
+      newRule.triggerMetadata?.regexPatterns ?? [],
+    ),
+  );
+  if (regexChange) parts.push(regexChange);
+
+  // Allow-list element-level diff
+  const allowChange = formatListChange(
+    "allow-list",
+    diffStringLists(
+      oldRule.triggerMetadata?.allowList ?? [],
+      newRule.triggerMetadata?.allowList ?? [],
+    ),
+  );
+  if (allowChange) parts.push(allowChange);
+
+  // Action / response types (e.g. block message, timeout, send alert)
+  const actionChange = formatListChange(
+    "actions",
+    diffStringLists(
+      (oldRule.actions ?? []).map((a) => String(a.type)),
+      (newRule.actions ?? []).map((a) => String(a.type)),
+    ),
+  );
+  if (actionChange) parts.push(actionChange);
 
   // Exempt roles count diff
-  const oldExemptRoles = oldRule.exemptRoles?.size ?? 0;
-  const newExemptRoles = newRule.exemptRoles?.size ?? 0;
-  const roleDelta = newExemptRoles - oldExemptRoles;
-  if (roleDelta !== 0) {
-    const sign = roleDelta > 0 ? "+" : "";
-    const abs = Math.abs(roleDelta);
-    parts.push(`${sign}${roleDelta} exempt role${abs !== 1 ? "s" : ""}`);
-  }
+  const roleChange = countDelta(
+    "exempt role",
+    oldRule.exemptRoles?.size ?? 0,
+    newRule.exemptRoles?.size ?? 0,
+  );
+  if (roleChange) parts.push(roleChange);
 
   // Exempt channels count diff
-  const oldExemptChannels = oldRule.exemptChannels?.size ?? 0;
-  const newExemptChannels = newRule.exemptChannels?.size ?? 0;
-  const channelDelta = newExemptChannels - oldExemptChannels;
-  if (channelDelta !== 0) {
-    const sign = channelDelta > 0 ? "+" : "";
-    const abs = Math.abs(channelDelta);
-    parts.push(`${sign}${channelDelta} exempt channel${abs !== 1 ? "s" : ""}`);
-  }
+  const channelChange = countDelta(
+    "exempt channel",
+    oldRule.exemptChannels?.size ?? 0,
+    newRule.exemptChannels?.size ?? 0,
+  );
+  if (channelChange) parts.push(channelChange);
 
   return parts.length > 0 ? parts.join(" · ") : "minor configuration change";
 };
