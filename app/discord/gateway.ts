@@ -3,7 +3,7 @@ import { Events, InteractionType, type Client } from "discord.js";
 import { Effect } from "effect";
 
 import { runEffect } from "#~/AppRuntime";
-import { client, login } from "#~/discord/client.server";
+import { DiscordClient, login } from "#~/discord/client.server";
 import { matchCommand } from "#~/discord/deployCommands.server";
 import { logEffect } from "#~/effects/observability.ts";
 import { type AnyCommand } from "#~/helpers/discord.ts";
@@ -24,181 +24,192 @@ const FATAL_CLOSE_CODES = new Set([
   GatewayCloseCodes.DisallowedIntents, // 4014
 ]);
 
-export const initDiscordBot: Effect.Effect<Client> = Effect.gen(function* () {
-  if (globalThis.__discordGatewayInitialized) {
-    yield* logEffect(
-      "info",
-      "Gateway",
-      "Gateway already initialized, skipping duplicate init",
-    );
-    return client;
-  }
+export const initDiscordBot: Effect.Effect<Client, never, DiscordClient> =
+  Effect.gen(function* () {
+    const client = yield* DiscordClient;
 
-  yield* logEffect("info", "Gateway", "Initializing Discord gateway");
-  globalThis.__discordGatewayInitialized = true;
-
-  void login();
-
-  // Diagnostic: log all raw gateway events
-  client.on(
-    Events.Raw,
-    (packet: { t?: string; op?: number; d?: Record<string, unknown> }) => {
-      Effect.runFork(
-        logEffect("debug", "Gateway.Raw", packet.t ?? "unknown", {
-          op: packet.op,
-          guildId: packet.d?.guild_id,
-          channelId: packet.d?.channel_id,
-          userId: packet.d?.user_id,
-        }),
+    if (globalThis.__discordGatewayInitialized) {
+      yield* logEffect(
+        "info",
+        "Gateway",
+        "Gateway already initialized, skipping duplicate init",
       );
-    },
-  );
+      return client;
+    }
 
-  client.on(Events.ThreadCreate, (thread) => {
-    Effect.runFork(
-      logEffect("info", "Gateway", "Thread created", {
-        threadId: thread.id,
-        guildId: thread.guild.id,
-        channelId: thread.parentId,
-        threadName: thread.name,
-      }),
+    yield* logEffect("info", "Gateway", "Initializing Discord gateway");
+    globalThis.__discordGatewayInitialized = true;
+
+    void login(client);
+
+    // Diagnostic: log all raw gateway events
+    client.on(
+      Events.Raw,
+      (packet: { t?: string; op?: number; d?: Record<string, unknown> }) => {
+        Effect.runFork(
+          logEffect("debug", "Gateway.Raw", packet.t ?? "unknown", {
+            op: packet.op,
+            guildId: packet.d?.guild_id,
+            channelId: packet.d?.channel_id,
+            userId: packet.d?.user_id,
+          }),
+        );
+      },
     );
 
-    // Track thread creation in business analytics
-    botStats.threadCreated(thread);
-
-    thread.join().catch((error) => {
+    client.on(Events.ThreadCreate, (thread) => {
       Effect.runFork(
-        logEffect("error", "Gateway", "Failed to join thread", {
+        logEffect("info", "Gateway", "Thread created", {
           threadId: thread.id,
           guildId: thread.guild.id,
-          error,
+          channelId: thread.parentId,
+          threadName: thread.name,
         }),
+      );
+
+      // Track thread creation in business analytics
+      botStats.threadCreated(thread);
+
+      thread.join().catch((error) => {
+        Effect.runFork(
+          logEffect("error", "Gateway", "Failed to join thread", {
+            threadId: thread.id,
+            guildId: thread.guild.id,
+            error,
+          }),
+        );
+      });
+    });
+
+    client.on(Events.InteractionCreate, (interaction) => {
+      Effect.runFork(
+        logEffect("debug", "deployCommands", "Handling interaction", {
+          type: interaction.type,
+          id: interaction.id,
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore
+          commandName: interaction.commandName,
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore
+          customId: interaction.customId,
+        }),
+      );
+      let config: AnyCommand | undefined = undefined;
+      let commandName: string | undefined = undefined;
+      switch (interaction.type) {
+        case InteractionType.ApplicationCommand: {
+          commandName = interaction.commandName;
+          config = matchCommand(commandName);
+          break;
+        }
+        case InteractionType.MessageComponent:
+        case InteractionType.ModalSubmit: {
+          commandName = interaction.customId;
+          config = matchCommand(commandName);
+          break;
+        }
+      }
+
+      if (!config || !commandName) {
+        Effect.runFork(
+          logEffect("debug", "deployCommands", "no matching command found"),
+        );
+        return;
+      }
+      Effect.runFork(
+        logEffect("debug", "deployCommands", "found matching command", {
+          config,
+        }),
+      );
+
+      void runEffect(
+        config.handler(interaction as never).pipe(
+          Effect.withSpan(`command.${commandName}`, {
+            attributes: {
+              "command.name": commandName,
+              "command.type": interaction.type,
+              "interaction.id": interaction.id,
+              guildId: interaction.guildId,
+              userId: interaction.user.id,
+            },
+          }),
+        ),
       );
     });
-  });
 
-  client.on(Events.InteractionCreate, (interaction) => {
-    Effect.runFork(
-      logEffect("debug", "deployCommands", "Handling interaction", {
-        type: interaction.type,
-        id: interaction.id,
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        commandName: interaction.commandName,
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        customId: interaction.customId,
-      }),
-    );
-    let config: AnyCommand | undefined = undefined;
-    let commandName: string | undefined = undefined;
-    switch (interaction.type) {
-      case InteractionType.ApplicationCommand: {
-        commandName = interaction.commandName;
-        config = matchCommand(commandName);
-        break;
-      }
-      case InteractionType.MessageComponent:
-      case InteractionType.ModalSubmit: {
-        commandName = interaction.customId;
-        config = matchCommand(commandName);
-        break;
-      }
-    }
+    const errorHandler = (error: unknown) => {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
 
-    if (!config || !commandName) {
       Effect.runFork(
-        logEffect("debug", "deployCommands", "no matching command found"),
-      );
-      return;
-    }
-    Effect.runFork(
-      logEffect("debug", "deployCommands", "found matching command", { config }),
-    );
-
-    void runEffect(
-      config.handler(interaction as never).pipe(
-        Effect.withSpan(`command.${commandName}`, {
-          attributes: {
-            "command.name": commandName,
-            "command.type": interaction.type,
-            "interaction.id": interaction.id,
-            guildId: interaction.guildId,
-            userId: interaction.user.id,
-          },
+        logEffect("error", "Gateway", "Gateway error occurred", {
+          error: errorMessage,
+          stack: error instanceof Error ? error.stack : undefined,
+          guildCount: client.guilds.cache.size,
+          userCount: client.users.cache.size,
         }),
-      ),
-    );
-  });
+      );
 
-  const errorHandler = (error: unknown) => {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+      // Track gateway errors in business analytics
+      botStats.gatewayError(errorMessage, client.guilds.cache.size);
 
-    Effect.runFork(
-      logEffect("error", "Gateway", "Gateway error occurred", {
-        error: errorMessage,
-        stack: error instanceof Error ? error.stack : undefined,
-        guildCount: client.guilds.cache.size,
-        userCount: client.users.cache.size,
-      }),
-    );
+      Sentry.captureException(error);
+    };
 
-    // Track gateway errors in business analytics
-    botStats.gatewayError(errorMessage, client.guilds.cache.size);
+    client.on(Events.Error, errorHandler);
 
-    Sentry.captureException(error);
-  };
+    // Add connection monitoring
+    client.on(Events.ShardDisconnect, async (closeEvent, _shardId) => {
+      if (FATAL_CLOSE_CODES.has(closeEvent.code)) {
+        Effect.runFork(
+          logEffect(
+            "error",
+            "Gateway",
+            "Received fatal gateway close code — exiting",
+            {
+              code: closeEvent.code,
+              reason: closeEvent.reason,
+            },
+          ),
+        );
+        Sentry.captureMessage(
+          `Fatal gateway disconnect: code ${closeEvent.code}`,
+          "fatal",
+        );
+        // Flush Sentry before exiting so the alert is not lost when the process terminates.
+        await Sentry.flush(2000);
+        process.exit(1);
+      }
 
-  client.on(Events.Error, errorHandler);
-
-  // Add connection monitoring
-  client.on(Events.ShardDisconnect, async (closeEvent, _shardId) => {
-    if (FATAL_CLOSE_CODES.has(closeEvent.code)) {
       Effect.runFork(
-        logEffect("error", "Gateway", "Received fatal gateway close code — exiting", {
+        logEffect("warn", "Gateway", "Client disconnected", {
           code: closeEvent.code,
-          reason: closeEvent.reason,
+          guildCount: client.guilds.cache.size,
+          userCount: client.users.cache.size,
         }),
       );
-      Sentry.captureMessage(
-        `Fatal gateway disconnect: code ${closeEvent.code}`,
-        "fatal",
-      );
-      // Flush Sentry before exiting so the alert is not lost when the process terminates.
-      await Sentry.flush(2000);
-      process.exit(1);
-    }
-
-    Effect.runFork(
-      logEffect("warn", "Gateway", "Client disconnected", {
-        code: closeEvent.code,
-        guildCount: client.guilds.cache.size,
-        userCount: client.users.cache.size,
-      }),
-    );
-  });
-
-  client.on(Events.ShardReconnecting, () => {
-    Effect.runFork(
-      logEffect("info", "Gateway", "Client reconnecting", {
-        guildCount: client.guilds.cache.size,
-        userCount: client.users.cache.size,
-      }),
-    );
-
-    // Track reconnections in business analytics
-    botStats.reconnection(client.guilds.cache.size, client.users.cache.size);
-  });
-
-  // Wait for the client to be ready before continuing
-  const waitForReady = Effect.async<Client>((resume) => {
-    client.once(Events.ClientReady, () => {
-      resume(Effect.succeed(client));
     });
+
+    client.on(Events.ShardReconnecting, () => {
+      Effect.runFork(
+        logEffect("info", "Gateway", "Client reconnecting", {
+          guildCount: client.guilds.cache.size,
+          userCount: client.users.cache.size,
+        }),
+      );
+
+      // Track reconnections in business analytics
+      botStats.reconnection(client.guilds.cache.size, client.users.cache.size);
+    });
+
+    // Wait for the client to be ready before continuing
+    const waitForReady = Effect.async<Client>((resume) => {
+      client.once(Events.ClientReady, () => {
+        resume(Effect.succeed(client));
+      });
+    });
+
+    yield* waitForReady;
+
+    return client;
   });
-
-  yield* waitForReady;
-
-  return client;
-});

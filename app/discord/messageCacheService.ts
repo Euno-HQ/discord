@@ -4,7 +4,7 @@ import type { Selectable } from "kysely";
 import { DatabaseLayer, DatabaseService, type SqlError } from "#~/Database";
 import type { DB } from "#~/db";
 import { logEffect } from "#~/effects/observability";
-import { scheduleTask } from "#~/helpers/schedule";
+import { scheduleTaskEffect } from "#~/helpers/schedule.server";
 
 export type CachedMessage = Selectable<DB["message_cache"]>;
 
@@ -137,13 +137,18 @@ export const MessageCacheServiceLive = Layer.effect(
 ).pipe(Layer.provide(DatabaseLayer));
 
 /**
- * Start the periodic message cache expiration scheduler.
+ * Periodic message cache expiration scheduler.
  * Runs every 10 minutes to null out old content and delete stale rows.
+ *
+ * A long-lived Effect — fork it with `Effect.forkDaemon` / `runtime.runFork`
+ * at startup (see `server.ts`).
  */
-export function startMessageCacheExpiration(
-  runExpiration: () => Promise<void>,
-): void {
-  scheduleTask("MessageCacheExpiration", 10 * 60 * 1000, () => {
-    void runExpiration();
-  });
-}
+export const messageCacheExpirationSchedule = scheduleTaskEffect(
+  "MessageCacheExpiration",
+  10 * 60 * 1000,
+  Effect.gen(function* () {
+    const cache = yield* MessageCacheService;
+    yield* cache.expireContent();
+    yield* cache.expireRows();
+  }),
+);

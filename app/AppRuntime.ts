@@ -2,6 +2,7 @@ import { Effect, Layer, Logger, LogLevel, ManagedRuntime } from "effect";
 import type { PostHog } from "posthog-node";
 
 import { DatabaseLayer, DatabaseService, type EffectKysely } from "#~/Database";
+import { DiscordClientLayer } from "#~/discord/client.server";
 import { DiscordEventBusLive } from "#~/discord/eventBus";
 import { MessageCacheServiceLive } from "#~/discord/messageCacheService";
 import { NotFoundError } from "#~/effects/errors";
@@ -27,18 +28,23 @@ const InfraLayer = Layer.mergeAll(
     : Logger.minimumLogLevel(LogLevel.All),
 );
 
-// App layer: database + PostHog + feature flags + spam detection + message cache + infrastructure
+// App layer: database + PostHog + feature flags + spam detection + message cache
+// + discord client + infrastructure
 const AppLayer = Layer.mergeAll(
   DatabaseLayer,
   PostHogServiceLive,
   FeatureFlagServiceLive,
   Layer.provide(
     SpamDetectionServiceLive,
-    Layer.merge(DatabaseLayer, FeatureFlagServiceLive),
+    Layer.mergeAll(DatabaseLayer, FeatureFlagServiceLive, DiscordClientLayer),
   ),
   MessageCacheServiceLive,
   SupervisorServiceLive,
-  DiscordEventBusLive,
+  // The event bus registers discord.js listeners at construction, so it needs
+  // the client Layer; expose the client itself too so any bot effect can
+  // `yield* DiscordClient`.
+  DiscordClientLayer,
+  Layer.provide(DiscordEventBusLive, DiscordClientLayer),
   Layer.provide(UserServiceLive, DatabaseLayer),
   InfraLayer,
 );

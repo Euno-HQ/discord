@@ -18,7 +18,11 @@ vi.mock("#~/helpers/observability", () => ({
 vi.mock("#~/effects/observability", () => ({
   logEffect: () => Effect.void,
 }));
-vi.mock("#~/discord/client.server", () => ({ client: {} }));
+vi.mock("#~/discord/client.server", () => ({
+  client: {},
+  DiscordClient: Context.GenericTag("DiscordClient"),
+  DiscordClientLayer: Layer.empty,
+}));
 vi.mock("#~/Database", () => ({
   DatabaseService: Context.GenericTag("DatabaseService"),
   DatabaseLayer: Layer.empty,
