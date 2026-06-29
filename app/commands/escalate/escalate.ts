@@ -5,7 +5,7 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { client } from "#~/discord/client.server";
+import { DiscordClient } from "#~/discord/client.server";
 import {
   editMessage,
   fetchChannel,
@@ -44,6 +44,7 @@ export const createEscalationEffect = (
   escalationId: string,
 ) =>
   Effect.gen(function* () {
+    const client = yield* DiscordClient;
     const escalationService = yield* EscalationService;
     const guildId = interaction.guildId!;
 
@@ -166,6 +167,7 @@ export const upgradeToMajorityEffect = (
   escalationId: string,
 ) =>
   Effect.gen(function* () {
+    const client = yield* DiscordClient;
     const escalationService = yield* EscalationService;
     const guildId = interaction.guildId!;
     const features: Features[] = [];
