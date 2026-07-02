@@ -42,9 +42,9 @@ Effects are lazy descriptions — nothing runs until something executes them. Th
 codebase has exactly **one** runtime: a `ManagedRuntime` built from `AppLayer`
 and exported as `runtime` in `app/AppRuntime.ts`. `AppLayer` merges every
 service (Database, PostHog, FeatureFlag, MessageCache, DiscordEventBus,
-Supervisor, SpamDetection, User) and stays open for the whole process lifetime,
-so its resources — the SQLite connection, the PostHog flush finalizer, the
-broadcast event queue — live as long as the bot does.
+Supervisor, SpamDetection, User, Escalation) and stays open for the whole
+process lifetime, so its resources — the SQLite connection, the PostHog flush
+finalizer, the broadcast event queue — live as long as the bot does.
 
 Because the services live in `AppLayer`, code that `yield* DatabaseService` (or
 any other app service) **never needs a per-call `Layer.provide`** — the runtime
@@ -386,13 +386,11 @@ database out of context on its first line:
 export const fetchGuild = (guildId: string) =>
   Effect.gen(function* () {
     const db = yield* DatabaseService;
-    const row = yield* db
+    const rows = yield* db
       .selectFrom("guilds")
       .selectAll()
-      .where("id", "=", guildId)
-      .pipe(/* ...takeFirst... */);
-    if (!row) return yield* Effect.fail(new NotFoundError({ resource: "guild", id: guildId }));
-    return row;
+      .where("id", "=", guildId);
+    return rows[0]; // may be undefined — callers handle the miss
   }).pipe(Effect.withSpan("Guild.fetchGuild", { attributes: { guildId } }));
 ```
 
@@ -401,7 +399,25 @@ runtime). Callers compose them with `yield*` inside larger Effects, or cross a
 boundary with `await runEffect(fetchGuild(id))`. The Kysely builder is itself
 yieldable — `yield* db.selectFrom(...)` runs the query; there's no `.execute()`.
 DB failures surface automatically as `SqlError` in the error channel; domain
-"not found" is a deliberate `Effect.fail(new NotFoundError(...))`.
+"not found" is either a plain `undefined` return (`fetchGuild`) or a deliberate
+`Effect.fail(new NotFoundError(...))` (`fetchSettings`).
+
+**Never call `.pipe()` (or any method-style combinator) on the effectified
+builder itself** — it typechecks but crashes at runtime. @effect/sql-kysely
+wraps the builder in a proxy, the proxy wraps the method's return value too, and
+the Effect runtime throws a proxy-invariant `TypeError` on `Symbol(effect/Hash)`
+when it touches the result. `yield*` the builder directly, or use data-first
+combinators:
+
+```typescript
+// WRONG — runtime TypeError:
+yield* db.selectFrom("guilds").selectAll().pipe(Effect.map((rows) => rows[0]));
+
+// RIGHT — yield* the builder directly:
+const rows = yield* db.selectFrom("guilds").selectAll();
+// or data-first combinators:
+yield* Effect.map(db.selectFrom("guilds").selectAll(), (rows) => rows[0]);
+```
 
 The model files (`app/models/*.server.ts`) are the reference for this pattern.
 `subscriptions.server.ts` and `stripe.server.ts` group their free functions

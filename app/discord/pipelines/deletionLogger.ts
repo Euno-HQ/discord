@@ -34,7 +34,16 @@ export const deletionLoggerPipeline: Effect.Effect<
     Stream.filterEffect((e) =>
       flags
         .isPostHogEnabled("deletion-log", e.guild.id)
-        .pipe(Effect.catchAll(() => Effect.succeed(false))),
+        .pipe(
+          Effect.catchAll((error) =>
+            logEffect(
+              "warn",
+              "DeletionLogger",
+              "Feature flag check failed, defaulting off",
+              { guildId: e.guild.id, error },
+            ).pipe(Effect.as(false)),
+          ),
+        ),
     ),
 
     // Cache messages on the way through

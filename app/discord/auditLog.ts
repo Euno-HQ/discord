@@ -1,6 +1,7 @@
 import type { AuditLogEvent, Guild, PartialUser, User } from "discord.js";
 import { Effect } from "effect";
 
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { logEffect } from "#~/effects/observability";
 
 // Time window to check audit log for matching entries (5 seconds)
@@ -29,7 +30,7 @@ export const fetchAuditLogEntry = (
     for (let attempt = 0; attempt < 3; attempt++) {
       yield* Effect.sleep("500 millis");
 
-      const auditLogs = yield* Effect.promise(() =>
+      const auditLogs = yield* tryDiscord("fetchAuditLogs", () =>
         guild.fetchAuditLogs({ type: auditLogType, limit: 5 }),
       ).pipe(
         Effect.withSpan("discord.fetchAuditLogs", {

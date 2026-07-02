@@ -9,6 +9,7 @@ import type {
   GuildMessageUpdate,
 } from "#~/discord/events";
 import { MessageCacheService } from "#~/discord/messageCacheService";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import {
   fetchChannel,
   fetchGuild,
@@ -63,19 +64,26 @@ const flushUncachedBatch = (
     if (!logChannel?.isTextBased()) return;
 
     const s = batch.count !== 1 ? "s" : "";
-    yield* Effect.tryPromise({
-      try: () =>
-        logChannel.send({
-          allowedMentions: { parse: [] },
-          embeds: [
-            {
-              description: `-# ${batch.count} uncached message${s} deleted from <#${batch.sourceChannelId}>\n-# we don't know the content or author of uncached messages`,
-              color: Colors.Red,
-            },
-          ],
-        }),
-      catch: () => Effect.void,
-    }).pipe(Effect.catchAll((e) => e));
+    yield* tryDiscord("sendUncachedBatchLog", () =>
+      logChannel.send({
+        allowedMentions: { parse: [] },
+        embeds: [
+          {
+            description: `-# ${batch.count} uncached message${s} deleted from <#${batch.sourceChannelId}>\n-# we don't know the content or author of uncached messages`,
+            color: Colors.Red,
+          },
+        ],
+      }),
+    ).pipe(
+      Effect.catchAll((error) =>
+        logEffect(
+          "warn",
+          "DeletionLogger",
+          "Failed to send uncached deletion batch log",
+          { key, error },
+        ),
+      ),
+    );
   }).pipe(
     Effect.catchAll((e) =>
       logEffect("warn", "DeletionLogger", "Failed to flush uncached batch", {
@@ -215,20 +223,21 @@ export const handleDelete = (
       color: Colors.Red,
     };
 
-    yield* Effect.tryPromise({
-      try: () =>
-        thread.send({
-          allowedMentions: { parse: [] },
-          embeds: [embed],
-        }),
-      catch: (error) =>
+    yield* tryDiscord("sendDeletionLogEmbed", () =>
+      thread.send({
+        allowedMentions: { parse: [] },
+        embeds: [embed],
+      }),
+    ).pipe(
+      Effect.catchAll((error) =>
         logEffect(
           "warn",
           "DeletionLogger",
           "Failed to post deletion log embed",
           { guildId: guild.id, error },
         ),
-    }).pipe(Effect.catchAll((e) => e));
+      ),
+    );
 
     // If a mod deleted this message, also log to the moderation thread
     if (auditEntry?.executor) {
@@ -244,20 +253,21 @@ export const handleDelete = (
       );
 
       if (modThread) {
-        yield* Effect.tryPromise({
-          try: () =>
-            modThread.send({
-              allowedMentions: { parse: [] },
-              embeds: [embed],
-            }),
-          catch: (error) =>
+        yield* tryDiscord("sendModDeletionLog", () =>
+          modThread.send({
+            allowedMentions: { parse: [] },
+            embeds: [embed],
+          }),
+        ).pipe(
+          Effect.catchAll((error) =>
             logEffect(
               "warn",
               "DeletionLogger",
               "Failed to post mod deletion to moderation thread",
               { guildId: guild.id, error },
             ),
-        }).pipe(Effect.catchAll((e) => e));
+          ),
+        );
       }
     }
   }).pipe(
@@ -320,29 +330,30 @@ export const handleEdit = (
     const channelMention = `<#${newMessage.channelId}>`;
     const sent = `<t:${Math.floor(newMessage.createdTimestamp / 1000)}:R>`;
 
-    yield* Effect.tryPromise({
-      try: () =>
-        thread.send({
-          allowedMentions: { parse: [] },
-          embeds: [
-            {
-              description: [
-                `<@${author.id}> edited their message in ${channelMention}, sent ${sent}`,
-                quoteMessageContent(before),
-                "↓",
-                quoteMessageContent(after),
-                `-# [Go to message](${newMessage.url})`,
-              ].join("\n"),
-              color: Colors.Yellow,
-            },
-          ],
-        }),
-      catch: (error) =>
+    yield* tryDiscord("sendEditLogEmbed", () =>
+      thread.send({
+        allowedMentions: { parse: [] },
+        embeds: [
+          {
+            description: [
+              `<@${author.id}> edited their message in ${channelMention}, sent ${sent}`,
+              quoteMessageContent(before),
+              "↓",
+              quoteMessageContent(after),
+              `-# [Go to message](${newMessage.url})`,
+            ].join("\n"),
+            color: Colors.Yellow,
+          },
+        ],
+      }),
+    ).pipe(
+      Effect.catchAll((error) =>
         logEffect("warn", "DeletionLogger", "Failed to post edit log embed", {
           guildId: guild.id,
           error,
         }),
-    }).pipe(Effect.catchAll((e) => e));
+      ),
+    );
   }).pipe(
     Effect.catchAll((err) =>
       logEffect("warn", "DeletionLogger", "Failed to log message edit", {
@@ -428,26 +439,27 @@ export const handleBulkDelete = (
             .join("\n")
         : "*(no authors available — messages were not cached)*";
 
-    yield* Effect.tryPromise({
-      try: () =>
-        deletionLogChannel.send({
-          allowedMentions: { parse: [] },
-          embeds: [
-            {
-              title: "Messages bulk deleted",
-              color: Colors.Orange,
-              description: `**${count}** message${count !== 1 ? "s" : ""} bulk deleted in ${channelName}`,
-              fields: [{ name: "Authors", value: authorList }],
-              timestamp: new Date().toISOString(),
-            },
-          ],
-        }),
-      catch: (error) =>
+    yield* tryDiscord("sendBulkDeleteLog", () =>
+      deletionLogChannel.send({
+        allowedMentions: { parse: [] },
+        embeds: [
+          {
+            title: "Messages bulk deleted",
+            color: Colors.Orange,
+            description: `**${count}** message${count !== 1 ? "s" : ""} bulk deleted in ${channelName}`,
+            fields: [{ name: "Authors", value: authorList }],
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }),
+    ).pipe(
+      Effect.catchAll((error) =>
         logEffect("warn", "DeletionLogger", "Failed to post bulk delete log", {
           guildId: guild.id,
           error,
         }),
-    }).pipe(Effect.catchAll((e) => e));
+      ),
+    );
   }).pipe(
     Effect.catchAll((err) =>
       logEffect("warn", "DeletionLogger", "Failed to log bulk message delete", {

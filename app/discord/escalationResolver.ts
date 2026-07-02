@@ -1,9 +1,8 @@
 import type { Client } from "discord.js";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 
 import type { RuntimeContext } from "#~/AppRuntime";
 import { checkPendingEscalationsEffect } from "#~/commands/escalate/escalationResolver";
-import { EscalationServiceLive } from "#~/commands/escalate/service.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import { scheduleTaskEffect } from "#~/helpers/schedule.server";
 
@@ -24,7 +23,6 @@ export const escalationResolverSchedule = (
     "EscalationResolver",
     ONE_MINUTE * 15,
     checkPendingEscalationsEffect(client).pipe(
-      Effect.provide(Layer.mergeAll(EscalationServiceLive)),
       Effect.catchAll((error) =>
         logEffect(
           "error",

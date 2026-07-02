@@ -80,13 +80,10 @@ export const UserServiceLive = Layer.effect(
         ),
 
       getUserByEmail: (email) =>
-        Effect.gen(function* () {
-          const [user] = yield* db
-            .selectFrom("users")
-            .selectAll()
-            .where("email", "=", email);
-          return user;
-        }).pipe(Effect.withSpan("UserService.getUserByEmail")),
+        Effect.map(
+          db.selectFrom("users").selectAll().where("email", "=", email),
+          ([user]) => user,
+        ).pipe(Effect.withSpan("UserService.getUserByEmail")),
 
       createUser: (email, externalId) =>
         Effect.gen(function* () {
@@ -125,9 +122,9 @@ export const UserServiceLive = Layer.effect(
         ),
 
       deleteUserByEmail: (email) =>
-        Effect.gen(function* () {
-          yield* db.deleteFrom("users").where("email", "=", email);
-        }).pipe(Effect.withSpan("UserService.deleteUserByEmail")),
+        Effect.asVoid(db.deleteFrom("users").where("email", "=", email)).pipe(
+          Effect.withSpan("UserService.deleteUserByEmail"),
+        ),
     };
   }),
 );

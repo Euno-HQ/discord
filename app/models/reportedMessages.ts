@@ -515,34 +515,45 @@ const deleteSingleMessage = (
 ) =>
   Effect.gen(function* () {
     const client = yield* DiscordClient;
-    const channel = yield* Effect.tryPromise({
-      try: () => client.channels.fetch(channelId),
-      catch: (error) => error,
-    });
+    const channel = yield* tryDiscord("fetchChannel", () =>
+      client.channels.fetch(channelId),
+    ).pipe(Effect.catchTag("ResourceMissingError", () => Effect.succeed(null)));
 
-    if (!channel || !("messages" in channel)) {
+    if (channel && !("messages" in channel)) {
       yield* logEffect(
         "warn",
         "ReportedMessage",
-        "Channel not found or not a text channel",
+        "Channel is not a text channel",
         {
           messageId,
           channelId,
         },
       );
-      return { success: false as const, messageId, error: "Channel not found" };
+      return {
+        success: false as const,
+        messageId,
+        error: "Channel is not a text channel",
+      };
     }
 
-    const result = yield* tryDiscord("deleteReportedMessage", async () => {
-      const message = await channel.messages.fetch(messageId);
-      await message.delete();
-      return { deleted: true as const };
-    }).pipe(
-      // Message already gone (404) → recover as alreadyGone.
-      Effect.catchTag("ResourceMissingError", () =>
-        Effect.succeed({ deleted: false as const, alreadyGone: true as const }),
-      ),
-    );
+    const result = yield* channel
+      ? tryDiscord("deleteReportedMessage", async () => {
+          const message = await channel.messages.fetch(messageId);
+          await message.delete();
+          return { deleted: true as const };
+        }).pipe(
+          // Message already gone (404) → recover as alreadyGone.
+          Effect.catchTag("ResourceMissingError", () =>
+            Effect.succeed({
+              deleted: false as const,
+              alreadyGone: true as const,
+            }),
+          ),
+        )
+      : Effect.succeed({
+          deleted: false as const,
+          alreadyGone: true as const,
+        });
 
     // Mark as deleted in database
     yield* markMessageAsDeleted(messageId, guildId);
@@ -559,20 +570,12 @@ const deleteSingleMessage = (
 
     return { success: true as const, messageId };
   }).pipe(
-    Effect.catchAll((error) => {
-      return Effect.gen(function* () {
-        yield* logEffect(
-          "warn",
-          "ReportedMessage",
-          "Failed to delete message",
-          {
-            messageId,
-            error,
-          },
-        );
-        return { success: false as const, messageId, error };
-      });
-    }),
+    Effect.catchAll((error) =>
+      logEffect("warn", "ReportedMessage", "Failed to delete message", {
+        messageId,
+        error,
+      }).pipe(Effect.as({ success: false as const, messageId, error })),
+    ),
   );
 
 /**

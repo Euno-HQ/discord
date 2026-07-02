@@ -140,3 +140,27 @@ export const fetchSettings = <T extends keyof typeof SETTINGS>(
       attributes: { guildId, keys: keys.join(",") },
     }),
   );
+
+/**
+ * Recovered variant of fetchSettings for callers that treat missing settings
+ * as "not configured yet." First-time-setup guilds legitimately have no
+ * settings row, so NotFoundError recovers silently; any other failure (a
+ * broken DB) is logged and also recovers, so the two stay distinguishable in
+ * the logs.
+ */
+export const fetchSettingsOrUndefined = <T extends keyof typeof SETTINGS>(
+  guildId: string,
+  keys: T[],
+): Effect.Effect<Pick<SettingsRecord, T> | undefined, never, DatabaseService> =>
+  fetchSettings(guildId, keys).pipe(
+    Effect.catchTag("NotFoundError", () => Effect.succeed(undefined)),
+    Effect.catchAll((error) =>
+      logEffect("error", "Guild", "Failed to fetch settings", {
+        guildId,
+        error,
+      }).pipe(Effect.as(undefined)),
+    ),
+    Effect.withSpan("Guild.fetchSettingsOrUndefined", {
+      attributes: { guildId, keys: keys.join(",") },
+    }),
+  );

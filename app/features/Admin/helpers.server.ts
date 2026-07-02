@@ -3,6 +3,7 @@ import { data } from "react-router";
 
 import { getPosthog } from "#~/AppRuntime";
 import type { StripeError } from "#~/effects/errors.ts";
+import { logEffect } from "#~/effects/observability.ts";
 import { requireUser } from "#~/models/session.server";
 import { StripeService } from "#~/models/stripe.server";
 
@@ -22,11 +23,22 @@ export const fetchFeatureFlags = (
 ): Effect.Effect<Record<string, string | boolean> | null, never, never> => {
   const posthog = getPosthog();
   if (!posthog) return Effect.succeed(null);
-  return Effect.promise(
-    () =>
+  // getAllFlags is a network call to PostHog and can reject; flags are
+  // optional garnish for the admin pages, so recover to null (with a log)
+  // instead of failing the loader.
+  return Effect.tryPromise({
+    try: () =>
       posthog.getAllFlags(guildId, {
         groups: { guild: guildId },
       }) as Promise<Record<string, string | boolean>>,
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catchAll((error) =>
+      logEffect("warn", "Admin", "Failed to fetch PostHog feature flags", {
+        guildId,
+        error,
+      }).pipe(Effect.as(null)),
+    ),
   );
 };
 

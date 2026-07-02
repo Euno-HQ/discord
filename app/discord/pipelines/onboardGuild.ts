@@ -3,6 +3,7 @@ import { Effect, Stream } from "effect";
 
 import type { RuntimeContext } from "#~/AppRuntime";
 import { DiscordEventBus } from "#~/discord/eventBus";
+import { isGuildCreateOrDeleteEvent } from "#~/discord/events";
 import { logEffect } from "#~/effects/observability";
 
 import { handleGuildCreate, handleGuildDelete } from "./onboardGuildHandlers";
@@ -12,9 +13,7 @@ export const onboardGuildPipeline: Effect.Effect<void, never, RuntimeContext> =
     const { stream } = yield* DiscordEventBus;
 
     yield* stream.pipe(
-      Stream.filter(
-        (e) => e.type === "GuildCreate" || e.type === "GuildDelete",
-      ),
+      Stream.filter(isGuildCreateOrDeleteEvent),
 
       Stream.mapEffect((e) => {
         const handler = (() => {
@@ -23,8 +22,6 @@ export const onboardGuildPipeline: Effect.Effect<void, never, RuntimeContext> =
               return handleGuildCreate(e);
             case "GuildDelete":
               return handleGuildDelete(e);
-            default:
-              return Effect.void;
           }
         })();
         return handler.pipe(

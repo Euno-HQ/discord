@@ -4,7 +4,11 @@ import { runEffect } from "#~/AppRuntime";
 import { GuildSettingsForm } from "#~/components/GuildSettingsForm";
 import { fetchGuildData } from "#~/helpers/guildData.server";
 import { log, trackPerformance } from "#~/helpers/observability";
-import { fetchSettings, setSettings, SETTINGS } from "#~/models/guilds.server";
+import {
+  fetchSettingsOrUndefined,
+  setSettings,
+  SETTINGS,
+} from "#~/models/guilds.server";
 import { requireUser } from "#~/models/session.server";
 
 import type { Route } from "./+types/settings";
@@ -19,15 +23,17 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   log("info", "settings", "Settings page accessed", { guildId });
 
-  // Fetch current guild settings
+  // Fetch current guild settings. No settings yet is routine (first-time
+  // setup) — the recovered variant returns undefined and we render the empty
+  // form; genuine failures are logged server-side by the model.
   const [currentSettings, { roles, channels }] = await Promise.all([
     runEffect(
-      fetchSettings(guildId, [
+      fetchSettingsOrUndefined(guildId, [
         SETTINGS.modLog,
         SETTINGS.moderator,
         SETTINGS.restricted,
       ]),
-    ).catch(() => undefined),
+    ),
     runEffect(fetchGuildData(guildId)),
   ]);
 

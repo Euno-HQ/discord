@@ -223,51 +223,58 @@ export const fetchGuilds = (
   userRest: REST,
   botRest: REST,
 ): Effect.Effect<Guild[], DiscordError, never> =>
-  Effect.gen(function* () {
-    const [rawUserGuilds, rawBotGuilds] = (yield* Effect.all([
-      tryDiscord("fetchUserGuilds", () => userRest.get(Routes.userGuilds())),
-      tryDiscord("fetchBotGuilds", () => botRest.get(Routes.userGuilds())),
-    ])) as [APIGuild[], APIGuild[]];
+  Effect.all([
+    tryDiscord(
+      "fetchUserGuilds",
+      () => userRest.get(Routes.userGuilds()) as Promise<APIGuild[]>,
+    ),
+    tryDiscord(
+      "fetchBotGuilds",
+      () => botRest.get(Routes.userGuilds()) as Promise<APIGuild[]>,
+    ),
+  ]).pipe(
+    Effect.map(([rawUserGuilds, rawBotGuilds]) => {
+      const botGuilds = new Map(
+        rawBotGuilds.reduce(
+          (accum, val) => {
+            const guild = processGuild(val);
+            if (guild.authz.length > 0) {
+              accum.push([val.id, guild]);
+            }
+            return accum;
+          },
+          [] as [string, Omit<Guild, "hasBot">][],
+        ),
+      );
+      const userGuilds = new Map(
+        rawUserGuilds.reduce(
+          (accum, val) => {
+            const guild = processGuild(val);
+            if (guild.authz.includes("MANAGER")) {
+              accum.push([val.id, guild]);
+            }
+            return accum;
+          },
+          [] as [string, Omit<Guild, "hasBot">][],
+        ),
+      );
 
-    const botGuilds = new Map(
-      rawBotGuilds.reduce(
-        (accum, val) => {
-          const guild = processGuild(val);
-          if (guild.authz.length > 0) {
-            accum.push([val.id, guild]);
-          }
-          return accum;
-        },
-        [] as [string, Omit<Guild, "hasBot">][],
-      ),
-    );
-    const userGuilds = new Map(
-      rawUserGuilds.reduce(
-        (accum, val) => {
-          const guild = processGuild(val);
-          if (guild.authz.includes("MANAGER")) {
-            accum.push([val.id, guild]);
-          }
-          return accum;
-        },
-        [] as [string, Omit<Guild, "hasBot">][],
-      ),
-    );
+      const botGuildIds = new Set(botGuilds.keys());
+      const userGuildIds = new Set(userGuilds.keys());
 
-    const botGuildIds = new Set(botGuilds.keys());
-    const userGuildIds = new Set(userGuilds.keys());
+      const manageableGuilds = intersection(userGuildIds, botGuildIds);
+      const invitableGuilds = complement(userGuildIds, botGuildIds);
 
-    const manageableGuilds = intersection(userGuildIds, botGuildIds);
-    const invitableGuilds = complement(userGuildIds, botGuildIds);
-
-    return [
-      ...[...manageableGuilds].map((gId) => {
-        const guild = botGuilds.get(gId);
-        return guild ? { ...guild, hasBot: true } : undefined;
-      }),
-      ...[...invitableGuilds].map((gId) => {
-        const guild = userGuilds.get(gId);
-        return guild ? { ...guild, hasBot: false } : undefined;
-      }),
-    ].filter((g) => !isUndefined(g));
-  }).pipe(Effect.withSpan("Discord.fetchGuilds"));
+      return [
+        ...[...manageableGuilds].map((gId) => {
+          const guild = botGuilds.get(gId);
+          return guild ? { ...guild, hasBot: true } : undefined;
+        }),
+        ...[...invitableGuilds].map((gId) => {
+          const guild = userGuilds.get(gId);
+          return guild ? { ...guild, hasBot: false } : undefined;
+        }),
+      ].filter((g) => !isUndefined(g));
+    }),
+    Effect.withSpan("Discord.fetchGuilds"),
+  );

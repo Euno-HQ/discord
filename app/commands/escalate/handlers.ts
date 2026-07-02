@@ -34,7 +34,6 @@ import {
 } from "./directActions";
 import { createEscalationEffect, upgradeToMajorityEffect } from "./escalate";
 import { expediteEffect } from "./expedite";
-import { EscalationServiceLive } from "./service";
 import {
   buildConfirmedMessageComponents,
   buildVoteMessageComponents,
@@ -85,7 +84,6 @@ const vote =
           resolution,
         },
       }),
-      Effect.provide(EscalationServiceLive),
       Effect.catchTag("NotAuthorizedError", () =>
         interactionReply(interaction, {
           content: "Only moderators can vote on escalations.",
@@ -109,11 +107,13 @@ const vote =
           error,
           resolution,
         })
-          .pipe(() =>
-            interactionReply(interaction, {
-              content: "Something went wrong while recording your vote.",
-              flags: [MessageFlags.Ephemeral],
-            }),
+          .pipe(
+            Effect.zipRight(
+              interactionReply(interaction, {
+                content: "Something went wrong while recording your vote.",
+                flags: [MessageFlags.Ephemeral],
+              }),
+            ),
           )
           .pipe(Effect.catchAll(() => Effect.void)),
       ),
@@ -155,7 +155,6 @@ const expedite = (interaction: MessageComponentInteraction) =>
     Effect.withSpan("escalation-expedite", {
       attributes: { guildId: interaction.guildId, userId: interaction.user.id },
     }),
-    Effect.provide(EscalationServiceLive),
     Effect.catchTag("NotAuthorizedError", () =>
       interactionFollowUp(interaction, {
         content: "Only moderators can expedite resolutions.",
@@ -225,7 +224,6 @@ const escalate = (interaction: MessageComponentInteraction) =>
     Effect.withSpan("escalation-escalate", {
       attributes: { guildId: interaction.guildId, userId: interaction.user.id },
     }),
-    Effect.provide(EscalationServiceLive),
     Effect.catchTag("FeatureDisabledError", () =>
       interactionEditReply(interaction, {
         content: `This is a paid feature. [Upgrade your plan](${webBaseUrl}/app/${interaction.guildId}/settings/upgrade) to enable it.`,

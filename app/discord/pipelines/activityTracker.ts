@@ -67,7 +67,16 @@ export const activityTrackerPipeline: Effect.Effect<
       if (!guildId) return Effect.succeed(false);
       return flags
         .isPostHogEnabled("analytics", guildId)
-        .pipe(Effect.catchAll(() => Effect.succeed(false)));
+        .pipe(
+          Effect.catchAll((error) =>
+            logEffect(
+              "warn",
+              "ActivityTracker",
+              "Feature flag check failed, defaulting off",
+              { guildId, error },
+            ).pipe(Effect.as(false)),
+          ),
+        );
     }),
 
     // Dispatch to handlers with per-event error isolation

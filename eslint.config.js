@@ -4,13 +4,19 @@ import tseslint from "typescript-eslint";
 import { FlatCompat } from "@eslint/eslintrc";
 import pluginJs from "@eslint/js";
 
+import noBarePipeFunction from "./eslint-rules/no-bare-pipe-function.js";
+import noEffectPromise from "./eslint-rules/no-effect-promise.js";
 import noErrorStringCast from "./eslint-rules/no-error-string-cast.js";
 
 const compat = new FlatCompat();
 
 // Local rules for codebase conventions the shared plugins can't know about.
 const localPlugin = {
-  rules: { "no-error-string-cast": noErrorStringCast },
+  rules: {
+    "no-bare-pipe-function": noBarePipeFunction,
+    "no-effect-promise": noEffectPromise,
+    "no-error-string-cast": noErrorStringCast,
+  },
 };
 
 /** @type {import('eslint').Linter.Config[]} */
@@ -129,6 +135,19 @@ export default [
       // Pass typed Effect errors through to logEffect instead of stringifying
       // them — String(taggedError) collapses to just the _tag. See issue #366.
       "local/no-error-string-cast": "warn",
+
+      // Effect.promise turns rejections into defects that bypass typed error
+      // handling and every Effect.catchAll — in this codebase that has killed
+      // daemon pipeline fibers. Use Effect.tryPromise with a tagged error
+      // (tryDiscord for Discord calls); a genuinely-never-rejecting promise may
+      // eslint-disable with a justification. See notes/EFFECT.md.
+      "local/no-effect-promise": "warn",
+
+      // `.pipe(fn)` is plain function application — a bare arrow/function
+      // argument silently REPLACES the piped effect instead of composing with
+      // it (see the escalate-handlers discarded-error-log bug). Use a
+      // combinator: Effect.zipRight/flatMap/map/etc.
+      "local/no-bare-pipe-function": "warn",
 
       "no-console": "off",
       "@typescript-eslint/unbound-method": "off",

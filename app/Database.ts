@@ -49,7 +49,7 @@ export function checkpointWal() {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql.unsafe("PRAGMA wal_checkpoint(TRUNCATE)");
-  });
+  }).pipe(Effect.withSpan("checkpointWal"));
 }
 
 const sendWebhookAlert = (message: string) =>
@@ -105,17 +105,21 @@ export const runIntegrityCheck = Effect.gen(function* () {
 
   return yield* new DatabaseCorruptionError({ errors });
 }).pipe(
-  Effect.repeat(Schedule.fixed("6 hours")),
+  // Recover from SqlError inside the repeat so a transient failure (e.g.
+  // SQLITE_BUSY) doesn't end the schedule. DatabaseCorruptionError is left to
+  // escape the loop on purpose: once corruption is confirmed, re-checking
+  // every 6 hours adds nothing.
   Effect.catchTag("SqlError", (error) =>
     Effect.all([
       logEffect("error", "IntegrityCheck", "Integrity check failed to run", {
         error,
       }),
       sendWebhookAlert(
-        `🚨 **Database Integrity Check Failed**\n\`\`\`\n${error.message}\n${formatError(error.cause)}\n${error.stack}\n\`\`\``,
+        `🚨 **Database Integrity Check Failed**\n\`\`\`\n${formatError(error)}\n\`\`\``,
       ),
     ]),
   ),
+  Effect.repeat(Schedule.fixed("6 hours")),
   Effect.catchAll(() => Effect.succeed(null)),
   Effect.withSpan("runIntegrityCheck"),
 );

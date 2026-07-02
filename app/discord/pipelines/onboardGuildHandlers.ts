@@ -81,7 +81,11 @@ export const handleGuildCreate = (
     });
 
     yield* sendWelcome(e.guild);
-  });
+  }).pipe(
+    Effect.withSpan("OnboardGuild.guildCreate", {
+      attributes: { guildId: e.guild.id },
+    }),
+  );
 
 export const handleGuildDelete = (
   e: GuildDeleteEvent,
@@ -100,4 +104,8 @@ export const handleGuildDelete = (
       guildId: e.guild.id,
       guildName: e.guild.name,
     });
-  });
+  }).pipe(
+    Effect.withSpan("OnboardGuild.guildDelete", {
+      attributes: { guildId: e.guild.id },
+    }),
+  );

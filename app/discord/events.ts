@@ -158,3 +158,12 @@ export const isGuildMessageEvent = (
 export const isGuildMemberMessage = (
   event: DiscordEvent,
 ): event is GuildMemberMessage => event.type === "GuildMemberMessage";
+
+export const isMessageReactionAddEvent = (
+  event: DiscordEvent,
+): event is MessageReactionAddEvent => event.type === "MessageReactionAdd";
+
+export const isGuildCreateOrDeleteEvent = (
+  event: DiscordEvent,
+): event is GuildCreateEvent | GuildDeleteEvent =>
+  event.type === "GuildCreate" || event.type === "GuildDelete";
