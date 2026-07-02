@@ -650,7 +650,7 @@ export const getDailyReportCounts = (guildId: string, since: string) =>
   Effect.gen(function* () {
     const kysely = yield* DatabaseService;
 
-    return yield* kysely
+    const rows = yield* kysely
       .selectFrom("reported_messages")
       .select((eb) => [
         eb.fn("strftime", [eb.val("%Y-%m-%d"), eb.ref("created_at")]).as("day"),
@@ -660,6 +660,11 @@ export const getDailyReportCounts = (guildId: string, since: string) =>
       .where("created_at", ">=", since)
       .groupBy("day")
       .orderBy("day");
+
+    // @effect/sql-kysely returns rows through a recursive Proxy (see EFFECT.md).
+    // Materialize to plain arrays/objects so the data can safely cross into
+    // React render (dev-mode key validation trips the proxy invariant otherwise).
+    return Array.from(rows, (row) => ({ ...row }));
   }).pipe(
     Effect.withSpan("ReportedMessage.getDailyReportCounts", {
       attributes: { guildId, since },
@@ -673,13 +678,17 @@ export const getReportCountsByReason = (guildId: string, since: string) =>
   Effect.gen(function* () {
     const kysely = yield* DatabaseService;
 
-    return yield* kysely
+    const rows = yield* kysely
       .selectFrom("reported_messages")
       .select((eb) => ["reason", eb.fn.countAll<number>().as("count")])
       .where("guild_id", "=", guildId)
       .where("created_at", ">=", since)
       .groupBy("reason")
       .orderBy("count", "desc");
+
+    // Materialize the proxied rows to plain data before they reach a loader /
+    // React render — see getDailyReportCounts / EFFECT.md.
+    return Array.from(rows, (row) => ({ ...row }));
   }).pipe(
     Effect.withSpan("ReportedMessage.getReportCountsByReason", {
       attributes: { guildId, since },

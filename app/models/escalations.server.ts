@@ -30,7 +30,7 @@ export const getOpenEscalationsForGuild = (guildId: string, limit: number) =>
   Effect.gen(function* () {
     const db = yield* DatabaseService;
 
-    return yield* db
+    const rows = yield* db
       .selectFrom("escalations")
       .select([
         "id",
@@ -43,6 +43,10 @@ export const getOpenEscalationsForGuild = (guildId: string, limit: number) =>
       .where("resolution", "is", null)
       .orderBy("created_at", "desc")
       .limit(limit);
+
+    // @effect/sql-kysely returns rows through a recursive Proxy (see EFFECT.md).
+    // Materialize to plain data so it can safely cross into a loader / React render.
+    return Array.from(rows, (row) => ({ ...row }));
   }).pipe(
     Effect.withSpan("Escalations.getOpenEscalationsForGuild", {
       attributes: { guildId, limit },

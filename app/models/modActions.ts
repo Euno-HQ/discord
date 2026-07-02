@@ -126,12 +126,16 @@ export const getModActionCountsByType = (guildId: string, since: string) =>
   Effect.gen(function* () {
     const db = yield* DatabaseService;
 
-    return yield* db
+    const rows = yield* db
       .selectFrom("mod_actions")
       .select((eb) => ["action_type", eb.fn.countAll<number>().as("count")])
       .where("guild_id", "=", guildId)
       .where("created_at", ">=", since)
       .groupBy("action_type");
+
+    // @effect/sql-kysely returns rows through a recursive Proxy (see EFFECT.md).
+    // Materialize to plain data so it can safely cross into a loader / React render.
+    return Array.from(rows, (row) => ({ ...row }));
   }).pipe(
     Effect.withSpan("ModActions.getModActionCountsByType", {
       attributes: { guildId, since },

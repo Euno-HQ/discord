@@ -420,6 +420,34 @@ const rows = yield* db.selectFrom("guilds").selectAll();
 yield* Effect.map(db.selectFrom("guilds").selectAll(), (rows) => rows[0]);
 ```
 
+**A second, subtler proxy hazard: rows yielded from an effectified builder are
+still Proxy-wrapped, even when you avoid `.pipe()`.** `@effect/sql-kysely`
+wraps the Kysely handle in a *recursive* Proxy — every property access
+re-wraps its result — so `const rows = yield* db.<builder>` inside
+`Effect.gen` gives you a Proxy-wrapped array of Proxy-wrapped row objects
+(unlike the removed Promise bridges, which returned plain rows from
+`.execute()`). This is usually harmless — `JSON.stringify`, reducing to
+primitives, building a `Map` all work fine through the proxy — but a
+consumer that `.map`s such an array directly into JSX children explodes in
+dev SSR: the proxied array re-proxies the produced React elements, and
+React's dev-only key validation (`validateExplicitKey` reading the frozen
+`_store`) throws `TypeError: 'get' on proxy: property '_store' is a
+read-only and non-configurable data property...`. Loader data reaches SSR
+render in-memory, so nothing strips the proxies along the way. Rule: model
+functions whose rows may reach a React render must materialize results to
+plain data before returning:
+
+```typescript
+const rows = yield* db.selectFrom("guilds").selectAll();
+return Array.from(rows, (row) => ({ ...row }));
+```
+
+Reference implementations: `getDailyReportCounts` / `getReportCountsByReason`
+(`app/models/reportedMessages.ts`), `getModActionCountsByType`
+(`app/models/modActions.ts`), `getOpenEscalationsForGuild`
+(`app/models/escalations.server.ts`). Regression coverage:
+`app/models/reportedMessages.test.ts`.
+
 The model files (`app/models/*.server.ts`) are the reference for this pattern.
 `subscriptions.server.ts` and `stripe.server.ts` group their free functions
 under an exported object (`SubscriptionService` / `StripeService`) for
