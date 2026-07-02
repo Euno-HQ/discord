@@ -48,6 +48,11 @@ do:    (agent) GET `/robots.txt`
 prove: no route is defined in `app/routes.ts` → expect 404 / framework fallback. Record observed status.
 pass:  status recorded; flag if behavior differs from expectation (known sharp edge, not a fix here).
 
+### B4 healthcheck
+do:    (agent) GET `/healthcheck`
+prove: `app/routes/healthcheck.tsx` runs `runEffect(probeDatabase())` (`app/models/healthcheck.server.ts:8-29`, a `sqlite_master` query) plus a self HEAD request via `Promise.all`; expect `200 "OK"`. To probe the failure path, temporarily point the DB at a bad path/break the connection and confirm `500 "ERROR"` + `console.log("healthcheck ❌", { error })`.
+pass:  DB reachable ⇒ 200 OK; DB (or self-HEAD) failing ⇒ 500 ERROR, not a hang or uncaught throw.
+
 ---
 
 ## Batch C — authenticated dashboard (needs a logged-in human)
@@ -70,3 +75,13 @@ do:    as a `@reactiflux.com` user, open `/app/admin`
 prove: local → 200; guild subscription list + per-guild PostHog flag values (expandable). A non-staff identity is denied.
        uat   → admin list renders for staff; denied otherwise.
 pass:  admin gated to staff; flag values visible there (handy for cross-checking Batch A).
+
+### C4 GDPR data export (`/export-data`)
+do:    logged in, GET `/export-data` (no `guild_id`), then GET `/export-data?guild_id=<GUILD>` for a guild you manage.
+prove: `app/routes/export-data.tsx` — no-`guild_id` request → 200, JSON with only the `user` block (id/email/external_id/auth_provider), filename `euno-export-user-<id>-*.json`. With `guild_id` → gated by the `data-export` flag (403 JSON `{"error":"Data export is a paid feature..."}` if disabled per Batch A); when enabled, 200 with `guild`, `subscription`, `message_statistics` (via `getMessageStatsForExport`, `app/models/activity.server.ts`), and `reported_messages` (via `getReportedMessagesForExport`, `app/models/reportedMessages.ts`) populated from real rows; `Content-Disposition: attachment`.
+pass:  export gated correctly by `data-export` flag; JSON shape matches the guild vs. no-guild branches; data reflects DB state.
+
+### C5 GDPR data deletion (`/export-data` DELETE)
+do:    logged in, send `DELETE /export-data` with no `guild_id`, then `DELETE /export-data?guild_id=<GUILD>` for a disposable test guild with reports/message_stats/subscription rows.
+prove: `app/routes/export-data.tsx` action — no `guild_id` → 400 JSON asking to contact support (no writes). With `guild_id` → 200 `{"message":"Guild data has been deleted successfully", guild_id, deleted_at}`; DB: `reported_messages` rows for the guild get `deleted_at` stamped (`softDeleteReportsForGuild` — **note: stamps every row for the guild, not just currently-undeleted ones**, matching pre-migration bridge behavior), `message_stats` rows removed, `guild_subscriptions` row removed, `guilds` row removed.
+pass:  missing `guild_id` refuses cleanly (400, no mutation); valid `guild_id` wipes reports/stats/subscription/guild rows as described.
