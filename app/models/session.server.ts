@@ -5,19 +5,14 @@ import {
   createSessionStorage,
   data,
   redirect,
+  type SessionData,
 } from "react-router";
 import { AuthorizationCode } from "simple-oauth2";
 
-import {
-  db,
-  run,
-  runEffect,
-  runTakeFirst,
-  runTakeFirstOrThrow,
-} from "#~/AppRuntime";
-import { type DB } from "#~/Database";
+import { runEffect } from "#~/AppRuntime";
+import { DatabaseService, type DB } from "#~/Database";
 import { toError } from "#~/effects/classifyDiscordError";
-import { OAuthFetchError } from "#~/effects/errors";
+import { NotFoundError, OAuthFetchError } from "#~/effects/errors";
 import { BOT_PERMISSIONS } from "#~/helpers/botPermissions";
 import {
   applicationId,
@@ -75,6 +70,60 @@ const {
 });
 export type CookieSession = Awaited<ReturnType<typeof getCookieSession>>;
 
+// --- Free Effect functions backing the DB-session store ---
+// Each requires DatabaseService (supplied by the runtime). The
+// createSessionStorage callbacks below cross the boundary with
+// `await runEffect(...)`, keeping the callbacks plain async as React Router
+// requires. See notes/EFFECT.md → "Data Access: Free Effect Functions".
+
+const createSessionData = (data: SessionData, expires?: Date) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+    const rows = yield* db
+      .insertInto("sessions")
+      .values({
+        id: randomUUID(),
+        data: JSON.stringify(data),
+        expires: expires?.toString(),
+      })
+      .returning("id");
+    const row = rows[0];
+    // Preserve runTakeFirstOrThrow semantics: fail (reject) on zero rows.
+    if (row === undefined) {
+      return yield* Effect.fail(
+        new NotFoundError({ resource: "session", id: "" }),
+      );
+    }
+    return row;
+  }).pipe(Effect.withSpan("Session.createData"));
+
+const readSessionData = (id: string) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+    const rows = yield* db
+      .selectFrom("sessions")
+      .where("id", "=", id)
+      .selectAll();
+    // Preserve runTakeFirst semantics: first row or undefined, no failure.
+    return rows[0];
+  }).pipe(Effect.withSpan("Session.readData"));
+
+const updateSessionData = (id: string, data: SessionData, expires?: Date) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+    yield* db
+      .updateTable("sessions")
+      .set("data", JSON.stringify(data))
+      .set("expires", expires?.toString() ?? null)
+      .where("id", "=", id);
+  }).pipe(Effect.withSpan("Session.updateData"));
+
+const deleteSessionData = (id: string) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+    yield* db.deleteFrom("sessions").where("id", "=", id);
+  }).pipe(Effect.withSpan("Session.deleteData"));
+
 const {
   commitSession: commitDbSession,
   destroySession: destroyDbSession,
@@ -86,16 +135,7 @@ const {
     secrets: [sessionSecret],
   },
   async createData(data, expires) {
-    const result = await runTakeFirstOrThrow(
-      db
-        .insertInto("sessions")
-        .values({
-          id: randomUUID(),
-          data: JSON.stringify(data),
-          expires: expires?.toString(),
-        })
-        .returning("id"),
-    );
+    const result = await runEffect(createSessionData(data, expires));
     if (!result.id) {
       console.error({ result, data, expires });
       throw new Error("Failed to create session data");
@@ -103,9 +143,7 @@ const {
     return result.id;
   },
   async readData(id) {
-    const result = await runTakeFirst(
-      db.selectFrom("sessions").where("id", "=", id).selectAll(),
-    );
+    const result = await runEffect(readSessionData(id));
 
     if (!result?.data) return null;
     // @effect/sql-kysely doesn't include ParseJSONResultsPlugin, so JSON
@@ -116,16 +154,10 @@ const {
       : result.data;
   },
   async updateData(id, data, expires) {
-    await run(
-      db
-        .updateTable("sessions")
-        .set("data", JSON.stringify(data))
-        .set("expires", expires?.toString() ?? null)
-        .where("id", "=", id),
-    );
+    await runEffect(updateSessionData(id, data, expires));
   },
   async deleteData(id) {
-    await run(db.deleteFrom("sessions").where("id", "=", id));
+    await runEffect(deleteSessionData(id));
   },
 });
 export type DbSession = Awaited<ReturnType<typeof getDbSession>>;
