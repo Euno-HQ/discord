@@ -199,6 +199,7 @@ export default [
       // modules that lack a .server.ts suffix. These are not imported by any
       // client-reachable module today; ideally they'd be renamed to *.server.ts.
       "app/helpers/discord.ts",
+      "app/helpers/cohortAnalysis.ts",
       "app/features/spam/service.ts",
       "app/features/spam/spamResponseHandler.ts",
       "app/features/spam/velocityGate.ts",

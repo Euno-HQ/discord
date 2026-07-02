@@ -1,7 +1,9 @@
+import { Effect } from "effect";
 import { sql } from "kysely";
 import { partition } from "lodash-es";
 
-import { db, run } from "#~/AppRuntime";
+import { runEffect } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
 import type { CodeStats } from "#~/helpers/discord";
 import { descriptiveStats, percentile } from "#~/helpers/statistics";
 import { createMessageStatsQuery } from "#~/models/activity.server";
@@ -259,6 +261,66 @@ function aggregateCodeStats(
   };
 }
 
+/**
+ * Aggregated per-user message stats (message/word/reaction counts, code
+ * stats, date) for the cohort window, filtered to users with at least
+ * `minMessageThreshold` messages.
+ */
+const fetchCohortUserStats = (
+  guildId: string,
+  start: string,
+  end: string,
+  minMessageThreshold: number,
+) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+
+    const userStatsQuery = createMessageStatsQuery(db, guildId, start, end)
+      .select((eb) => [
+        "author_id",
+        eb.fn.count<number>("author_id").as("message_count"),
+        eb.fn.sum<number>("word_count").as("word_count"),
+        eb.fn.sum<number>("react_count").as("reaction_count"),
+        eb.fn("group_concat", ["code_stats"]).as("code_stats_json"),
+        eb
+          .fn("date", [eb("sent_at", "/", eb.lit(1000)), sql.lit("unixepoch")])
+          .as("date"),
+      ])
+      .groupBy("author_id")
+      .having((eb) =>
+        eb(eb.fn.count<number>("author_id"), ">=", minMessageThreshold),
+      );
+
+    return yield* userStatsQuery;
+  }).pipe(Effect.withSpan("CohortAnalysis.fetchCohortUserStats"));
+
+/**
+ * Daily message-count activity for the given author IDs within the cohort
+ * window, used to compute streak data.
+ */
+const fetchCohortDailyActivity = (
+  guildId: string,
+  start: string,
+  end: string,
+  authorIds: string[],
+) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+
+    const dailyActivityQuery = createMessageStatsQuery(db, guildId, start, end)
+      .select(({ fn, eb, lit }) => [
+        "author_id",
+        fn.count<number>("author_id").as("message_count"),
+        eb
+          .fn("date", [eb("sent_at", "/", lit(1000)), sql.lit("unixepoch")])
+          .as("date"),
+      ])
+      .groupBy(["author_id", "date"])
+      .where("author_id", "in", authorIds);
+
+    return yield* dailyActivityQuery;
+  }).pipe(Effect.withSpan("CohortAnalysis.fetchCohortDailyActivity"));
+
 export async function getCohortMetrics(
   guildId: string,
   start: string,
@@ -266,41 +328,19 @@ export async function getCohortMetrics(
   minMessageThreshold = 10,
 ): Promise<UserCohortMetrics[]> {
   // Get aggregated user data
-  const userStatsQuery = createMessageStatsQuery(db, guildId, start, end)
-    .select((eb) => [
-      "author_id",
-      eb.fn.count<number>("author_id").as("message_count"),
-      eb.fn.sum<number>("word_count").as("word_count"),
-      eb.fn.sum<number>("react_count").as("reaction_count"),
-      eb.fn("group_concat", ["code_stats"]).as("code_stats_json"),
-      eb
-        .fn("date", [eb("sent_at", "/", eb.lit(1000)), sql.lit("unixepoch")])
-        .as("date"),
-    ])
-    .groupBy("author_id")
-    .having((eb) =>
-      eb(eb.fn.count<number>("author_id"), ">=", minMessageThreshold),
-    );
-
-  const userStats = await run(userStatsQuery);
+  const userStats = await runEffect(
+    fetchCohortUserStats(guildId, start, end, minMessageThreshold),
+  );
 
   // Get daily activity for streak calculation
-  const dailyActivityQuery = createMessageStatsQuery(db, guildId, start, end)
-    .select(({ fn, eb, lit }) => [
-      "author_id",
-      fn.count<number>("author_id").as("message_count"),
-      eb
-        .fn("date", [eb("sent_at", "/", lit(1000)), sql.lit("unixepoch")])
-        .as("date"),
-    ])
-    .groupBy(["author_id", "date"])
-    .where(
-      "author_id",
-      "in",
+  const dailyActivity = await runEffect(
+    fetchCohortDailyActivity(
+      guildId,
+      start,
+      end,
       userStats.map((u) => u.author_id),
-    );
-
-  const dailyActivity = await run(dailyActivityQuery);
+    ),
+  );
 
   // Group daily activity by user
   const dailyActivityByUser = dailyActivity.reduce(
