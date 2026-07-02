@@ -67,11 +67,13 @@ interrupted the moment it finished. On HMR the previous fibers are
 `Fiber.interrupt`ed and re-forked. This distinction is load-bearing; don't
 "simplify" it to `fork`.
 
-> Legacy async/await callers reach Effect through `runEffect`. A handful of
-> `@deprecated` Promise bridges (`run`, `runTakeFirst`, `runTakeFirstOrThrow`,
-> and the lazy `db` proxy in `AppRuntime.ts`) remain for not-yet-migrated call
-> sites (notably `session.server.ts`). Don't reach for them in new code — use
-> `runEffect` with a real Effect.
+> `runEffect` is the only Promise boundary in the codebase — there are no other
+> bridges. Legacy async/await callers reach Effect by calling
+> `await runEffect(modelFn(...))` against a real Effect from a free model
+> function (e.g. `app/models/*.server.ts`). The old `run`/`runTakeFirst`/
+> `runTakeFirstOrThrow`/lazy-`db`-proxy bridges that used to live in
+> `AppRuntime.ts` are gone; all their call sites were migrated onto
+> `runEffect` + free Effect functions.
 
 ## Reading Effect Code
 

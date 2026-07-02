@@ -1,18 +1,14 @@
 import { afterAll, describe, expect, it } from "vitest";
 
-import { db, getPosthog, runtime } from "#~/AppRuntime";
+import { getPosthog, runtime } from "#~/AppRuntime";
 import { EscalationService } from "#~/commands/escalate/service.ts";
 
-// These run WITHOUT calling warmRuntime() — so they never open the real DB.
-// They lock the contract that importing AppRuntime has no side effect and that
-// using the handles before warmup fails loudly.
+// This runs WITHOUT calling warmRuntime() — so it never opens the real DB.
+// It locks the contract that importing AppRuntime has no side effect and that
+// using the handle before warmup fails loudly.
 describe("AppRuntime lazy handles (unwarmed)", () => {
   it("getPosthog() throws before warmRuntime()", () => {
     expect(() => getPosthog()).toThrow(/not warmed/);
-  });
-
-  it("accessing a db property throws before warmRuntime()", () => {
-    expect(() => db.selectFrom("users")).toThrow(/not warmed/);
   });
 });
 

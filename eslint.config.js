@@ -196,8 +196,9 @@ export default [
       "app/models/**",
       // Mixed directories (app/helpers, app/features contain both client and
       // server files): narrow per-file exceptions for confirmed server-only
-      // modules that lack a .server.ts suffix. These are not imported by any
-      // client-reachable module today; ideally they'd be renamed to *.server.ts.
+      // modules that lack a .server.ts suffix. These are not reachable from
+      // client code — imported only from loaders/server code; ideally they'd
+      // be renamed to *.server.ts.
       "app/helpers/discord.ts",
       "app/helpers/cohortAnalysis.ts",
       "app/features/spam/service.ts",
