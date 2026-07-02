@@ -1,6 +1,7 @@
 import { Effect, Layer, Logger, LogLevel, ManagedRuntime } from "effect";
 import type { PostHog } from "posthog-node";
 
+import { EscalationServiceLive } from "#~/commands/escalate/service.ts";
 import { DatabaseLayer, DatabaseService, type EffectKysely } from "#~/Database";
 import { DiscordClientLayer } from "#~/discord/client.server";
 import { DiscordEventBusLive } from "#~/discord/eventBus";
@@ -46,6 +47,7 @@ const AppLayer = Layer.mergeAll(
   DiscordClientLayer,
   Layer.provide(DiscordEventBusLive, DiscordClientLayer),
   Layer.provide(UserServiceLive, DatabaseLayer),
+  Layer.provide(EscalationServiceLive, DatabaseLayer),
   InfraLayer,
 );
 

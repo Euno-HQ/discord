@@ -92,7 +92,7 @@ export function logUserMessage({
         staff,
       }),
       getOrCreateUserThread(guild, author),
-    ]);
+    ]).pipe(Effect.withConcurrency("unbounded"));
 
     const alreadyReported = existingReports.find(
       (r) =>

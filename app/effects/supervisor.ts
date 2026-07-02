@@ -37,9 +37,7 @@ export class SupervisorService extends Context.Tag("SupervisorService")<
 // ---------------------------------------------------------------------------
 
 export const SupervisorServiceLive = Layer.unwrapEffect(
-  Effect.gen(function* () {
-    const supervisor = yield* Supervisor.track;
-
+  Effect.map(Supervisor.track, (supervisor) => {
     const service: ISupervisorService = {
       getActiveJobMeta: () =>
         Effect.gen(function* () {

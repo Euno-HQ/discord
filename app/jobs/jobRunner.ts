@@ -284,41 +284,41 @@ export const registerNotificationBuilder = (
   notificationBuilders[jobType] = builder;
 };
 
-const notifyChannelEffect = (channelId: string, job: Job) =>
-  Effect.gen(function* () {
-    let body: Record<string, unknown> | null = null;
+const notifyChannelEffect = (channelId: string, job: Job) => {
+  let body: Record<string, unknown> | null = null;
 
-    const customBuilder = notificationBuilders[job.job_type];
-    if (customBuilder) {
-      body = customBuilder(job);
-    } else {
-      const message =
-        job.status === "completed"
-          ? `Background job completed: **${job.job_type}** — ${job.progress_count} members processed.`
-          : job.status === "failed"
-            ? `Background job failed: **${job.job_type}** — ${job.last_error}`
-            : null;
+  const customBuilder = notificationBuilders[job.job_type];
+  if (customBuilder) {
+    body = customBuilder(job);
+  } else {
+    const message =
+      job.status === "completed"
+        ? `Background job completed: **${job.job_type}** — ${job.progress_count} members processed.`
+        : job.status === "failed"
+          ? `Background job failed: **${job.job_type}** — ${job.last_error}`
+          : null;
 
-      if (message) {
-        body = { content: message };
-      }
+    if (message) {
+      body = { content: message };
     }
+  }
 
-    if (!body) return;
+  if (!body) return Effect.void;
 
-    yield* tryDiscord("notifyChannel", () =>
-      ssrDiscordSdk.post(Routes.channelMessages(channelId), {
-        body,
+  return tryDiscord("notifyChannel", () =>
+    ssrDiscordSdk.post(Routes.channelMessages(channelId), {
+      body,
+    }),
+  ).pipe(
+    Effect.asVoid,
+    Effect.catchAll((err) =>
+      logEffect("warn", "JobRunner", "Failed to send progress notification", {
+        channelId,
+        error: err,
       }),
-    ).pipe(
-      Effect.catchAll((err) =>
-        logEffect("warn", "JobRunner", "Failed to send progress notification", {
-          channelId,
-          error: err,
-        }),
-      ),
-    );
-  });
+    ),
+  );
+};
 
 export const pollAndExecuteEffect = Effect.gen(function* () {
   const job = yield* claimNextJobEffect;
