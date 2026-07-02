@@ -67,13 +67,12 @@ interrupted the moment it finished. On HMR the previous fibers are
 `Fiber.interrupt`ed and re-forked. This distinction is load-bearing; don't
 "simplify" it to `fork`.
 
-> `runEffect` is the only Promise boundary in the codebase — there are no other
-> bridges. Legacy async/await callers reach Effect by calling
-> `await runEffect(modelFn(...))` against a real Effect from a free model
-> function (e.g. `app/models/*.server.ts`). The old `run`/`runTakeFirst`/
-> `runTakeFirstOrThrow`/lazy-`db`-proxy bridges that used to live in
-> `AppRuntime.ts` are gone; all their call sites were migrated onto
-> `runEffect` + free Effect functions.
+> The deprecated raw-Kysely bridges (`run`/`runTakeFirst`/
+> `runTakeFirstOrThrow`/lazy `db` proxy) are gone; async callers now cross the
+> boundary only through the helpers in the table above (`runEffect`/
+> `runEffectExit` and the flag helpers built on them), always with a real
+> Effect from a free model function (e.g. `app/models/*.server.ts`), typically
+> as `await runEffect(modelFn(...))`.
 
 ## Reading Effect Code
 

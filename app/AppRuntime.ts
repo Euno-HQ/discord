@@ -88,6 +88,8 @@ export const warmRuntime = async (): Promise<void> => {
   if (_warmed) return;
   const [posthog] = await Promise.all([
     runtime.runPromise(PostHogService),
+    // DatabaseService resolved for its side effect only: opens the DB eagerly
+    // at startup (fail fast) — do not remove even though the result is unused.
     runtime.runPromise(DatabaseService),
   ]);
   _posthog = posthog;
