@@ -1,4 +1,5 @@
 import { isFeatureEnabled, runEffect } from "#~/AppRuntime";
+import { userManagesGuild } from "#~/helpers/guildAuth.server";
 import { log, trackPerformance } from "#~/helpers/observability";
 import {
   deleteMessageStatsForGuild,
@@ -13,6 +14,19 @@ import { requireUser } from "#~/models/session.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
 import type { Route } from "./+types/export-data";
+
+/**
+ * 404 for guild authorization failures. Deliberately identical whether the
+ * guild does not exist or the user simply does not manage it, so we never leak
+ * guild existence to a user who has no authority over it (mirrors the
+ * "Guild not found" behavior of the guild.tsx overview loader).
+ */
+function guildNotFound() {
+  return new Response(JSON.stringify({ error: "Guild not found" }), {
+    status: 404,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 /**
  * GDPR Data Export Route
@@ -30,6 +44,14 @@ export async function loader({ request }: Route.LoaderArgs) {
         userId: user.id,
         guildId: guildId ?? "none",
       });
+
+      // Authorize: the caller must manage this Discord guild. Checked BEFORE the
+      // paid-feature flag so a user who does not manage the guild gets an
+      // indistinguishable 404 (rather than leaking existence via the 403 billing
+      // message).
+      if (guildId && !(await userManagesGuild(request, user.id, guildId))) {
+        return guildNotFound();
+      }
 
       // Check if user has premium access (data export is a paid feature)
       if (guildId) {
@@ -179,6 +201,14 @@ export async function action({ request }: Route.ActionArgs) {
             headers: { "Content-Type": "application/json" },
           },
         );
+      }
+
+      // Authorize: the caller must manage this Discord guild before we destroy
+      // any of its data. Same indistinguishable 404 as the loader on failure.
+      // Note: bot presence is intentionally NOT required — a GDPR delete must
+      // remain possible after the owner kicks the bot.
+      if (!(await userManagesGuild(request, user.id, guildId))) {
+        return guildNotFound();
       }
 
       // Soft delete reported messages for this guild
