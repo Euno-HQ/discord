@@ -5,8 +5,10 @@ import { Effect } from "effect";
 import { runEffect } from "#~/AppRuntime";
 import { DiscordClient, login } from "#~/discord/client.server";
 import { matchCommand } from "#~/discord/deployCommands.server";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { logEffect } from "#~/effects/observability.ts";
 import { type AnyCommand } from "#~/helpers/discord.ts";
+import { formatError } from "#~/helpers/formatError";
 import { botStats } from "#~/helpers/metrics";
 import { log } from "#~/helpers/observability";
 import Sentry from "#~/helpers/sentry.server";
@@ -67,13 +69,17 @@ export const initDiscordBot: Effect.Effect<Client, never, DiscordClient> =
       // Track thread creation in business analytics
       botStats.threadCreated(thread);
 
-      thread.join().catch((error) => {
-        log("error", "Gateway", "Failed to join thread", {
-          threadId: thread.id,
-          guildId: thread.guild.id,
-          error,
-        });
-      });
+      void runEffect(
+        tryDiscord("joinThread", async () => await thread.join()).pipe(
+          Effect.catchAll((error) =>
+            logEffect("error", "Gateway", "Failed to join thread", {
+              threadId: thread.id,
+              guildId: thread.guild.id,
+              error,
+            }),
+          ),
+        ),
+      );
     });
 
     client.on(Events.InteractionCreate, (interaction) => {
@@ -125,18 +131,14 @@ export const initDiscordBot: Effect.Effect<Client, never, DiscordClient> =
     });
 
     const errorHandler = (error: unknown) => {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-
       log("error", "Gateway", "Gateway error occurred", {
-        error: errorMessage,
-        stack: error instanceof Error ? error.stack : undefined,
+        error,
         guildCount: client.guilds.cache.size,
         userCount: client.users.cache.size,
       });
 
       // Track gateway errors in business analytics
-      botStats.gatewayError(errorMessage, client.guilds.cache.size);
+      botStats.gatewayError(formatError(error), client.guilds.cache.size);
 
       Sentry.captureException(error);
     };

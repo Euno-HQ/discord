@@ -64,6 +64,7 @@ describe("userDiscordSdkFromRequest token refresh single-flight (#393)", () => {
     // Each call here represents one POST of the single-use refresh_token to
     // Discord. A real second POST would 400; we assert it never happens.
     session.refreshAndPersistDiscordSession.mockImplementation(() =>
+      // eslint-disable-next-line local/no-effect-promise -- test mock that never rejects; simulates only the success path of the refresh POST
       Effect.promise(async () => {
         refreshPosts += 1;
         await new Promise((r) => setTimeout(r, 10));
@@ -124,9 +125,7 @@ describe("userDiscordSdkFromRequest token refresh single-flight (#393)", () => {
     );
 
     session.refreshAndPersistDiscordSession.mockImplementation(() =>
-      Effect.promise(() =>
-        Promise.reject(new Error("400 Bad Request: invalid_grant")),
-      ),
+      Effect.fail(new Error("400 Bad Request: invalid_grant")),
     );
 
     // Should NOT throw a redirect — it re-reads, finds a fresh token, proceeds.
@@ -141,9 +140,7 @@ describe("userDiscordSdkFromRequest token refresh single-flight (#393)", () => {
     );
 
     session.refreshAndPersistDiscordSession.mockImplementation(() =>
-      Effect.promise(() =>
-        Promise.reject(new Error("400 Bad Request: invalid_grant")),
-      ),
+      Effect.fail(new Error("400 Bad Request: invalid_grant")),
     );
 
     await expect(

@@ -324,7 +324,16 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
                 `Estimated time: ${timeEstimate}. Progress updates will be posted every 30 minutes.`,
             },
           }),
-        ).pipe(Effect.catchAll(() => Effect.void));
+        ).pipe(
+          Effect.catchAll((error) =>
+            logEffect(
+              "warn",
+              "BulkRoleAssignment",
+              "Failed to post migration start notification",
+              { channelId: job.notify_channel_id, error },
+            ),
+          ),
+        );
       }
     }
 
@@ -388,7 +397,16 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
                 `Estimated time remaining: ${eta}`,
             },
           }),
-        ).pipe(Effect.catchAll(() => Effect.void));
+        ).pipe(
+          Effect.catchAll((error) =>
+            logEffect(
+              "warn",
+              "BulkRoleAssignment",
+              "Failed to post migration progress notification",
+              { channelId: job.notify_channel_id, error },
+            ),
+          ),
+        );
       }
 
       if (result.errors > 0) {

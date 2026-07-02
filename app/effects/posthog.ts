@@ -34,11 +34,24 @@ export const PostHogServiceLive = Layer.scoped(
     (client) =>
       Effect.gen(function* () {
         if (client) {
-          yield* Effect.promise(() => client.shutdown());
-          yield* logEffect(
-            "info",
-            "PostHogService",
-            "PostHog client shut down",
+          // shutdown() flushes queued events over the network and can reject;
+          // in this release finalizer that rejection would become a defect in
+          // the Layer teardown, so capture it and log instead.
+          yield* Effect.tryPromise({
+            try: () => client.shutdown(),
+            catch: (cause) => cause,
+          }).pipe(
+            Effect.matchEffect({
+              onFailure: (error) =>
+                logEffect(
+                  "warn",
+                  "PostHogService",
+                  "PostHog client shutdown failed",
+                  { error },
+                ),
+              onSuccess: () =>
+                logEffect("info", "PostHogService", "PostHog client shut down"),
+            }),
           );
         }
       }),
@@ -82,7 +95,11 @@ export const syncGuildGroup = (guildId: string, guild?: Guild) =>
         }),
       ),
     );
-  });
+  }).pipe(
+    Effect.withSpan("PostHogService.syncGuildGroup", {
+      attributes: { guildId },
+    }),
+  );
 
 export const initializeGroups = (guilds: Collection<string, Guild>) =>
   Effect.gen(function* () {
@@ -101,4 +118,8 @@ export const initializeGroups = (guilds: Collection<string, Guild>) =>
       "PostHogService",
       `Initialized ${guilds.size} guild groups in PostHog`,
     );
-  });
+  }).pipe(
+    Effect.withSpan("PostHogService.initializeGroups", {
+      attributes: { guildCount: guilds.size },
+    }),
+  );

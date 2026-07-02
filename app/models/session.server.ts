@@ -16,6 +16,8 @@ import {
   runTakeFirstOrThrow,
 } from "#~/AppRuntime";
 import { type DB } from "#~/Database";
+import { toError } from "#~/effects/classifyDiscordError";
+import { OAuthFetchError } from "#~/effects/errors";
 import { BOT_PERMISSIONS } from "#~/helpers/botPermissions";
 import {
   applicationId,
@@ -393,26 +395,34 @@ export async function completeOauthLogin(request: Request) {
   return redirect(finalRedirectTo, { headers });
 }
 
-export const retrieveDiscordToken = (request: Request) =>
-  Effect.gen(function* () {
-    const dbSession = yield* Effect.promise(() =>
-      getDbSession(request.headers.get("Cookie")),
-    );
-    const storedToken = dbSession.get(CookieSessionKeys.discordToken) as {
-      discordToken: string;
-      [k: string]: unknown;
-    };
-    const token = authorization.createToken(storedToken);
-    return token;
+// These calls reject routinely (expired/revoked refresh tokens, session-store
+// failures), so they carry a typed OAuthFetchError rather than dying as defects.
+const tryOAuth = <A>(operation: string, fn: () => Promise<A>) =>
+  Effect.tryPromise({
+    try: fn,
+    catch: (cause) => new OAuthFetchError({ operation, cause: toError(cause) }),
   });
+
+export const retrieveDiscordToken = (request: Request) =>
+  tryOAuth("getDbSession", () =>
+    getDbSession(request.headers.get("Cookie")),
+  ).pipe(
+    Effect.map((dbSession) => {
+      const storedToken = dbSession.get(CookieSessionKeys.discordToken) as {
+        discordToken: string;
+        [k: string]: unknown;
+      };
+      return authorization.createToken(storedToken);
+    }),
+  );
 
 export const refreshDiscordSession = (request: Request) =>
   Effect.gen(function* () {
-    const dbSession = yield* Effect.promise(() =>
+    const dbSession = yield* tryOAuth("getDbSession", () =>
       getDbSession(request.headers.get("Cookie")),
     );
     const token = yield* retrieveDiscordToken(request);
-    const newToken = yield* Effect.promise(() => token.refresh());
+    const newToken = yield* tryOAuth("refreshToken", () => token.refresh());
     // @ts-expect-error token.toJSON() isn't in the types but it works
     dbSession.set(CookieSessionKeys.discordToken, newToken.toJSON());
 
@@ -427,7 +437,7 @@ export const refreshDiscordSession = (request: Request) =>
 export const refreshAndPersistDiscordSession = (request: Request) =>
   Effect.gen(function* () {
     const session = yield* refreshDiscordSession(request);
-    return yield* Effect.promise(() => commitDbSession(session));
+    return yield* tryOAuth("commitDbSession", () => commitDbSession(session));
   });
 
 export async function logout(request: Request) {

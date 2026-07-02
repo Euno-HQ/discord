@@ -16,7 +16,7 @@ function makeAuditLogResponse(
 
 const mockUser = { id: "user-1", username: "TestUser" };
 
-function runEffect<A>(effect: Effect.Effect<A>) {
+function runEffect<A, E>(effect: Effect.Effect<A, E>) {
   return Effect.gen(function* () {
     // Fast-forward all sleeps so tests don't wait
     const fiber = yield* Effect.fork(effect);
