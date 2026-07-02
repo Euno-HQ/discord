@@ -126,6 +126,24 @@ describe("export-data loader (GDPR export)", () => {
     );
   });
 
+  test("exports guild.id as the exact snowflake string, not a lossy number", async () => {
+    vi.mocked(userManagesGuild).mockResolvedValue(true);
+    // Simulate the real DB read: guilds.id is an INTEGER column, so a snowflake
+    // comes back from better-sqlite3 as a truncated JS number (…748 -> …700).
+    // The fix must carry the exact request guild_id string, not this value.
+    vi.mocked(runEffect).mockImplementation(((eff: unknown) =>
+      Promise.resolve(
+        eff === "fetchGuild" ? { id: Number(MANAGED), settings: null } : [],
+      )) as never);
+
+    const res = await loader({ request: getRequest(MANAGED) } as never);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(typeof body.guild.id).toBe("string");
+    expect(body.guild.id).toBe(MANAGED);
+  });
+
   test("user-only export (no guild_id) works without an authorization check", async () => {
     const res = await loader({ request: getRequest() } as never);
 

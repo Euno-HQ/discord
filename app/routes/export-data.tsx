@@ -94,7 +94,10 @@ export async function loader({ request }: Route.LoaderArgs) {
 
         if (guild) {
           exportData.guild = {
-            id: guild.id,
+            // guilds.id is an INTEGER column, so the fetched row's id arrives as
+            // a lossy JS number (snowflakes exceed 2^53: …748 reads back as …700).
+            // guildId is the exact request string — use it as the authoritative id.
+            id: guildId,
             settings: guild.settings ? JSON.parse(guild.settings) : null,
           };
         }
