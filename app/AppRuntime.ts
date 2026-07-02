@@ -2,7 +2,7 @@ import { Effect, Layer, Logger, LogLevel, ManagedRuntime } from "effect";
 import type { PostHog } from "posthog-node";
 
 import { EscalationServiceLive } from "#~/commands/escalate/service.ts";
-import { DatabaseLayer, DatabaseService } from "#~/Database";
+import { DatabaseLayer } from "#~/Database";
 import { DiscordClientLayer } from "#~/discord/client.server";
 import { DiscordEventBusLive } from "#~/discord/eventBus";
 import { MessageCacheServiceLive } from "#~/discord/messageCacheService";
@@ -73,26 +73,26 @@ const NOT_WARMED =
   "AppRuntime not warmed — call warmRuntime() at startup before using getPosthog()";
 
 /**
- * Resolve the PostHog client and DB connection once. Called at the process
- * entry point (app/server.ts) before any request/event is served. Idempotent,
- * so HMR re-execution is safe.
+ * Resolve the PostHog client once. Called at the process entry point
+ * (app/server.ts) before any request/event is served. Idempotent, so HMR
+ * re-execution is safe.
+ *
+ * ManagedRuntime layer construction is all-or-nothing: the first
+ * `runtime.runPromise(...)` call builds the entire merged AppLayer, so
+ * resolving PostHogService here also opens the DB (and every other service)
+ * eagerly. Startup still fails fast on a misconfigured DB even though
+ * DatabaseService is never resolved directly.
  *
  * NOT safe against concurrent first-callers: the `if (_warmed) return;` guard
  * only short-circuits AFTER a prior call has resolved, so two callers racing
- * before either settles would both run `Promise.all` (a second connection).
- * This relies on the single serial top-level `await warmRuntime()` in
- * server.ts being the only caller. If a second caller is ever added, cache the
- * in-flight promise (`let _warming: Promise<void> | undefined`) and return it.
+ * before either settles would both call `runtime.runPromise`. This relies on
+ * the single serial top-level `await warmRuntime()` in server.ts being the
+ * only caller. If a second caller is ever added, cache the in-flight promise
+ * (`let _warming: Promise<void> | undefined`) and return it.
  */
 export const warmRuntime = async (): Promise<void> => {
   if (_warmed) return;
-  const [posthog] = await Promise.all([
-    runtime.runPromise(PostHogService),
-    // DatabaseService resolved for its side effect only: opens the DB eagerly
-    // at startup (fail fast) — do not remove even though the result is unused.
-    runtime.runPromise(DatabaseService),
-  ]);
-  _posthog = posthog;
+  _posthog = await runtime.runPromise(PostHogService);
   _warmed = true;
 };
 
