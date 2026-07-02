@@ -1,11 +1,14 @@
-import {
-  db,
-  isFeatureEnabled,
-  run,
-  runEffect,
-  runTakeFirst,
-} from "#~/AppRuntime";
+import { isFeatureEnabled, runEffect } from "#~/AppRuntime";
 import { log, trackPerformance } from "#~/helpers/observability";
+import {
+  deleteMessageStatsForGuild,
+  getMessageStatsForExport,
+} from "#~/models/activity.server";
+import { deleteGuild, fetchGuild } from "#~/models/guilds.server";
+import {
+  getReportedMessagesForExport,
+  softDeleteReportsForGuild,
+} from "#~/models/reportedMessages";
 import { requireUser } from "#~/models/session.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
@@ -65,9 +68,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         });
 
         // Get guild settings
-        const guild = await runTakeFirst(
-          db.selectFrom("guilds").selectAll().where("id", "=", guildId),
-        );
+        const guild = await runEffect(fetchGuild(guildId));
 
         if (guild) {
           exportData.guild = {
@@ -91,13 +92,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
 
         // Get message statistics (aggregated, no actual message content)
-        const messageStats = await run(
-          db
-            .selectFrom("message_stats")
-            .selectAll()
-            .where("guild_id", "=", guildId)
-            .limit(1000), // Limit to prevent huge exports
-        );
+        const messageStats = await runEffect(getMessageStatsForExport(guildId));
 
         if (messageStats.length > 0) {
           exportData.message_statistics = messageStats.map((stat) => ({
@@ -112,13 +107,8 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
 
         // Get reported messages (sanitized)
-        const reportedMessages = await run(
-          db
-            .selectFrom("reported_messages")
-            .selectAll()
-            .where("guild_id", "=", guildId)
-            .where("deleted_at", "is", null)
-            .limit(100),
+        const reportedMessages = await runEffect(
+          getReportedMessagesForExport(guildId),
         );
 
         if (reportedMessages.length > 0) {
@@ -192,23 +182,16 @@ export async function action({ request }: Route.ActionArgs) {
       }
 
       // Soft delete reported messages for this guild
-      await run(
-        db
-          .updateTable("reported_messages")
-          .set({ deleted_at: new Date().toISOString() })
-          .where("guild_id", "=", guildId),
-      );
+      await runEffect(softDeleteReportsForGuild(guildId));
 
       // Delete message stats
-      await run(db.deleteFrom("message_stats").where("guild_id", "=", guildId));
+      await runEffect(deleteMessageStatsForGuild(guildId));
 
       // Delete subscription data
-      await run(
-        db.deleteFrom("guild_subscriptions").where("guild_id", "=", guildId),
-      );
+      await runEffect(SubscriptionService.deleteGuildSubscription(guildId));
 
       // Delete guild settings
-      await run(db.deleteFrom("guilds").where("id", "=", guildId));
+      await runEffect(deleteGuild(guildId));
 
       log("info", "DataDelete", "Guild data deleted successfully", {
         userId: user.id,

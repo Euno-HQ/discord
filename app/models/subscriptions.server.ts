@@ -331,6 +331,19 @@ const initializeFreeSubscription = (
     }),
   );
 
+const deleteGuildSubscription = (
+  guildId: string,
+): Effect.Effect<void, SqlError, DatabaseService> =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+
+    yield* db.deleteFrom("guild_subscriptions").where("guild_id", "=", guildId);
+  }).pipe(
+    Effect.withSpan("SubscriptionService.deleteGuildSubscription", {
+      attributes: { guildId },
+    }),
+  );
+
 // Additional observability methods
 const getAllSubscriptions = (): Effect.Effect<
   readonly GuildSubscription[],
@@ -410,6 +423,7 @@ export const SubscriptionService = {
   updateSubscriptionStatus,
   getProductTier,
   initializeFreeSubscription,
+  deleteGuildSubscription,
   getAllSubscriptions,
   auditSubscriptionChanges,
 };

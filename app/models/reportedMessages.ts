@@ -99,6 +99,42 @@ export const recordReport = (data: {
   );
 
 /**
+ * Get non-deleted reports for a guild for GDPR data export (sanitized, capped).
+ */
+export const getReportedMessagesForExport = (guildId: string) =>
+  Effect.gen(function* () {
+    const kysely = yield* DatabaseService;
+
+    return yield* kysely
+      .selectFrom("reported_messages")
+      .selectAll()
+      .where("guild_id", "=", guildId)
+      .where("deleted_at", "is", null)
+      .limit(100);
+  }).pipe(
+    Effect.withSpan("getReportedMessagesForExport", {
+      attributes: { guildId },
+    }),
+  );
+
+/**
+ * Soft-delete ALL reported messages for a guild (GDPR deletion).
+ * NOTE: intentionally has no `deleted_at is null` guard — every row for the
+ * guild is stamped, matching the original bridge behavior.
+ */
+export const softDeleteReportsForGuild = (guildId: string) =>
+  Effect.gen(function* () {
+    const kysely = yield* DatabaseService;
+
+    yield* kysely
+      .updateTable("reported_messages")
+      .set({ deleted_at: new Date().toISOString() })
+      .where("guild_id", "=", guildId);
+  }).pipe(
+    Effect.withSpan("softDeleteReportsForGuild", { attributes: { guildId } }),
+  );
+
+/**
  * Get a specific report by ID.
  */
 export const getReportById = (reportId: string) =>
@@ -576,6 +612,78 @@ const deleteSingleMessage = (
         error,
       }).pipe(Effect.as({ success: false as const, messageId, error })),
     ),
+  );
+
+/**
+ * Get daily report counts grouped by guild and day, across many guilds
+ * (dashboard sparkline source for the multi-guild "app" overview).
+ */
+export const getDailyReportCountsByGuilds = (
+  guildIds: string[],
+  since: string,
+) =>
+  Effect.gen(function* () {
+    const kysely = yield* DatabaseService;
+
+    return yield* kysely
+      .selectFrom("reported_messages")
+      .select((eb) => [
+        "guild_id",
+        eb.fn("strftime", [eb.val("%Y-%m-%d"), eb.ref("created_at")]).as("day"),
+        eb.fn.countAll<number>().as("count"),
+      ])
+      .where("guild_id", "in", guildIds)
+      .where("created_at", ">=", since)
+      .groupBy(["guild_id", "day"])
+      .orderBy("guild_id")
+      .orderBy("day");
+  }).pipe(
+    Effect.withSpan("ReportedMessage.getDailyReportCountsByGuilds", {
+      attributes: { guildIds: guildIds.join(","), since },
+    }),
+  );
+
+/**
+ * Get daily report counts (dashboard sparkline source) for a single guild.
+ */
+export const getDailyReportCounts = (guildId: string, since: string) =>
+  Effect.gen(function* () {
+    const kysely = yield* DatabaseService;
+
+    return yield* kysely
+      .selectFrom("reported_messages")
+      .select((eb) => [
+        eb.fn("strftime", [eb.val("%Y-%m-%d"), eb.ref("created_at")]).as("day"),
+        eb.fn.countAll<number>().as("count"),
+      ])
+      .where("guild_id", "=", guildId)
+      .where("created_at", ">=", since)
+      .groupBy("day")
+      .orderBy("day");
+  }).pipe(
+    Effect.withSpan("ReportedMessage.getDailyReportCounts", {
+      attributes: { guildId, since },
+    }),
+  );
+
+/**
+ * Get report counts grouped by reason for a single guild (dashboard use).
+ */
+export const getReportCountsByReason = (guildId: string, since: string) =>
+  Effect.gen(function* () {
+    const kysely = yield* DatabaseService;
+
+    return yield* kysely
+      .selectFrom("reported_messages")
+      .select((eb) => ["reason", eb.fn.countAll<number>().as("count")])
+      .where("guild_id", "=", guildId)
+      .where("created_at", ">=", since)
+      .groupBy("reason")
+      .orderBy("count", "desc");
+  }).pipe(
+    Effect.withSpan("ReportedMessage.getReportCountsByReason", {
+      attributes: { guildId, since },
+    }),
   );
 
 /**

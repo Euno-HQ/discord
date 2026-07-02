@@ -1,5 +1,5 @@
 import { Data, Effect } from "effect";
-import { sql } from "kysely";
+import { sql, type Selectable } from "kysely";
 
 import {
   DatabaseService,
@@ -62,6 +62,48 @@ export function createMessageStatsQuery(
 
   return query;
 }
+
+/**
+ * Get raw message_stats rows for a guild for GDPR data export (capped).
+ * Requires DatabaseService in context.
+ */
+export const getMessageStatsForExport = (
+  guildId: MessageStats["guild_id"],
+): Effect.Effect<
+  Selectable<DB["message_stats"]>[],
+  SqlError,
+  DatabaseService
+> =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+
+    return yield* db
+      .selectFrom("message_stats")
+      .selectAll()
+      .where("guild_id", "=", guildId)
+      .limit(1000);
+  }).pipe(
+    Effect.withSpan("Activity.getMessageStatsForExport", {
+      attributes: { guildId },
+    }),
+  );
+
+/**
+ * Delete all message_stats rows for a guild (GDPR deletion).
+ * Requires DatabaseService in context.
+ */
+export const deleteMessageStatsForGuild = (
+  guildId: MessageStats["guild_id"],
+): Effect.Effect<void, SqlError, DatabaseService> =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+
+    yield* db.deleteFrom("message_stats").where("guild_id", "=", guildId);
+  }).pipe(
+    Effect.withSpan("Activity.deleteMessageStatsForGuild", {
+      attributes: { guildId },
+    }),
+  );
 
 interface DailyBreakdown {
   messages: number;

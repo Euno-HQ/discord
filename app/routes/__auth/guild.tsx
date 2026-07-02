@@ -1,9 +1,15 @@
 import { data, Link, useLoaderData } from "react-router";
 
-import { db, run, runEffect } from "#~/AppRuntime";
+import { runEffect } from "#~/AppRuntime";
 import { Sparkline } from "#~/components/Sparkline";
 import { ssrDiscordSdk, userDiscordSdkFromRequest } from "#~/discord/api";
 import { getCachedGuilds } from "#~/helpers/guildCache.server";
+import { getOpenEscalationsForGuild } from "#~/models/escalations.server";
+import { getModActionCountsByType } from "#~/models/modActions";
+import {
+  getDailyReportCounts,
+  getReportCountsByReason,
+} from "#~/models/reportedMessages";
 import { requireUser } from "#~/models/session.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
@@ -54,58 +60,16 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     tier,
   ] = await Promise.all([
     // Daily report counts for sparkline (30 days)
-    run(
-      db
-        .selectFrom("reported_messages")
-        .select((eb) => [
-          eb
-            .fn("strftime", [eb.val("%Y-%m-%d"), eb.ref("created_at")])
-            .as("day"),
-          eb.fn.countAll<number>().as("count"),
-        ])
-        .where("guild_id", "=", guildId)
-        .where("created_at", ">=", thirtyDaysAgo)
-        .groupBy("day")
-        .orderBy("day"),
-    ),
+    runEffect(getDailyReportCounts(guildId, thirtyDaysAgo)),
 
     // Mod action counts grouped by action_type
-    run(
-      db
-        .selectFrom("mod_actions")
-        .select((eb) => ["action_type", eb.fn.countAll<number>().as("count")])
-        .where("guild_id", "=", guildId)
-        .where("created_at", ">=", thirtyDaysAgo)
-        .groupBy("action_type"),
-    ),
+    runEffect(getModActionCountsByType(guildId, thirtyDaysAgo)),
 
     // Report counts grouped by reason
-    run(
-      db
-        .selectFrom("reported_messages")
-        .select((eb) => ["reason", eb.fn.countAll<number>().as("count")])
-        .where("guild_id", "=", guildId)
-        .where("created_at", ">=", thirtyDaysAgo)
-        .groupBy("reason")
-        .orderBy("count", "desc"),
-    ),
+    runEffect(getReportCountsByReason(guildId, thirtyDaysAgo)),
 
     // Open escalations (full rows, limited to 10)
-    run(
-      db
-        .selectFrom("escalations")
-        .select([
-          "id",
-          "reported_user_id",
-          "initiator_id",
-          "created_at",
-          "thread_id",
-        ])
-        .where("guild_id", "=", guildId)
-        .where("resolution", "is", null)
-        .orderBy("created_at", "desc")
-        .limit(10),
-    ),
+    runEffect(getOpenEscalationsForGuild(guildId, 10)),
 
     // Subscription tier
     runEffect(SubscriptionService.getProductTier(guildId)),

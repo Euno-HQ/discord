@@ -99,3 +99,41 @@ export const getModActionCounts = (userId: string, guildId: string) =>
       attributes: { userId, guildId },
     }),
   );
+
+/**
+ * Get mod action counts per guild (30-day dashboard totals) across many guilds.
+ */
+export const getModActionCountsByGuilds = (guildIds: string[], since: string) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+
+    return yield* db
+      .selectFrom("mod_actions")
+      .select((eb) => ["guild_id", eb.fn.countAll<number>().as("count")])
+      .where("guild_id", "in", guildIds)
+      .where("created_at", ">=", since)
+      .groupBy("guild_id");
+  }).pipe(
+    Effect.withSpan("ModActions.getModActionCountsByGuilds", {
+      attributes: { guildIds: guildIds.join(","), since },
+    }),
+  );
+
+/**
+ * Get mod action counts grouped by action_type for a single guild (dashboard use).
+ */
+export const getModActionCountsByType = (guildId: string, since: string) =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+
+    return yield* db
+      .selectFrom("mod_actions")
+      .select((eb) => ["action_type", eb.fn.countAll<number>().as("count")])
+      .where("guild_id", "=", guildId)
+      .where("created_at", ">=", since)
+      .groupBy("action_type");
+  }).pipe(
+    Effect.withSpan("ModActions.getModActionCountsByType", {
+      attributes: { guildId, since },
+    }),
+  );

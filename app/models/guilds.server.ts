@@ -109,6 +109,15 @@ export const setSettings = (
       .where("id", "=", guildId);
   }).pipe(Effect.withSpan("Guild.setSettings", { attributes: { guildId } }));
 
+export const deleteGuild = (
+  guildId: string,
+): Effect.Effect<void, SqlError, DatabaseService> =>
+  Effect.gen(function* () {
+    const db = yield* DatabaseService;
+
+    yield* db.deleteFrom("guilds").where("id", "=", guildId);
+  }).pipe(Effect.withSpan("Guild.deleteGuild", { attributes: { guildId } }));
+
 export const fetchSettings = <T extends keyof typeof SETTINGS>(
   guildId: string,
   keys: T[],

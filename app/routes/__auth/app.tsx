@@ -1,11 +1,14 @@
 import { useLoaderData } from "react-router";
 
-import { db, run, runEffect } from "#~/AppRuntime";
+import { runEffect } from "#~/AppRuntime";
 import { AddEunoCard } from "#~/components/AddEunoCard";
 import { ServerCard } from "#~/components/ServerCard";
 import { ssrDiscordSdk, userDiscordSdkFromRequest } from "#~/discord/api";
 import { botInviteUrl } from "#~/helpers/botPermissions";
 import { getCachedGuilds } from "#~/helpers/guildCache.server";
+import { getOpenEscalationCountsByGuilds } from "#~/models/escalations.server";
+import { getModActionCountsByGuilds } from "#~/models/modActions";
+import { getDailyReportCountsByGuilds } from "#~/models/reportedMessages";
 import { getUser } from "#~/models/session.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
@@ -60,42 +63,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   const [dailyReportRows, modActionRows, escalationRows, allSubscriptions] =
     await Promise.all([
       // 1. Daily report counts for sparklines
-      run(
-        db
-          .selectFrom("reported_messages")
-          .select((eb) => [
-            "guild_id",
-            eb
-              .fn("strftime", [eb.val("%Y-%m-%d"), eb.ref("created_at")])
-              .as("day"),
-            eb.fn.countAll<number>().as("count"),
-          ])
-          .where("guild_id", "in", guildIds)
-          .where("created_at", ">=", thirtyDaysAgo)
-          .groupBy(["guild_id", "day"])
-          .orderBy("guild_id")
-          .orderBy("day"),
-      ),
+      runEffect(getDailyReportCountsByGuilds(guildIds, thirtyDaysAgo)),
 
       // 2. Mod action counts (30 days)
-      run(
-        db
-          .selectFrom("mod_actions")
-          .select((eb) => ["guild_id", eb.fn.countAll<number>().as("count")])
-          .where("guild_id", "in", guildIds)
-          .where("created_at", ">=", thirtyDaysAgo)
-          .groupBy("guild_id"),
-      ),
+      runEffect(getModActionCountsByGuilds(guildIds, thirtyDaysAgo)),
 
       // 3. Open escalation counts
-      run(
-        db
-          .selectFrom("escalations")
-          .select((eb) => ["guild_id", eb.fn.countAll<number>().as("count")])
-          .where("guild_id", "in", guildIds)
-          .where("resolution", "is", null)
-          .groupBy("guild_id"),
-      ),
+      runEffect(getOpenEscalationCountsByGuilds(guildIds)),
 
       // 4. All subscriptions
       runEffect(SubscriptionService.getAllSubscriptions()),
