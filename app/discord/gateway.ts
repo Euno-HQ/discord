@@ -3,7 +3,7 @@ import { Events, InteractionType, type Client } from "discord.js";
 import { Effect } from "effect";
 
 import { runEffect } from "#~/AppRuntime";
-import { client, login } from "#~/discord/client.server";
+import { client, getBotConnection, login } from "#~/discord/client.server";
 import { matchCommand } from "#~/discord/deployCommands.server";
 import { logEffect } from "#~/effects/observability.ts";
 import { type AnyCommand } from "#~/helpers/discord.ts";
@@ -38,7 +38,9 @@ export const initDiscordBot: Effect.Effect<Client> = Effect.gen(function* () {
   yield* logEffect("info", "Gateway", "Initializing Discord gateway");
   globalThis.__discordGatewayInitialized = true;
 
-  void login();
+  // Kept as a promise so `waitForReady` below can stop waiting when login
+  // fails — otherwise a failed login parks the startup fiber forever.
+  const loginOutcome = login();
 
   // Diagnostic: log all raw gateway events
   client.on(
@@ -142,17 +144,25 @@ export const initDiscordBot: Effect.Effect<Client> = Effect.gen(function* () {
   // Add connection monitoring
   client.on(Events.ShardDisconnect, async (closeEvent, _shardId) => {
     if (FATAL_CLOSE_CODES.has(closeEvent.code)) {
-      log("error", "Gateway", "Received fatal gateway close code — exiting", {
-        code: closeEvent.code,
-        reason: closeEvent.reason,
-      });
+      // Fatal for the *gateway*, not for the process. discord.js will not
+      // reconnect after these codes, and a new token or restored intents both
+      // require an operator action anyway. Alert loudly and keep serving the
+      // web app rather than crash-looping the whole container.
+      log(
+        "error",
+        "Gateway",
+        "Received fatal gateway close code — bot is offline until redeployed",
+        {
+          code: closeEvent.code,
+          reason: closeEvent.reason,
+        },
+      );
       Sentry.captureMessage(
         `Fatal gateway disconnect: code ${closeEvent.code}`,
         "fatal",
       );
-      // Flush Sentry before exiting so the alert is not lost when the process terminates.
       await Sentry.flush(2000);
-      process.exit(1);
+      return;
     }
 
     log("warn", "Gateway", "Client disconnected", {
@@ -172,14 +182,33 @@ export const initDiscordBot: Effect.Effect<Client> = Effect.gen(function* () {
     botStats.reconnection(client.guilds.cache.size, client.users.cache.size);
   });
 
-  // Wait for the client to be ready before continuing
+  // Wait for the client to be ready — but give up the moment login reports a
+  // terminal failure, so a bot that cannot authenticate doesn't strand the
+  // startup fiber and block everything sequenced after it.
   const waitForReady = Effect.async<Client>((resume) => {
-    client.once(Events.ClientReady, () => {
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
       resume(Effect.succeed(client));
+    };
+
+    client.once(Events.ClientReady, settle);
+    void loginOutcome.then((state) => {
+      if (state !== "connected") settle();
     });
   });
 
   yield* waitForReady;
+
+  if (getBotConnection().state !== "connected") {
+    yield* logEffect(
+      "warn",
+      "Gateway",
+      "Continuing without a Discord gateway connection",
+      { connection: getBotConnection().state },
+    );
+  }
 
   return client;
 });
