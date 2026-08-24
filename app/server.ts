@@ -20,6 +20,7 @@ import { SetupComponentCommands } from "#~/commands/setupHandlers";
 import { Command as setupReactjiChannel } from "#~/commands/setupReactjiChannel";
 import { Command as setupTicket } from "#~/commands/setupTickets";
 import { Command as track } from "#~/commands/track";
+import { getBotConnection } from "#~/discord/client.server";
 import {
   deployCommands,
   registerCommand,
@@ -121,13 +122,22 @@ const startup = Effect.gen(function* () {
 
   yield* logEffect("debug", "Server", "initializing Discord bot");
   const discordClient = yield* initDiscordBot;
+  const connection = getBotConnection();
+  const botConnected = connection.state === "connected";
+
+  if (!botConnected) {
+    yield* logEffect(
+      "error",
+      "Server",
+      "Discord gateway unavailable — starting in web-only degraded mode",
+      { connection: connection.state, attempts: connection.attempts },
+    );
+  }
 
   // One-time setup: event handlers, schedulers, signal handlers.
   // Skipped on HMR reloads to prevent duplicate listeners.
   if (!globalThis.__discordOneTimeSetupDone) {
     globalThis.__discordOneTimeSetupDone = true;
-
-    yield* tryDiscord("init", () => deployCommands(discordClient));
 
     // Message cache expiration (was inside startDeletionLogging, now standalone)
     startMessageCacheExpiration(() =>
@@ -151,23 +161,32 @@ const startup = Effect.gen(function* () {
       ),
     );
 
-    // Start escalation resolver scheduler (must be after client is ready)
-    startEscalationResolver(discordClient);
     runtime.runFork(runJobRunner);
 
-    yield* logEffect("info", "Gateway", "Gateway initialization completed", {
-      guildCount: discordClient.guilds.cache.size,
-      userCount: discordClient.users.cache.size,
-    });
+    // Everything below needs a live gateway. When Discord has rejected us the
+    // client exists but is not logged in, so these calls would throw and take
+    // the startup fiber down with them — stranding the pipelines, job runner,
+    // and signal handlers that the web app still depends on.
+    if (botConnected) {
+      yield* tryDiscord("init", () => deployCommands(discordClient));
 
-    // Track bot startup in business analytics
-    botStats.botStarted(
-      discordClient.guilds.cache.size,
-      discordClient.users.cache.size,
-    );
+      // Start escalation resolver scheduler (must be after client is ready)
+      startEscalationResolver(discordClient);
 
-    // Initialize PostHog group analytics for guilds
-    yield* initializeGroups(discordClient.guilds.cache);
+      yield* logEffect("info", "Gateway", "Gateway initialization completed", {
+        guildCount: discordClient.guilds.cache.size,
+        userCount: discordClient.users.cache.size,
+      });
+
+      // Track bot startup in business analytics
+      botStats.botStarted(
+        discordClient.guilds.cache.size,
+        discordClient.users.cache.size,
+      );
+
+      // Initialize PostHog group analytics for guilds
+      yield* initializeGroups(discordClient.guilds.cache);
+    }
 
     yield* logEffect("debug", "Server", "scheduling integrity check");
     runtime.runFork(runIntegrityCheck);
