@@ -2,7 +2,20 @@
 import { Context, Effect, Layer } from "effect";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { Resource } from "@effect/opentelemetry";
+import { SqlClient } from "@effect/sql";
+
+import type { RuntimeContext } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
+import { DiscordClient } from "#~/discord/client.server";
+import { DiscordEventBus } from "#~/discord/eventBus";
+import { MessageCacheService } from "#~/discord/messageCacheService";
+import { FeatureFlagService } from "#~/effects/featureFlags";
+import { PostHogService } from "#~/effects/posthog";
+import { SupervisorService } from "#~/effects/supervisor";
+import { SpamDetectionService } from "#~/features/spam/service";
 import { fetchGuild } from "#~/models/guilds.server";
+import { UserService } from "#~/models/user.server";
 
 import { handleGuildCreate, handleGuildDelete } from "./onboardGuildHandlers";
 
@@ -38,9 +51,27 @@ vi.mock("#~/discord/deployCommands.server", () => ({
 
 // --- Helpers ---
 
-const runHandler = (effect: Effect.Effect<void, unknown, any>) =>
-  // @ts-expect-error - test mock: RuntimeContext services are vi.mocked
-  Effect.runPromise(effect);
+// None of the RuntimeContext services are used directly by these handlers
+// (their real call sites — fetchGuild, deployToGuild — are vi.mocked below),
+// but the handlers' declared type is RuntimeContext, so every tag it carries
+// must be supplied for the R channel to close to `never` — that's what proves
+// no new dependency snuck in unnoticed.
+const fullRuntimeContext = Layer.mergeAll(
+  Layer.succeed(DatabaseService, {} as any),
+  Layer.succeed(SqlClient.SqlClient, {} as any),
+  Resource.layerEmpty,
+  Layer.succeed(PostHogService, {} as any),
+  Layer.succeed(FeatureFlagService, {} as any),
+  Layer.succeed(SpamDetectionService, {} as any),
+  Layer.succeed(SupervisorService, {} as any),
+  Layer.succeed(DiscordClient, {} as any),
+  Layer.succeed(DiscordEventBus, {} as any),
+  Layer.succeed(UserService, {} as any),
+  Layer.succeed(MessageCacheService, {} as any),
+);
+
+const runHandler = (effect: Effect.Effect<void, unknown, RuntimeContext>) =>
+  Effect.runPromise(effect.pipe(Effect.provide(fullRuntimeContext)));
 
 const makeGuildCreateEvent = (overrides: any = {}) => ({
   type: "GuildCreate" as const,

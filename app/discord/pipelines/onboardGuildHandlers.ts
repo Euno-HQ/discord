@@ -4,6 +4,12 @@ import { Effect } from "effect";
 import type { RuntimeContext } from "#~/AppRuntime";
 import { deployToGuild } from "#~/discord/deployCommands.server";
 import type { GuildCreateEvent, GuildDeleteEvent } from "#~/discord/events";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
+import {
+  ResourceMissingError,
+  type DiscordError,
+  type SqlError,
+} from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { botStats } from "#~/helpers/metrics";
 import { fetchGuild } from "#~/models/guilds.server";
@@ -16,22 +22,19 @@ const WELCOME_MESSAGE = `Euno is here! Run \`/setup\` to get started.`;
  * with "mod" or "intro" in the name. Gives up silently if all fail.
  */
 const sendWelcome = (guild: Guild) =>
-  Effect.tryPromise({
-    try: () => guild.systemChannel!.send(WELCOME_MESSAGE),
-    catch: (e) => e,
-  }).pipe(
+  tryDiscord("sendWelcomeSystemChannel", () =>
+    guild.systemChannel!.send(WELCOME_MESSAGE),
+  ).pipe(
     Effect.catchAll(() =>
-      Effect.tryPromise({
-        try: () => guild.publicUpdatesChannel!.send(WELCOME_MESSAGE),
-        catch: (e) => e,
-      }),
+      tryDiscord("sendWelcomePublicUpdatesChannel", () =>
+        guild.publicUpdatesChannel!.send(WELCOME_MESSAGE),
+      ),
     ),
     Effect.catchAll(() =>
       Effect.gen(function* () {
-        const channels = yield* Effect.tryPromise({
-          try: () => guild.channels.fetch(),
-          catch: (e) => e,
-        });
+        const channels = yield* tryDiscord("fetchGuildChannelsForWelcome", () =>
+          guild.channels.fetch(),
+        );
         const likelyChannels = channels.filter((c): c is TextChannel =>
           Boolean(
             c &&
@@ -41,17 +44,24 @@ const sendWelcome = (guild: Guild) =>
         );
         const channelArray = [...likelyChannels.values()];
         // Build a chain of fallbacks: try first channel, then second, etc.
-        const attempts = channelArray.reduce<Effect.Effect<unknown, unknown>>(
+        const attempts = channelArray.reduce<
+          Effect.Effect<unknown, DiscordError>
+        >(
           (acc, ch) =>
             acc.pipe(
               Effect.catchAll(() =>
-                Effect.tryPromise({
-                  try: () => ch.send(WELCOME_MESSAGE),
-                  catch: (e) => e,
-                }),
+                tryDiscord("sendWelcomeFallbackChannel", () =>
+                  ch.send(WELCOME_MESSAGE),
+                ),
               ),
             ),
-          Effect.fail("no likely channels found"),
+          Effect.fail(
+            new ResourceMissingError({
+              source: "discord",
+              operation: "sendWelcomeFallbackChannel",
+              cause: new Error("no likely channels found"),
+            }),
+          ),
         );
         yield* attempts;
       }),
@@ -61,7 +71,7 @@ const sendWelcome = (guild: Guild) =>
 
 export const handleGuildCreate = (
   e: GuildCreateEvent,
-): Effect.Effect<void, unknown, RuntimeContext> =>
+): Effect.Effect<void, DiscordError | SqlError, RuntimeContext> =>
   Effect.gen(function* () {
     const appGuild = yield* fetchGuild(e.guild.id);
 
@@ -75,17 +85,16 @@ export const handleGuildCreate = (
       guildName: e.guild.name,
     });
 
-    yield* Effect.tryPromise({
-      try: () => deployToGuild(e.guild.id, e.guild.name),
-      catch: (err) => err,
-    });
+    yield* tryDiscord("deployToGuild", () =>
+      deployToGuild(e.guild.id, e.guild.name),
+    );
 
     yield* sendWelcome(e.guild);
   });
 
 export const handleGuildDelete = (
   e: GuildDeleteEvent,
-): Effect.Effect<void, unknown, RuntimeContext> =>
+): Effect.Effect<void, SqlError, RuntimeContext> =>
   Effect.gen(function* () {
     // GuildDelete also fires when a guild becomes temporarily unavailable
     if (e.guild.available === false) return;

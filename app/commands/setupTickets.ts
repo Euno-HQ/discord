@@ -19,6 +19,7 @@ import {
   interactionReply,
   sendMessage,
 } from "#~/effects/discordSdk.ts";
+import { NotFoundError } from "#~/effects/errors";
 import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
 import {
@@ -126,10 +127,12 @@ export const Command = [
             .values({ message_id: interaction.message.id, role_id: mod });
           config = insertedRows[0];
           if (!config) {
-            yield* Effect.fail(
-              new Error("Something went wrong while fixing tickets config"),
+            return yield* Effect.fail(
+              new NotFoundError({
+                resource: "ticketsConfig",
+                id: interaction.message.id,
+              }),
             );
-            return;
           }
         }
 

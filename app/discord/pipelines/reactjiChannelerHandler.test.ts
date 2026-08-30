@@ -2,7 +2,19 @@
 import { Context, Effect, Layer } from "effect";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { Resource } from "@effect/opentelemetry";
+import { SqlClient } from "@effect/sql";
+
+import type { RuntimeContext } from "#~/AppRuntime";
 import { DatabaseService } from "#~/Database";
+import { DiscordClient } from "#~/discord/client.server";
+import { DiscordEventBus } from "#~/discord/eventBus";
+import { MessageCacheService } from "#~/discord/messageCacheService";
+import { FeatureFlagService } from "#~/effects/featureFlags";
+import { PostHogService } from "#~/effects/posthog";
+import { SupervisorService } from "#~/effects/supervisor";
+import { SpamDetectionService } from "#~/features/spam/service";
+import { UserService } from "#~/models/user.server";
 
 import { handleReactionAdd } from "./reactjiChannelerHandler";
 
@@ -39,13 +51,36 @@ const makeMockDb = (configs: any[] = []) => ({
   }),
 });
 
+// Services beyond DatabaseService are unused by this handler (its real call
+// sites are vi.mocked below), but the handler's declared type is
+// RuntimeContext, so every tag it carries must be supplied for the R channel
+// to close to `never` — that's what proves no new dependency snuck in unnoticed.
+const restOfRuntimeContext = Layer.mergeAll(
+  Layer.succeed(SqlClient.SqlClient, {} as any),
+  Resource.layerEmpty,
+  Layer.succeed(PostHogService, {} as any),
+  Layer.succeed(FeatureFlagService, {} as any),
+  Layer.succeed(SpamDetectionService, {} as any),
+  Layer.succeed(SupervisorService, {} as any),
+  Layer.succeed(DiscordClient, {} as any),
+  Layer.succeed(DiscordEventBus, {} as any),
+  Layer.succeed(UserService, {} as any),
+  Layer.succeed(MessageCacheService, {} as any),
+);
+
 const runHandler = (
-  effect: Effect.Effect<void, unknown, any>,
+  effect: Effect.Effect<void, never, RuntimeContext>,
   db = makeMockDb(),
 ) =>
   Effect.runPromise(
-    // @ts-expect-error - test mock: RuntimeContext services are vi.mocked
-    effect.pipe(Effect.provide(Layer.succeed(DatabaseService, db))),
+    effect.pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(DatabaseService, db as any),
+          restOfRuntimeContext,
+        ),
+      ),
+    ),
   );
 
 const makeReactionEvent = (overrides: any = {}) => ({

@@ -69,14 +69,7 @@ export const automodPipeline: Effect.Effect<void, never, RuntimeContext> =
           if (verdict.tier !== "none") {
             yield* spamService.executeResponse(verdict, e.message, e.member);
           }
-        }).pipe(
-          Effect.catchAll((err) =>
-            logEffect("warn", "Automod", "Pipeline handler failed", {
-              ...logContext(e),
-              error: err,
-            }),
-          ),
-        ),
+        }),
       ),
 
       Stream.runDrain,

@@ -199,7 +199,7 @@ export const handleDelete = (
             e.targetId === userId &&
             Date.now() - e.createdTimestamp < AUDIT_LOG_WINDOW_MS,
         ),
-    ).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    );
 
     const sent = `<t:${Math.floor(msg.createdTimestamp / 1000)}:R>`;
     const header = auditEntry?.executor

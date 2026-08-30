@@ -32,9 +32,7 @@ export const deletionLoggerPipeline: Effect.Effect<
     // All GuildMessageEvent variants carry `guild: Guild`, so `e.guild.id` is
     // always available.
     Stream.filterEffect((e) =>
-      flags
-        .isPostHogEnabled("deletion-log", e.guild.id)
-        .pipe(Effect.catchAll(() => Effect.succeed(false))),
+      flags.isPostHogEnabled("deletion-log", e.guild.id),
     ),
 
     // Cache messages on the way through

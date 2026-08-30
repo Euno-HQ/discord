@@ -62,6 +62,9 @@ describe("scheduleTaskEffect", () => {
       const task = Effect.gen(function* () {
         const n = yield* Ref.updateAndGet(runs, (x) => x + 1);
         if (n === 1) {
+          // Deliberately a plain Error — this test only cares that an
+          // untyped failure doesn't tear down the schedule, not the taxonomy.
+          // @effect-diagnostics-next-line effect/globalErrorInEffectFailure:off
           return yield* Effect.fail(new Error("boom"));
         }
       });

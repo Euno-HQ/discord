@@ -2,11 +2,23 @@
 import { Context, Effect, Layer } from "effect";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { Resource } from "@effect/opentelemetry";
+import { SqlClient } from "@effect/sql";
+
+import type { RuntimeContext } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
 import { fetchAuditLogEntry } from "#~/discord/auditLog";
+import { DiscordClient } from "#~/discord/client.server";
+import { DiscordEventBus } from "#~/discord/eventBus";
 import { MessageCacheService } from "#~/discord/messageCacheService";
 import { fetchChannel, fetchUserOrNull } from "#~/effects/discordSdk";
+import { FeatureFlagService } from "#~/effects/featureFlags";
+import { PostHogService } from "#~/effects/posthog";
+import { SupervisorService } from "#~/effects/supervisor";
+import { SpamDetectionService } from "#~/features/spam/service";
 import { getOrCreateDeletionLogThread } from "#~/models/deletionLogThreads";
 import { fetchSettings } from "#~/models/guilds.server";
+import { UserService } from "#~/models/user.server";
 import { getOrCreateUserThread } from "#~/models/userThreads";
 
 import {
@@ -68,13 +80,36 @@ const makeMockCache = (
   expireRows: () => Effect.void,
 });
 
+// Services beyond MessageCacheService are unused by these handlers (their
+// real call sites are vi.mocked below), but the handlers' declared type is
+// RuntimeContext, so every tag it carries must be supplied for the R channel
+// to close to `never` — that's what proves no new dependency snuck in unnoticed.
+const restOfRuntimeContext = Layer.mergeAll(
+  Layer.succeed(DatabaseService, {} as any),
+  Layer.succeed(SqlClient.SqlClient, {} as any),
+  Resource.layerEmpty,
+  Layer.succeed(PostHogService, {} as any),
+  Layer.succeed(FeatureFlagService, {} as any),
+  Layer.succeed(SpamDetectionService, {} as any),
+  Layer.succeed(SupervisorService, {} as any),
+  Layer.succeed(DiscordClient, {} as any),
+  Layer.succeed(DiscordEventBus, {} as any),
+  Layer.succeed(UserService, {} as any),
+);
+
 const runHandler = (
-  effect: Effect.Effect<void, unknown, any>,
+  effect: Effect.Effect<void, unknown, RuntimeContext>,
   cache = makeMockCache(),
 ) =>
   Effect.runPromise(
-    // @ts-expect-error - test mock: RuntimeContext services are vi.mocked, Layer.succeed covers MessageCacheService
-    effect.pipe(Effect.provide(Layer.succeed(MessageCacheService, cache))),
+    effect.pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(MessageCacheService, cache),
+          restOfRuntimeContext,
+        ),
+      ),
+    ),
   );
 
 const makeDeleteEvent = (overrides: any = {}) => ({

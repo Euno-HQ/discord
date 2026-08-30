@@ -77,6 +77,16 @@ export class StripeError extends Data.TaggedError("StripeError")<{
 }> {}
 
 /**
+ * A raw `fetch` to an outgoing alert webhook (e.g. the emergency Discord/Slack
+ * webhook used by integrity-check alerting) failed. Not part of the
+ * `DiscordError` taxonomy — this is a bare `fetch`, not an SDK call.
+ */
+export class WebhookAlertError extends Data.TaggedError("WebhookAlertError")<{
+  operation: string;
+  cause: Error;
+}> {}
+
+/**
  * Raw `fetch` to a Discord OAuth endpoint (e.g. `/users/@me`) failed: either the
  * request rejected (network) or returned a non-2xx status. This is distinct from
  * the `DiscordError` taxonomy, which classifies `@discordjs/rest` SDK rejection

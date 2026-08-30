@@ -404,4 +404,4 @@ export const runJobRunner = Effect.gen(function* () {
     jobSignal = null;
     yield* pollAndExecuteEffect;
   }
-}).pipe(Effect.catchAll(() => Effect.succeed(null)));
+});

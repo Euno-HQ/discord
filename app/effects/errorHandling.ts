@@ -102,9 +102,29 @@ export const toUserResponse = (
           "We hit a billing error — please try again shortly or contact support if it persists.",
         ephemeral: true,
       };
-    // ClientError, ServerError, ConfigError, SqlError, DatabaseCorruptionError,
-    // NotFoundError, AlreadyResolvedError, NoLeaderError, ResolutionExecutionError
-    default:
+    // Everything below deliberately gets GENERIC: these are internal faults with
+    // nothing safe or actionable to tell a user. They are listed explicitly rather
+    // than swept up by `default:` so that the exhaustiveness check underneath has
+    // teeth — adding a member to AppError must be a decision, not a silent
+    // fallthrough into "Something went wrong".
+    case "ClientError":
+    case "ServerError":
+    case "NotFoundError":
+    case "ConfigError":
+    case "DatabaseCorruptionError":
+    case "AlreadyResolvedError":
+    case "NoLeaderError":
+    case "ResolutionExecutionError":
+    case "SubscriptionNotFoundError":
+    case "SqlError":
+    case "UnknownException":
       return GENERIC;
+    default: {
+      // If this line stops compiling, a new member was added to AppError without
+      // deciding what a user should see. Add a case above — either real copy or
+      // an explicit opt-in to GENERIC.
+      const _exhaustive: never = e;
+      return GENERIC;
+    }
   }
 };

@@ -9,6 +9,7 @@ import { Effect } from "effect";
 
 import { AUDIT_LOG_WINDOW_MS, fetchAuditLogEntry } from "#~/discord/auditLog";
 import { fetchChannelFromClient, sendMessage } from "#~/effects/discordSdk";
+import { ConfigError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { truncateMessage } from "#~/helpers/string";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
@@ -181,7 +182,12 @@ const fetchModLogChannel = (rule: AutoModerationRule) =>
         "mod-log channel not configured, skipping automod rule log",
         { guildId: rule.guild.id },
       );
-      return yield* Effect.fail(new Error("modLog channel not configured"));
+      return yield* Effect.fail(
+        new ConfigError({
+          key: "modLog",
+          message: "mod-log channel not configured",
+        }),
+      );
     }
     return yield* fetchChannelFromClient<GuildTextBasedChannel>(
       rule.guild.client,

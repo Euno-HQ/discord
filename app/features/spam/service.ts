@@ -284,21 +284,7 @@ export const SpamDetectionServiceLive = Layer.effect(
           }
 
           return verdict;
-        }).pipe(
-          Effect.catchAll((error) =>
-            Effect.gen(function* () {
-              yield* logEffect(
-                "error",
-                "SpamDetection",
-                "Spam check failed, falling through",
-                { error },
-              );
-              // Spam detection failure should never block message processing
-              return computeVerdict([]);
-            }),
-          ),
-          Effect.withSpan("SpamDetection.checkMessage"),
-        ),
+        }).pipe(Effect.withSpan("SpamDetection.checkMessage")),
 
       executeResponse: (verdict, message, member) =>
         executeResponse(verdict, message, member).pipe(
