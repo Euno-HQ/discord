@@ -2,7 +2,7 @@
   "effectPromise": 0,
   "unknownErrorChannel": 0,
   "anyErrorChannel": 0,
-  "bridgesOutsideRoutes": 45,
+  "bridgesOutsideRoutes": 33,
   "asyncInServerZones": 13,
   "asCasts": 10,
   "tsExpectError": 12,

@@ -35,14 +35,38 @@ const walk = (dir: string, out: string[] = []): string[] => {
 
 const all = walk("app");
 const src = all.filter((f) => !f.includes(".test."));
-const read = (fs: string[]) =>
+/**
+ * Strip comments before counting. Learned the hard way twice: the first version
+ * of `bridgesOutsideRoutes` read 45 when the real number was ~37, because
+ * docstrings saying "call this with runEffect(...)" counted as bridges. A metric
+ * that counts prose is a metric that lies, which is the one thing this script
+ * must not do.
+ *
+ * Heuristic, not a parser: the `[^:]` guard keeps `https://` intact, but a `//`
+ * inside a string literal not preceded by `:` would still be treated as a
+ * comment. Good enough for counting debt; if a metric here ever needs to be
+ * exact, that is the signal to graduate it to a lint rule instead of sharpening
+ * the regex.
+ */
+const stripComments = (s: string) =>
+  s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+const readRaw = (fs: string[]) =>
   fs.map((f) => [f, readFileSync(f, "utf8")] as const);
+
+/** Code-shaped metrics read stripped text; comment-shaped ones must read raw. */
+const read = (fs: string[]) =>
+  readRaw(fs).map(([f, s]) => [f, stripComments(s)] as const);
 
 const count = (files: readonly (readonly [string, string])[], re: RegExp) =>
   files.reduce((n, [, s]) => n + (s.match(re) ?? []).length, 0);
 
 const S = read(src);
-const A = read(all);
+// Suppression counts target the comments THEMSELVES, so they read raw text --
+// stripping comments first would silently zero them, which it did on the first
+// attempt. Another reminder that a metric can be broken by its own plumbing.
+const Araw = readRaw(all);
+const Sraw = readRaw(src);
 
 /**
  * Each entry: what it counts, and why that number lying is a real bug.
@@ -99,10 +123,10 @@ const metrics: Record<string, number> = {
   ),
   // Escape hatches. Each one is a place the compiler stopped proving things.
   asCasts: count(S, /as any|as unknown as/g),
-  tsExpectError: count(S, /@ts-expect-error|@ts-ignore/g),
+  tsExpectError: count(Sraw, /@ts-expect-error|@ts-ignore/g),
   // Gate suppressions -- counted so the ratchet can't be satisfied by silencing.
-  effectDiagnosticSuppressions: count(A, /@effect-diagnostics/g),
-  eslintDisables: count(A, /eslint-disable/g),
+  effectDiagnosticSuppressions: count(Araw, /@effect-diagnostics/g),
+  eslintDisables: count(Araw, /eslint-disable/g),
 };
 
 const setMode = process.argv.includes("--set");
