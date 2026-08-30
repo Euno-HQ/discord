@@ -34,7 +34,19 @@ export const PostHogServiceLive = Layer.scoped(
     (client) =>
       Effect.gen(function* () {
         if (client) {
-          yield* Effect.promise(() => client.shutdown());
+          // Best-effort: shutdown() flushes over the network and can reject.
+          // `Effect.promise` would make that rejection a defect and fail the
+          // finalizer, taking scope teardown with it — log and continue instead.
+          yield* Effect.tryPromise(() => client.shutdown()).pipe(
+            Effect.catchAll((error) =>
+              logEffect(
+                "warn",
+                "PostHogService",
+                "PostHog client shutdown failed; continuing teardown",
+                { error },
+              ),
+            ),
+          );
           yield* logEffect(
             "info",
             "PostHogService",

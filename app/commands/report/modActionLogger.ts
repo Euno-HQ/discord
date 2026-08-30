@@ -13,7 +13,10 @@ import { Effect } from "effect";
 
 import { resolveApplicationsForDeparture } from "#~/commands/memberApplications";
 import { logAutomod } from "#~/commands/report/automodLog.ts";
-import { AUDIT_LOG_WINDOW_MS, fetchAuditLogEntry } from "#~/discord/auditLog";
+import {
+  AUDIT_LOG_WINDOW_MS,
+  fetchAuditLogEntryOrNull,
+} from "#~/discord/auditLog";
 import { fetchAutomodRuleOrNull, fetchUser } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 
@@ -40,7 +43,8 @@ export const banAddEffect = (ban: GuildBan) =>
       reason,
     });
 
-    const entry = yield* fetchAuditLogEntry(
+    const entry = yield* fetchAuditLogEntryOrNull(
+      "ModActionLogger",
       guild,
       user.id,
       AuditLogEvent.MemberBanAdd,
@@ -82,7 +86,8 @@ export const banRemoveEffect = (ban: GuildBan) =>
       guildId: guild.id,
     });
 
-    const entry = yield* fetchAuditLogEntry(
+    const entry = yield* fetchAuditLogEntryOrNull(
+      "ModActionLogger",
       guild,
       user.id,
       AuditLogEvent.MemberBanRemove,
@@ -117,7 +122,8 @@ export const banRemoveEffect = (ban: GuildBan) =>
 
 const fetchKickAuditLog = (guild: Guild, user: User) =>
   Effect.gen(function* () {
-    const entry = yield* fetchAuditLogEntry(
+    const entry = yield* fetchAuditLogEntryOrNull(
+      "ModActionLogger",
       guild,
       user.id,
       AuditLogEvent.MemberKick,
@@ -284,7 +290,8 @@ export const memberUpdateEffect = (
     );
 
     // Look for a manual timeout first (MemberUpdate audit log)
-    let entry = yield* fetchAuditLogEntry(
+    let entry = yield* fetchAuditLogEntryOrNull(
+      "ModActionLogger",
       guild,
       user.id,
       AuditLogEvent.MemberUpdate,
@@ -303,7 +310,8 @@ export const memberUpdateEffect = (
     // Fall back to automod timeout if no manual entry found
     let isAutomod = false;
     if (!entry && isTimeoutApplied) {
-      const automodEntry = yield* fetchAuditLogEntry(
+      const automodEntry = yield* fetchAuditLogEntryOrNull(
+        "ModActionLogger",
         guild,
         user.id,
         AuditLogEvent.AutoModerationUserCommunicationDisabled,

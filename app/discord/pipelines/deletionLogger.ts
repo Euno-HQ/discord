@@ -73,28 +73,20 @@ export const deletionLoggerPipeline: Effect.Effect<
       }
     }),
 
-    // Dispatch to handlers with per-event error isolation
+    // Dispatch to handlers. Each handler already catches its own failures
+    // (see deletionLogHandlers.ts), so this never fails — no error isolation
+    // needed here.
     Stream.mapEffect((e) => {
-      const handler = (() => {
-        switch (e.type) {
-          case "GuildMemberMessage":
-            return Effect.void;
-          case "GuildMessageDelete":
-            return handleDelete(client, e);
-          case "GuildMessageUpdate":
-            return handleEdit(client, e);
-          case "GuildMessageBulkDelete":
-            return handleBulkDelete(client, e);
-        }
-      })();
-      return handler.pipe(
-        Effect.catchAll((err) =>
-          logEffect("warn", "DeletionLogger", "Pipeline handler failed", {
-            eventType: e.type,
-            error: err,
-          }),
-        ),
-      );
+      switch (e.type) {
+        case "GuildMemberMessage":
+          return Effect.void;
+        case "GuildMessageDelete":
+          return handleDelete(client, e);
+        case "GuildMessageUpdate":
+          return handleEdit(client, e);
+        case "GuildMessageBulkDelete":
+          return handleBulkDelete(client, e);
+      }
     }),
 
     Stream.runDrain,

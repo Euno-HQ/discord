@@ -78,6 +78,25 @@ export default [
       "prefer-const": "error",
       "no-var": "error",
 
+      // `Effect.promise` asserts in the type that a promise cannot reject. When
+      // one does, the rejection becomes a DEFECT: absent from the error channel,
+      // it kills the fiber and surfaces as an opaque FiberFailure. That is a
+      // program breaking in a way its signature never admitted was possible —
+      // the exact failure the Effect types are supposed to rule out. It cost us
+      // a real safety net once already: `fetchAuditLogEntry` looked infallible,
+      // so a `catchAll` guarding it was deleted as dead code.
+      // Use `Effect.tryPromise` (with a typed `catch` where one fits). This rule
+      // currently has zero suppressions repo-wide; keep it that way if you can.
+      "no-restricted-syntax": [
+        "warn",
+        {
+          selector:
+            "MemberExpression[object.name='Effect'][property.name='promise']",
+          message:
+            "Effect.promise hides a rejection as a defect. Use Effect.tryPromise with a typed catch (tryDiscord for Discord calls).",
+        },
+      ],
+
       // React rules
       "react/react-in-jsx-scope": "off",
       "react-hooks/exhaustive-deps": "warn",
@@ -208,6 +227,14 @@ export default [
         },
       ],
     },
+  },
+  {
+    // The Effect.promise ban targets PRODUCTION defects — a rejection that no
+    // signature admitted was possible. In a test, `Effect.promise(() =>
+    // Promise.reject(...))` is often the point: it deliberately constructs a
+    // defect to assert the code under test survives one. Allowed here.
+    files: ["**/*.test.ts", "**/*.test.tsx"],
+    rules: { "no-restricted-syntax": "off" },
   },
   {
     // Local ESLint rule modules are plain-JS tooling (untyped AST callbacks),

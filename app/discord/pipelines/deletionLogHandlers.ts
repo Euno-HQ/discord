@@ -125,7 +125,7 @@ const recordUncachedDeletion = (
 export const handleDelete = (
   client: Client,
   e: GuildMessageDelete,
-): Effect.Effect<void, unknown, RuntimeContext> =>
+): Effect.Effect<void, never, RuntimeContext> =>
   Effect.gen(function* () {
     const guild = e.guild;
     const msg = e.message;
@@ -199,6 +199,26 @@ export const handleDelete = (
             e.targetId === userId &&
             Date.now() - e.createdTimestamp < AUDIT_LOG_WINDOW_MS,
         ),
+    ).pipe(
+      // Audit log lookup is best-effort attribution, not a gate on whether we
+      // log the deletion — degrade to "no executor found" on any failure so
+      // the deletion log entry still gets written.
+      Effect.catchTag("ForbiddenError", (error) =>
+        logEffect(
+          "warn",
+          "DeletionLogger",
+          "Bot lacks View Audit Log permission; deletion log entries will not show an executor",
+          { guildId: guild.id, error },
+        ).pipe(Effect.as(undefined)),
+      ),
+      Effect.catchAll((error) =>
+        logEffect(
+          "debug",
+          "DeletionLogger",
+          "Audit log lookup failed; logging deletion without executor attribution",
+          { guildId: guild.id, error },
+        ).pipe(Effect.as(undefined)),
+      ),
     );
 
     const sent = `<t:${Math.floor(msg.createdTimestamp / 1000)}:R>`;
@@ -275,7 +295,7 @@ export const handleDelete = (
 export const handleEdit = (
   client: Client,
   e: GuildMessageUpdate,
-): Effect.Effect<void, unknown, RuntimeContext> =>
+): Effect.Effect<void, never, RuntimeContext> =>
   Effect.gen(function* () {
     const guild = e.guild;
     const newMessage = e.newMessage;
@@ -361,7 +381,7 @@ export const handleEdit = (
 export const handleBulkDelete = (
   client: Client,
   e: GuildMessageBulkDelete,
-): Effect.Effect<void, unknown, RuntimeContext> =>
+): Effect.Effect<void, never, RuntimeContext> =>
   Effect.gen(function* () {
     const guild = e.guild;
     const messages = e.messages;

@@ -7,7 +7,10 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { AUDIT_LOG_WINDOW_MS, fetchAuditLogEntry } from "#~/discord/auditLog";
+import {
+  AUDIT_LOG_WINDOW_MS,
+  fetchAuditLogEntryOrNull,
+} from "#~/discord/auditLog";
 import { fetchChannelFromClient, sendMessage } from "#~/effects/discordSdk";
 import { ConfigError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
@@ -23,12 +26,17 @@ const fetchRuleAuditLog = (
     | AuditLogEvent.AutoModerationRuleUpdate
     | AuditLogEvent.AutoModerationRuleDelete,
 ) =>
-  fetchAuditLogEntry(rule.guild, rule.id, event, (entries) =>
-    entries.find(
-      (e) =>
-        e.targetId === rule.id &&
-        Date.now() - e.createdTimestamp < AUDIT_LOG_WINDOW_MS,
-    ),
+  fetchAuditLogEntryOrNull(
+    "AutomodRuleLog",
+    rule.guild,
+    rule.id,
+    event,
+    (entries) =>
+      entries.find(
+        (e) =>
+          e.targetId === rule.id &&
+          Date.now() - e.createdTimestamp < AUDIT_LOG_WINDOW_MS,
+      ),
   );
 
 const executorMention = (

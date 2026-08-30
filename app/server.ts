@@ -126,13 +126,18 @@ const startup = Effect.gen(function* () {
 
     yield* tryDiscord("init", () => deployCommands(discordClient));
 
-    // Periodic schedulers — long-lived Effects forked off the runtime so they
-    // outlive `startup`. Each self-recovers per run (see scheduleTaskEffect),
-    // so a single failure never tears the schedule down.
-    runtime.runFork(messageCacheExpirationSchedule);
+    // Periodic schedulers — long-lived Effects forkDaemon'd (not runFork'd off
+    // the runtime) so they stay in the structured-concurrency tree and outlive
+    // `startup`, the fiber running this code. Each self-recovers per run (see
+    // scheduleTaskEffect), so a single failure never tears the schedule down.
+    // Forked exactly once — this whole block is skipped on HMR reloads by the
+    // __discordOneTimeSetupDone guard, which is also why they must NOT go into
+    // __pipelineFibers: that array is interrupted and replaced on every reload,
+    // and nothing here would re-fork them.
+    yield* messageCacheExpirationSchedule.pipe(Effect.forkDaemon);
     // Escalation resolver scheduler (must be after client is ready)
-    runtime.runFork(escalationResolverSchedule(discordClient));
-    runtime.runFork(runJobRunner);
+    yield* escalationResolverSchedule(discordClient).pipe(Effect.forkDaemon);
+    yield* runJobRunner.pipe(Effect.forkDaemon);
 
     yield* logEffect("info", "Gateway", "Gateway initialization completed", {
       guildCount: discordClient.guilds.cache.size,
@@ -149,7 +154,7 @@ const startup = Effect.gen(function* () {
     yield* initializeGroups(discordClient.guilds.cache);
 
     yield* logEffect("debug", "Server", "scheduling integrity check");
-    runtime.runFork(runIntegrityCheck);
+    yield* runIntegrityCheck.pipe(Effect.forkDaemon);
 
     // Graceful shutdown handler to checkpoint WAL and dispose the runtime
     // (tears down PostHog finalizer, feature flag interval, and SQLite connection)
