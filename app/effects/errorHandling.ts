@@ -116,6 +116,9 @@ export const toUserResponse = (
     case "NoLeaderError":
     case "ResolutionExecutionError":
     case "SubscriptionNotFoundError":
+    case "SessionStoreError":
+    case "PostHogError":
+    case "RequestBodyReadError":
     case "SqlError":
     case "UnknownException":
       return GENERIC;

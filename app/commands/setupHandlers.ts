@@ -9,11 +9,13 @@ import {
 import { Effect } from "effect";
 
 import { DatabaseService, type SqlError } from "#~/Database";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import {
   interactionDeferUpdate,
   interactionEditReply,
   interactionUpdate,
 } from "#~/effects/discordSdk";
+import { ValidationError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import type { MessageComponentCommand } from "#~/helpers/discord";
 import { commandStats } from "#~/helpers/metrics";
@@ -674,8 +676,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         const screen = parts[4] ?? "1";
 
         if (!guildId || !field || !(field in FIELD_MAP)) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Invalid customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Invalid customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -691,8 +697,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         } else if (interaction.isChannelSelectMenu()) {
           value = interaction.values[0];
         } else {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Unexpected interaction type"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "interactionType",
+              message: "Unexpected interaction type",
+            }),
+          );
         }
 
         if (value) {
@@ -728,8 +738,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         const screen = parts[4] ?? "1";
 
         if (!guildId || !field || !(field in FIELD_MAP)) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Invalid customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Invalid customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -769,8 +783,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       Effect.gen(function* () {
         const guildId = interaction.customId.split("|")[1];
         if (!guildId) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Missing guildId in customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Missing guildId in customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -815,8 +833,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       Effect.gen(function* () {
         const guildId = interaction.customId.split("|")[1];
         if (!guildId) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Missing guildId in customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Missing guildId in customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -852,8 +874,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       Effect.gen(function* () {
         const guildId = interaction.customId.split("|")[1];
         if (!guildId) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Missing guildId in customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Missing guildId in customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -881,7 +907,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         let permCheck: SetupPermissionCheckResult | undefined;
 
         if (guild && botMember) {
-          permCheck = yield* Effect.tryPromise(() =>
+          permCheck = yield* tryDiscord("checkSetupPermissions", () =>
             checkSetupPermissions(guild, botMember, state),
           );
         }
@@ -930,8 +956,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       Effect.gen(function* () {
         const guildId = interaction.customId.split("|")[1];
         if (!guildId) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Missing guildId in customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Missing guildId in customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -964,8 +994,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       Effect.gen(function* () {
         const guildId = interaction.customId.split("|")[1];
         if (!guildId) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Missing guildId in customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Missing guildId in customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);

@@ -78,22 +78,41 @@ export default [
       "prefer-const": "error",
       "no-var": "error",
 
-      // `Effect.promise` asserts in the type that a promise cannot reject. When
-      // one does, the rejection becomes a DEFECT: absent from the error channel,
-      // it kills the fiber and surfaces as an opaque FiberFailure. That is a
-      // program breaking in a way its signature never admitted was possible —
-      // the exact failure the Effect types are supposed to rule out. It cost us
-      // a real safety net once already: `fetchAuditLogEntry` looked infallible,
-      // so a `catchAll` guarding it was deleted as dead code.
-      // Use `Effect.tryPromise` (with a typed `catch` where one fits). This rule
-      // currently has zero suppressions repo-wide; keep it that way if you can.
+      // Two ways an Effect signature can lie about how a program fails. Both are
+      // at zero repo-wide with no suppressions; keep them there.
       "no-restricted-syntax": [
         "warn",
         {
+          // `Effect.promise` asserts in the TYPE that a promise cannot reject.
+          // When one does, the rejection is a DEFECT: absent from the error
+          // channel, it kills the fiber and surfaces as an opaque FiberFailure —
+          // a program breaking in a way its signature never admitted was
+          // possible. It cost a real safety net once already: fetchAuditLogEntry
+          // looked infallible, so a catchAll guarding it was deleted as dead code.
           selector:
             "MemberExpression[object.name='Effect'][property.name='promise']",
           message:
             "Effect.promise hides a rejection as a defect. Use Effect.tryPromise with a typed catch (tryDiscord for Discord calls).",
+        },
+        {
+          // The bare `Effect.tryPromise(() => …)` form says "this can fail" but
+          // not HOW: the failure becomes UnknownException, so callers can't
+          // discriminate it and toUserResponse can only give it generic copy.
+          //
+          // This rule exists because `check:effect` structurally CANNOT see it —
+          // `unknownInEffectCatch` only fires on the `{ try, catch }` shape. 13
+          // of these sat invisible behind a green gate until the debt ratchet
+          // counted them, and the AST rule then found 11 more that the ratchet's
+          // regex had missed. Between the two rules both shapes are now covered.
+          //
+          // Match on the argument being a FUNCTION, not merely on argument count:
+          // the correct `Effect.tryPromise({ try, catch })` form is also a single
+          // argument, so an arguments.length check would forbid the fix as well
+          // as the defect.
+          selector:
+            "CallExpression[callee.object.name='Effect'][callee.property.name='tryPromise'] > :matches(ArrowFunctionExpression, FunctionExpression)",
+          message:
+            "Single-arg Effect.tryPromise erases the failure into UnknownException. Pass { try, catch } with a tagged error (or use tryDiscord for Discord calls).",
         },
       ],
 

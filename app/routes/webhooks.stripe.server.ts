@@ -2,19 +2,21 @@ import { Cause, Effect, Exit } from "effect";
 import type Stripe from "stripe";
 
 import { runEffectExit, type RuntimeContext } from "#~/AppRuntime";
-import type { SqlError, StripeError } from "#~/effects/errors";
+import { toError } from "#~/effects/classifyDiscordError";
+import {
+  RequestBodyReadError,
+  type SqlError,
+  type StripeError,
+} from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { syncGuildGroup } from "#~/effects/posthog";
 import { StripeService } from "#~/models/stripe.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
 /** Every way webhook processing can fail, visible in the type: a failed body
- *  read (UnknownException), signature verification (StripeError), or a
+ *  read (RequestBodyReadError), signature verification (StripeError), or a
  *  subscription write (SqlError). */
-export type StripeWebhookError =
-  | Cause.UnknownException
-  | StripeError
-  | SqlError;
+export type StripeWebhookError = RequestBodyReadError | StripeError | SqlError;
 
 export type StripeWebhookResult =
   | { ok: true }
@@ -37,9 +39,17 @@ export async function processStripeWebhook(
   const program: Effect.Effect<void, StripeWebhookError, RuntimeContext> =
     Effect.gen(function* () {
       // Raw body for signature verification. A rejected read (aborted or
-      // truncated request stream) is a typed UnknownException → 400, matching
-      // the old try/catch; the failure may be transient, so let Stripe retry.
-      const body = yield* Effect.tryPromise(() => request.text());
+      // truncated request stream) is a typed RequestBodyReadError → 400,
+      // matching the old try/catch; the failure may be transient, so let
+      // Stripe retry.
+      const body = yield* Effect.tryPromise({
+        try: () => request.text(),
+        catch: (cause) =>
+          new RequestBodyReadError({
+            operation: "request.text",
+            cause: toError(cause),
+          }),
+      });
 
       // Verify webhook signature and construct event
       const event = yield* StripeService.constructWebhookEvent(body, signature);

@@ -10,7 +10,12 @@ import { AuthorizationCode } from "simple-oauth2";
 
 import { runEffect } from "#~/AppRuntime";
 import { DatabaseService, type DB, type EffectKysely } from "#~/Database";
-import { OAuthFetchError } from "#~/effects/errors";
+import { toError } from "#~/effects/classifyDiscordError";
+import {
+  OAuthFetchError,
+  SessionStoreError,
+  SqlError,
+} from "#~/effects/errors";
 import { BOT_PERMISSIONS } from "#~/helpers/botPermissions";
 import {
   applicationId,
@@ -404,9 +409,19 @@ export async function completeOauthLogin(request: Request) {
 
 export const retrieveDiscordToken = (request: Request) =>
   Effect.gen(function* () {
-    const dbSession = yield* Effect.tryPromise(() =>
-      getDbSession(request.headers.get("Cookie")),
-    );
+    const dbSession = yield* Effect.tryPromise({
+      try: () => getDbSession(request.headers.get("Cookie")),
+      // A `SqlError` from the DB read inside `readData` passes through
+      // unchanged; anything else (e.g. a `JSON.parse` failure on corrupt
+      // session data) is wrapped.
+      catch: (rejection) =>
+        rejection instanceof SqlError
+          ? rejection
+          : new SessionStoreError({
+              operation: "getDbSession",
+              cause: toError(rejection),
+            }),
+    });
     const storedToken = dbSession.get(CookieSessionKeys.discordToken) as {
       discordToken: string;
       [k: string]: unknown;
@@ -417,9 +432,16 @@ export const retrieveDiscordToken = (request: Request) =>
 
 export const refreshDiscordSession = (request: Request) =>
   Effect.gen(function* () {
-    const dbSession = yield* Effect.tryPromise(() =>
-      getDbSession(request.headers.get("Cookie")),
-    );
+    const dbSession = yield* Effect.tryPromise({
+      try: () => getDbSession(request.headers.get("Cookie")),
+      catch: (rejection) =>
+        rejection instanceof SqlError
+          ? rejection
+          : new SessionStoreError({
+              operation: "getDbSession",
+              cause: toError(rejection),
+            }),
+    });
     const token = yield* retrieveDiscordToken(request);
     // Live network call to Discord's OAuth token endpoint — it absolutely can
     // reject (network fault, revoked/consumed refresh_token). Surface that as a
@@ -446,7 +468,16 @@ export const refreshDiscordSession = (request: Request) =>
 export const refreshAndPersistDiscordSession = (request: Request) =>
   Effect.gen(function* () {
     const session = yield* refreshDiscordSession(request);
-    return yield* Effect.tryPromise(() => commitDbSession(session));
+    return yield* Effect.tryPromise({
+      try: () => commitDbSession(session),
+      catch: (rejection) =>
+        rejection instanceof SqlError
+          ? rejection
+          : new SessionStoreError({
+              operation: "commitDbSession",
+              cause: toError(rejection),
+            }),
+    });
   });
 
 export async function logout(request: Request) {

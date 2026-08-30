@@ -44,13 +44,37 @@ const count = (files: readonly (readonly [string, string])[], re: RegExp) =>
 const S = read(src);
 const A = read(all);
 
-/** Each entry: what it counts, and why that number lying is a real bug. */
+/**
+ * Each entry: what it counts, and why that number lying is a real bug.
+ *
+ * Two kinds of metric, and confusing them wastes effort:
+ *
+ *   TARGET — can legitimately reach 0, and once it does it should GRADUATE to a
+ *     lint rule with no suppressions, at which point the counter is redundant.
+ *     `effectPromise` and `bareTryPromise` both did exactly this. Still open:
+ *     unknownErrorChannel, anyErrorChannel (both at 0, not yet graduated).
+ *
+ *   CAP — will never be 0, because some of what it counts is correct. The number
+ *     exists to stop it growing, and any increase should be justified in review.
+ *     `asyncInServerZones` is the clearest case: 8 of the 13 are the
+ *     Response/redirect-throwing auth functions in session.server.ts and api.ts,
+ *     which MUST stay async — running one inside Effect wraps the thrown
+ *     redirect in a FiberFailure and breaks React Router. Same for
+ *     bridgesOutsideRoutes (discord.js event callbacks are a real boundary) and
+ *     the escape-hatch counts, where a justified suppression beats a bad cast.
+ */
 const metrics: Record<string, number> = {
   // A rejection becomes an invisible defect that kills the fiber.
   effectPromise: count(S, /Effect\.promise\(/g),
-  // Single-arg tryPromise erases the failure into UnknownException.
-  // NOT caught by check:effect -- that rule only fires on the {try, catch} form.
-  bareTryPromise: count(S, /Effect\.tryPromise\(\(\) =>/g),
+  // NOTE: `bareTryPromise` used to live here and has been RETIRED, which is the
+  // intended end-state for a TARGET metric. It reached 0, graduated to an ESLint
+  // rule (`no-restricted-syntax`, matching the AST rather than text), and the
+  // counter became both redundant and WRONG: its regex only matched
+  // `tryPromise(() =>` on one line, so it read 0 while the AST rule immediately
+  // found 11 more in multi-line and `async () =>` forms. Worth remembering when
+  // adding a metric here -- a regex approximates the thing you care about, and a
+  // green approximation is exactly the false confidence this script exists to
+  // prevent. Prefer graduating to a real rule over refining the regex.
   // An explicit `unknown`/`any` error channel widens the real union to nothing.
   unknownErrorChannel: count(S, /Effect\.Effect<[^>]*,\s*unknown,/g),
   anyErrorChannel: count(S, /Effect\.Effect<[^>]*,\s*any,/g),

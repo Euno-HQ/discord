@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { data } from "react-router";
 
 import { getPosthog } from "#~/AppRuntime";
-import type { StripeError } from "#~/effects/errors.ts";
+import { PostHogError, type StripeError } from "#~/effects/errors.ts";
 import { requireUser } from "#~/models/session.server";
 import { StripeService } from "#~/models/stripe.server";
 
@@ -32,9 +32,10 @@ export const fetchFeatureFlags = (
   Effect.suspend(() => {
     const posthog = getPosthog();
     if (!posthog) return Effect.succeed(null);
-    return Effect.tryPromise(() =>
-      posthog.getAllFlags(guildId, { groups: { guild: guildId } }),
-    ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    return Effect.tryPromise({
+      try: () => posthog.getAllFlags(guildId, { groups: { guild: guildId } }),
+      catch: (cause) => new PostHogError({ operation: "getAllFlags", cause }),
+    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
   });
 
 export const fetchStripeDetails = (
