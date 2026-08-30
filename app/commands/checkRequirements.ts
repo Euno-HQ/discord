@@ -4,6 +4,8 @@ import {
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  type Guild,
+  type GuildBasedChannel,
 } from "discord.js";
 import { Effect } from "effect";
 
@@ -71,6 +73,61 @@ const checkFetch = <T>(
       ServerError: () => Effect.succeed({ kind: "error" as const }),
     }),
   );
+
+/**
+ * Permissions a log channel needs to be usable: the bot must see it, post in it,
+ * and open/manage the threads both log pipelines create per user.
+ */
+const LOG_CHANNEL_PERMS = [
+  { flag: PermissionFlagsBits.ViewChannel, name: "ViewChannel" },
+  { flag: PermissionFlagsBits.SendMessages, name: "SendMessages" },
+  {
+    flag: PermissionFlagsBits.CreatePrivateThreads,
+    name: "CreatePrivateThreads",
+  },
+  { flag: PermissionFlagsBits.ManageThreads, name: "ManageThreads" },
+] as const;
+
+/**
+ * Names of the LOG_CHANNEL_PERMS the bot is missing on `channel`.
+ *
+ * Resolving a channel proves it EXISTS, never that we can use it:
+ * `guild.channels.fetch()` is served from discord.js's cache, so revoking the
+ * bot's ViewChannel produces no API call, no 403, and therefore no
+ * ForbiddenError for `checkFetch` to classify — the check goes green while the
+ * log pipeline is failing with "Missing Access" on every write. The permission
+ * has to be read directly. (Same reason the application-channel check below
+ * does its own `permissionsFor` pass.)
+ */
+function missingLogChannelPerms(guild: Guild, channel: unknown): string[] {
+  const botMember = guild.members.me;
+  if (!botMember || !channel || typeof channel !== "object") return [];
+  if (!("permissionsFor" in channel)) return [];
+  const perms = (channel as GuildBasedChannel).permissionsFor(botMember);
+  if (!perms) return [];
+  return LOG_CHANNEL_PERMS.filter(({ flag }) => !perms.has(flag)).map(
+    ({ name }) => name,
+  );
+}
+
+/**
+ * Downgrade an otherwise-OK log channel result when the bot can't actually use
+ * the channel, naming the missing permissions.
+ */
+export function applyLogChannelPerms(
+  result: CheckResult,
+  guild: Guild,
+  outcome: FetchOutcome<unknown> | null,
+): CheckResult {
+  if (!result.ok || outcome?.kind !== "ok") return result;
+  const missing = missingLogChannelPerms(guild, outcome.value);
+  if (missing.length === 0) return result;
+  return {
+    ...result,
+    ok: false,
+    detail: `${result.detail} — bot missing: ${missing.join(", ")}`,
+  };
+}
 
 /** Detail copy for a non-"ok" FetchOutcome; `notFoundDetail` covers "missing". */
 function fetchFailureDetail(
@@ -255,7 +312,8 @@ export const Command = {
             outcome?.kind === "ok" ? (outcome.value?.id ?? null) : null,
             "Not configured",
           );
-          if (result) results.push(result);
+          if (result)
+            results.push(applyLogChannelPerms(result, guild, outcome));
         }
       }
 
@@ -279,8 +337,9 @@ export const Command = {
             "Not configured (optional but recommended)",
           );
           if (result) {
-            if (!result.ok) result.optional = true;
-            results.push(result);
+            const gated = applyLogChannelPerms(result, guild, outcome);
+            if (!gated.ok) gated.optional = true;
+            results.push(gated);
           }
         }
       }
