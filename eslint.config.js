@@ -95,6 +95,22 @@ export default [
             "Effect.promise hides a rejection as a defect. Use Effect.tryPromise with a typed catch (tryDiscord for Discord calls).",
         },
         {
+          // `any` in ANY of Effect's three type arguments defeats the point of
+          // the type. In the error channel a caller can't discriminate failures;
+          // in the REQUIREMENT channel a program can start needing a whole new
+          // service and every caller — including its tests — still compiles.
+          //
+          // This one deliberately applies to test files too (see the override
+          // below). Tests are how "manually verified" gets established, so an
+          // `Effect<A, any, any>` test helper is the most expensive place for
+          // this lie to live: it verifies nothing about requirements while
+          // looking like it does.
+          selector:
+            "TSTypeReference[typeName.right.name='Effect'] > TSTypeParameterInstantiation > TSAnyKeyword",
+          message:
+            "`any` in an Effect type argument erases the error or requirement channel. Name the real type (Layer.Layer.Success<typeof TestLayer> works well for a test runtime's R).",
+        },
+        {
           // The bare `Effect.tryPromise(() => …)` form says "this can fail" but
           // not HOW: the failure becomes UnknownException, so callers can't
           // discriminate it and toUserResponse can only give it generic copy.
@@ -253,7 +269,24 @@ export default [
     // Promise.reject(...))` is often the point: it deliberately constructs a
     // defect to assert the code under test survives one. Allowed here.
     files: ["**/*.test.ts", "**/*.test.tsx"],
-    rules: { "no-restricted-syntax": "off" },
+    // Tests may construct a defect on purpose (`Effect.promise(() =>
+    // Promise.reject(...))` to prove the code under test survives one), and may
+    // use the bare tryPromise form for a fixture. But `any` in an Effect type
+    // argument is NOT excusable here — it is worse in a test than in production,
+    // because it makes the test look like it verifies requirements when it does
+    // not. So the rule is re-declared with only that selector rather than
+    // switched off wholesale.
+    rules: {
+      "no-restricted-syntax": [
+        "warn",
+        {
+          selector:
+            "TSTypeReference[typeName.right.name='Effect'] > TSTypeParameterInstantiation > TSAnyKeyword",
+          message:
+            "`any` in an Effect type argument erases the error or requirement channel. Name the real type (Layer.Layer.Success<typeof TestLayer> works well for a test runtime's R).",
+        },
+      ],
+    },
   },
   {
     // Local ESLint rule modules are plain-JS tooling (untyped AST callbacks),

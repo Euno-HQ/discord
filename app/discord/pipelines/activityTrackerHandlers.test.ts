@@ -76,11 +76,9 @@ const mockDb = {
   deleteFrom: (...args: any[]) => mockDeleteFrom(...args),
 };
 
-const runHandler = (effect: Effect.Effect<void, unknown, any>) =>
+const runHandler = (effect: Effect.Effect<void, unknown, DatabaseService>) =>
   Effect.runPromise(
-    effect.pipe(
-      Effect.provide(Layer.succeed(DatabaseService, mockDb as any)),
-    ) as Effect.Effect<void, unknown, never>,
+    effect.pipe(Effect.provide(Layer.succeed(DatabaseService, mockDb as any))),
   );
 
 const makeCreateEvent = (overrides: any = {}) => ({

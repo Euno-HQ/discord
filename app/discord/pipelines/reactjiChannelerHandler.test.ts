@@ -51,21 +51,72 @@ const makeMockDb = (configs: any[] = []) => ({
   }),
 });
 
+// Typed stub for a service that's never touched at runtime in this file (its
+// real call sites are vi.mocked away). Proxy methods throw if called, so a
+// test that starts depending on it fails loudly instead of silently seeing
+// `undefined` — and since it's typed at the tag's service type, a signature
+// change on the interface is still a compile error at the call site.
+const unusedService = <T extends object>(name: string): T =>
+  new Proxy({} as T, {
+    get: (_t, prop) => () => {
+      throw new Error(
+        `${name}.${String(prop)} called unexpectedly in a test that stubs it as unused`,
+      );
+    },
+  });
+
 // Services beyond DatabaseService are unused by this handler (its real call
 // sites are vi.mocked below), but the handler's declared type is
 // RuntimeContext, so every tag it carries must be supplied for the R channel
 // to close to `never` — that's what proves no new dependency snuck in unnoticed.
 const restOfRuntimeContext = Layer.mergeAll(
-  Layer.succeed(SqlClient.SqlClient, {} as any),
+  Layer.succeed(
+    SqlClient.SqlClient,
+    unusedService<Context.Tag.Service<typeof SqlClient.SqlClient>>("SqlClient"),
+  ),
   Resource.layerEmpty,
-  Layer.succeed(PostHogService, {} as any),
-  Layer.succeed(FeatureFlagService, {} as any),
-  Layer.succeed(SpamDetectionService, {} as any),
-  Layer.succeed(SupervisorService, {} as any),
-  Layer.succeed(DiscordClient, {} as any),
-  Layer.succeed(DiscordEventBus, {} as any),
-  Layer.succeed(UserService, {} as any),
-  Layer.succeed(MessageCacheService, {} as any),
+  // PostHogService's Service type is `PostHog | null`; `null` is a real,
+  // valid value (means "PostHog disabled") rather than a cast, so it needs
+  // no throwing-proxy stub.
+  Layer.succeed(PostHogService, null),
+  Layer.succeed(
+    FeatureFlagService,
+    unusedService<Context.Tag.Service<typeof FeatureFlagService>>(
+      "FeatureFlagService",
+    ),
+  ),
+  Layer.succeed(
+    SpamDetectionService,
+    unusedService<Context.Tag.Service<typeof SpamDetectionService>>(
+      "SpamDetectionService",
+    ),
+  ),
+  Layer.succeed(
+    SupervisorService,
+    unusedService<Context.Tag.Service<typeof SupervisorService>>(
+      "SupervisorService",
+    ),
+  ),
+  Layer.succeed(
+    DiscordClient,
+    unusedService<Context.Tag.Service<typeof DiscordClient>>("DiscordClient"),
+  ),
+  Layer.succeed(
+    DiscordEventBus,
+    unusedService<Context.Tag.Service<typeof DiscordEventBus>>(
+      "DiscordEventBus",
+    ),
+  ),
+  Layer.succeed(
+    UserService,
+    unusedService<Context.Tag.Service<typeof UserService>>("UserService"),
+  ),
+  Layer.succeed(
+    MessageCacheService,
+    unusedService<Context.Tag.Service<typeof MessageCacheService>>(
+      "MessageCacheService",
+    ),
+  ),
 );
 
 const runHandler = (

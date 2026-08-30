@@ -62,6 +62,7 @@ const count = (files: readonly (readonly [string, string])[], re: RegExp) =>
   files.reduce((n, [, s]) => n + (s.match(re) ?? []).length, 0);
 
 const S = read(src);
+const T = read(all.filter((f) => f.includes(".test.")));
 // Suppression counts target the comments THEMSELVES, so they read raw text --
 // stripping comments first would silently zero them, which it did on the first
 // attempt. Another reminder that a metric can be broken by its own plumbing.
@@ -101,7 +102,11 @@ const metrics: Record<string, number> = {
   // prevent. Prefer graduating to a real rule over refining the regex.
   // An explicit `unknown`/`any` error channel widens the real union to nothing.
   unknownErrorChannel: count(S, /Effect\.Effect<[^>]*,\s*unknown,/g),
-  anyErrorChannel: count(S, /Effect\.Effect<[^>]*,\s*any,/g),
+  // `anyErrorChannel` RETIRED here: it reached 0 and graduated to an ESLint rule
+  // that bans `any` in ANY of Effect's three type arguments (error AND
+  // requirement), in tests as well as production. The rule is strictly stronger
+  // than the regex was -- it caught the requirement channel, which this counter
+  // never even looked at.
   // Promise bridges outside route loaders/actions are un-migrated seams.
   bridgesOutsideRoutes:
     count(
@@ -123,6 +128,13 @@ const metrics: Record<string, number> = {
   ),
   // Escape hatches. Each one is a place the compiler stopped proving things.
   asCasts: count(S, /as any|as unknown as/g),
+  // Tests were invisible to `asCasts` for this script's whole first life, which
+  // is how 25 `Layer.succeed(Service, {} as any)` service stubs sat unmeasured.
+  // Tests are where "manually verified" gets established, so a lie here is not
+  // cheaper than one in production -- it is the lie that makes the verification
+  // worthless. Mostly partial discord.js event/message fixtures now, which are
+  // genuinely painful to type in full: a CAP, not a target.
+  asCastsInTests: count(T, /as any|as unknown as/g),
   tsExpectError: count(Sraw, /@ts-expect-error|@ts-ignore/g),
   // Gate suppressions -- counted so the ratchet can't be satisfied by silencing.
   effectDiagnosticSuppressions: count(Araw, /@effect-diagnostics/g),
