@@ -119,3 +119,42 @@ do:    Delete (in Discord) a message that's still tracked in `reported_messages`
 prove: local → log `"Message already deleted"` (service `ReportedMessage`, level DEBUG) for the gone message; NO `"Error deleting messages"` / no user-facing error; DB row's `deleted_at` is set (`SELECT deleted_at FROM reported_messages WHERE reported_message_id='<id>'`).
        uat   → debug log; no error; row marked deleted.
 pass:  404 → ResourceMissing silently recovered; `deleted_at` stamped; no user error.
+
+---
+
+## Batch F — /check-requirements reports permission loss, not just channel existence
+
+Grounding: `app/commands/checkRequirements.ts` — `applyLogChannelPerms` /
+`missingLogChannelPerms` (perms list in `LOG_CHANNEL_PERMS`), applied to the Mod Log and
+Deletion Log branches.
+
+**Why this batch exists (2026-08-30):** these checks used to rely on
+`fetchChannel` succeeding. `guild.channels.fetch()` is served from **discord.js's cache**,
+so revoking the bot's ViewChannel produces no API call, no 403, and therefore no
+`ForbiddenError` for `checkFetch` to classify — the check went green while every write to
+the channel failed with `Missing Access`. A resolved channel proves it EXISTS, never that
+the bot can use it. Note the consequence for QA: a **green result here is not evidence
+that a fetch succeeded**, and a red result is now produced by a local permission read with
+**no error line in the log** — so do not look for a `_tag` to confirm this one.
+
+Auto-verified: `applyLogChannelPerms` unit tests in `checkRequirements.test.ts` (built on a
+real `PermissionsBitField`; 11 prior tests passed throughout the bug because none modelled
+the "resolved vs usable" gap).
+
+### F1 ViewChannel revoked → red, names the permission
+do:    Deny the bot's role **View Channel** on the mod-log channel, run `/check-requirements`, then restore.
+prove: local → Discord: `Mod Log Channel` is ❌ and its detail contains `bot missing: ViewChannel`. Log: **no** new ERROR/WARN and **no** `_tag` — the verdict comes from `permissionsFor`, not a failed fetch.
+       uat   → same Discord output.
+pass:  red, naming ViewChannel; goes green again once restored.
+
+### F2 SendMessages revoked, View intact → red (the most-invisible case)
+do:    Deny only **Send Messages** on the mod-log channel (leave View Channel), run `/check-requirements`, then restore.
+prove: local → `Mod Log Channel` ❌ with detail containing `bot missing: SendMessages`. The bot can still see the channel, so nothing anywhere fails loudly — this case was previously undetectable by any means.
+       uat   → same.
+pass:  red, naming SendMessages.
+
+### F3 deletion-log channel, same treatment
+do:    Deny **View Channel** on the deletion-log channel, run `/check-requirements`, restore.
+prove: local → `Deletion Log Channel` ❌ naming the missing perms, still marked optional.
+       uat   → same.
+pass:  red + optional; green when restored.
