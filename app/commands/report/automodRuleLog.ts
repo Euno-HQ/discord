@@ -7,8 +7,12 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { AUDIT_LOG_WINDOW_MS, fetchAuditLogEntry } from "#~/discord/auditLog";
+import {
+  AUDIT_LOG_WINDOW_MS,
+  fetchAuditLogEntryOrNull,
+} from "#~/discord/auditLog";
 import { fetchChannelFromClient, sendMessage } from "#~/effects/discordSdk";
+import { ConfigError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { truncateMessage } from "#~/helpers/string";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
@@ -22,12 +26,17 @@ const fetchRuleAuditLog = (
     | AuditLogEvent.AutoModerationRuleUpdate
     | AuditLogEvent.AutoModerationRuleDelete,
 ) =>
-  fetchAuditLogEntry(rule.guild, rule.id, event, (entries) =>
-    entries.find(
-      (e) =>
-        e.targetId === rule.id &&
-        Date.now() - e.createdTimestamp < AUDIT_LOG_WINDOW_MS,
-    ),
+  fetchAuditLogEntryOrNull(
+    "AutomodRuleLog",
+    rule.guild,
+    rule.id,
+    event,
+    (entries) =>
+      entries.find(
+        (e) =>
+          e.targetId === rule.id &&
+          Date.now() - e.createdTimestamp < AUDIT_LOG_WINDOW_MS,
+      ),
   );
 
 const executorMention = (
@@ -181,7 +190,12 @@ const fetchModLogChannel = (rule: AutoModerationRule) =>
         "mod-log channel not configured, skipping automod rule log",
         { guildId: rule.guild.id },
       );
-      return yield* Effect.fail(new Error("modLog channel not configured"));
+      return yield* Effect.fail(
+        new ConfigError({
+          key: "modLog",
+          message: "mod-log channel not configured",
+        }),
+      );
     }
     return yield* fetchChannelFromClient<GuildTextBasedChannel>(
       rule.guild.client,

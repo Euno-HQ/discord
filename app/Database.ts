@@ -7,7 +7,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { ResultLengthMismatch, SqlError } from "@effect/sql/SqlError";
 
 import type { DB } from "./db";
-import { DatabaseCorruptionError } from "./effects/errors";
+import { DatabaseCorruptionError, WebhookAlertError } from "./effects/errors";
 import { logEffect } from "./effects/observability";
 import { databaseUrl, emergencyWebhook } from "./helpers/env.server";
 import { formatError } from "./helpers/formatError";
@@ -60,7 +60,11 @@ const sendWebhookAlert = (message: string) =>
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: message }),
       }),
-    catch: (e) => e,
+    catch: (e) =>
+      new WebhookAlertError({
+        operation: "sendWebhookAlert",
+        cause: e instanceof Error ? e : new Error(formatError(e)),
+      }),
   }).pipe(
     Effect.tapError((e) =>
       logEffect("error", "IntegrityCheck", "Failed to send webhook alert", {

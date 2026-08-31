@@ -515,10 +515,9 @@ const deleteSingleMessage = (
 ) =>
   Effect.gen(function* () {
     const client = yield* DiscordClient;
-    const channel = yield* Effect.tryPromise({
-      try: () => client.channels.fetch(channelId),
-      catch: (error) => error,
-    });
+    const channel = yield* tryDiscord("fetchChannel", () =>
+      client.channels.fetch(channelId),
+    );
 
     if (!channel || !("messages" in channel)) {
       yield* logEffect(

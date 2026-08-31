@@ -8,14 +8,14 @@ import {
 } from "react-router";
 import { AuthorizationCode } from "simple-oauth2";
 
+import { runEffect } from "#~/AppRuntime";
+import { DatabaseService, type DB, type EffectKysely } from "#~/Database";
+import { toError } from "#~/effects/classifyDiscordError";
 import {
-  db,
-  run,
-  runEffect,
-  runTakeFirst,
-  runTakeFirstOrThrow,
-} from "#~/AppRuntime";
-import { type DB } from "#~/Database";
+  OAuthFetchError,
+  SessionStoreError,
+  SqlError,
+} from "#~/effects/errors";
 import { BOT_PERMISSIONS } from "#~/helpers/botPermissions";
 import {
   applicationId,
@@ -23,6 +23,7 @@ import {
   isProd,
   sessionSecret,
 } from "#~/helpers/env.server";
+import { formatError } from "#~/helpers/formatError";
 import { requestOrigin } from "#~/helpers/request.server";
 import { fetchUser } from "#~/models/discord.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
@@ -36,6 +37,13 @@ export type Sessions = DB["sessions"];
 const userSvc = <A, E>(
   f: (s: IUserService) => Effect.Effect<A, E, never>,
 ): Promise<A> => runEffect(Effect.flatMap(UserService, f));
+
+// Bridge: run a query built on the runtime's EffectKysely handle from this
+// plain-async (web) module. A SqlError rejects the returned promise,
+// propagating exactly as a thrown DB error did.
+const dbEffect = <A, E>(
+  f: (db: EffectKysely) => Effect.Effect<A, E, never>,
+): Promise<A> => runEffect(Effect.flatMap(DatabaseService, f));
 
 const config = {
   client: {
@@ -84,25 +92,31 @@ const {
     secrets: [sessionSecret],
   },
   async createData(data, expires) {
-    const result = await runTakeFirstOrThrow(
-      db
-        .insertInto("sessions")
-        .values({
-          id: randomUUID(),
-          data: JSON.stringify(data),
-          expires: expires?.toString(),
-        })
-        .returning("id"),
+    const result = await dbEffect((db) =>
+      Effect.map(
+        db
+          .insertInto("sessions")
+          .values({
+            id: randomUUID(),
+            data: JSON.stringify(data),
+            expires: expires?.toString(),
+          })
+          .returning("id"),
+        (rows) => rows[0],
+      ),
     );
-    if (!result.id) {
+    if (!result?.id) {
       console.error({ result, data, expires });
       throw new Error("Failed to create session data");
     }
     return result.id;
   },
   async readData(id) {
-    const result = await runTakeFirst(
-      db.selectFrom("sessions").where("id", "=", id).selectAll(),
+    const result = await dbEffect((db) =>
+      Effect.map(
+        db.selectFrom("sessions").where("id", "=", id).selectAll(),
+        (rows) => rows[0],
+      ),
     );
 
     if (!result?.data) return null;
@@ -114,7 +128,7 @@ const {
       : result.data;
   },
   async updateData(id, data, expires) {
-    await run(
+    await dbEffect((db) =>
       db
         .updateTable("sessions")
         .set("data", JSON.stringify(data))
@@ -123,7 +137,7 @@ const {
     );
   },
   async deleteData(id) {
-    await run(db.deleteFrom("sessions").where("id", "=", id));
+    await dbEffect((db) => db.deleteFrom("sessions").where("id", "=", id));
   },
 });
 export type DbSession = Awaited<ReturnType<typeof getDbSession>>;
@@ -395,9 +409,19 @@ export async function completeOauthLogin(request: Request) {
 
 export const retrieveDiscordToken = (request: Request) =>
   Effect.gen(function* () {
-    const dbSession = yield* Effect.promise(() =>
-      getDbSession(request.headers.get("Cookie")),
-    );
+    const dbSession = yield* Effect.tryPromise({
+      try: () => getDbSession(request.headers.get("Cookie")),
+      // A `SqlError` from the DB read inside `readData` passes through
+      // unchanged; anything else (e.g. a `JSON.parse` failure on corrupt
+      // session data) is wrapped.
+      catch: (rejection) =>
+        rejection instanceof SqlError
+          ? rejection
+          : new SessionStoreError({
+              operation: "getDbSession",
+              cause: toError(rejection),
+            }),
+    });
     const storedToken = dbSession.get(CookieSessionKeys.discordToken) as {
       discordToken: string;
       [k: string]: unknown;
@@ -408,11 +432,28 @@ export const retrieveDiscordToken = (request: Request) =>
 
 export const refreshDiscordSession = (request: Request) =>
   Effect.gen(function* () {
-    const dbSession = yield* Effect.promise(() =>
-      getDbSession(request.headers.get("Cookie")),
-    );
+    const dbSession = yield* Effect.tryPromise({
+      try: () => getDbSession(request.headers.get("Cookie")),
+      catch: (rejection) =>
+        rejection instanceof SqlError
+          ? rejection
+          : new SessionStoreError({
+              operation: "getDbSession",
+              cause: toError(rejection),
+            }),
+    });
     const token = yield* retrieveDiscordToken(request);
-    const newToken = yield* Effect.promise(() => token.refresh());
+    // Live network call to Discord's OAuth token endpoint — it absolutely can
+    // reject (network fault, revoked/consumed refresh_token). Surface that as a
+    // typed failure instead of a fiber-killing defect.
+    const newToken = yield* Effect.tryPromise({
+      try: () => token.refresh(),
+      catch: (e) =>
+        new OAuthFetchError({
+          operation: "token.refresh",
+          cause: e instanceof Error ? e : new Error(formatError(e)),
+        }),
+    });
     // @ts-expect-error token.toJSON() isn't in the types but it works
     dbSession.set(CookieSessionKeys.discordToken, newToken.toJSON());
 
@@ -427,7 +468,16 @@ export const refreshDiscordSession = (request: Request) =>
 export const refreshAndPersistDiscordSession = (request: Request) =>
   Effect.gen(function* () {
     const session = yield* refreshDiscordSession(request);
-    return yield* Effect.promise(() => commitDbSession(session));
+    return yield* Effect.tryPromise({
+      try: () => commitDbSession(session),
+      catch: (rejection) =>
+        rejection instanceof SqlError
+          ? rejection
+          : new SessionStoreError({
+              operation: "commitDbSession",
+              cause: toError(rejection),
+            }),
+    });
   });
 
 export async function logout(request: Request) {

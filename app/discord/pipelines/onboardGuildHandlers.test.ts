@@ -2,7 +2,20 @@
 import { Context, Effect, Layer } from "effect";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { Resource } from "@effect/opentelemetry";
+import { SqlClient } from "@effect/sql";
+
+import type { RuntimeContext } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
+import { DiscordClient } from "#~/discord/client.server";
+import { DiscordEventBus } from "#~/discord/eventBus";
+import { MessageCacheService } from "#~/discord/messageCacheService";
+import { FeatureFlagService } from "#~/effects/featureFlags";
+import { PostHogService } from "#~/effects/posthog";
+import { SupervisorService } from "#~/effects/supervisor";
+import { SpamDetectionService } from "#~/features/spam/service";
 import { fetchGuild } from "#~/models/guilds.server";
+import { UserService } from "#~/models/user.server";
 
 import { handleGuildCreate, handleGuildDelete } from "./onboardGuildHandlers";
 
@@ -38,9 +51,94 @@ vi.mock("#~/discord/deployCommands.server", () => ({
 
 // --- Helpers ---
 
-const runHandler = (effect: Effect.Effect<void, unknown, any>) =>
-  // @ts-expect-error - test mock: RuntimeContext services are vi.mocked
-  Effect.runPromise(effect);
+// Typed stub for a service that's never touched at runtime in this file (its
+// real call sites are vi.mocked away). Proxy methods throw if called, so a
+// test that starts depending on it fails loudly instead of silently seeing
+// `undefined` — and since it's typed at the tag's service type, a signature
+// change on the interface is still a compile error at the call site.
+const unusedService = <T extends object>(name: string): T =>
+  new Proxy({} as T, {
+    get: (_t, prop) => {
+      // Return undefined for probes rather than a function. The trap used to
+      // hand back a function for EVERY property, which meant `stub.then` looked
+      // like a thenable: any await or promise-resolution path would call it and
+      // throw from inside a microtask, taking the vitest worker down with it
+      // ("Worker exited unexpectedly") instead of failing a test. Symbols cover
+      // inspection/iteration probes from vitest and node's inspector.
+      if (typeof prop === "symbol") return undefined;
+      if (["then", "catch", "finally", "toJSON", "inspect"].includes(prop))
+        return undefined;
+      return () => {
+        throw new Error(
+          `${name}.${prop} called unexpectedly in a test that stubs it as unused`,
+        );
+      };
+    },
+  });
+
+// None of the RuntimeContext services are used directly by these handlers
+// (their real call sites — fetchGuild, deployToGuild — are vi.mocked below),
+// but the handlers' declared type is RuntimeContext, so every tag it carries
+// must be supplied for the R channel to close to `never` — that's what proves
+// no new dependency snuck in unnoticed.
+const fullRuntimeContext = Layer.mergeAll(
+  Layer.succeed(
+    DatabaseService,
+    unusedService<Context.Tag.Service<typeof DatabaseService>>(
+      "DatabaseService",
+    ),
+  ),
+  Layer.succeed(
+    SqlClient.SqlClient,
+    unusedService<Context.Tag.Service<typeof SqlClient.SqlClient>>("SqlClient"),
+  ),
+  Resource.layerEmpty,
+  // PostHogService's Service type is `PostHog | null`; `null` is a real,
+  // valid value (means "PostHog disabled") rather than a cast, so it needs
+  // no throwing-proxy stub.
+  Layer.succeed(PostHogService, null),
+  Layer.succeed(
+    FeatureFlagService,
+    unusedService<Context.Tag.Service<typeof FeatureFlagService>>(
+      "FeatureFlagService",
+    ),
+  ),
+  Layer.succeed(
+    SpamDetectionService,
+    unusedService<Context.Tag.Service<typeof SpamDetectionService>>(
+      "SpamDetectionService",
+    ),
+  ),
+  Layer.succeed(
+    SupervisorService,
+    unusedService<Context.Tag.Service<typeof SupervisorService>>(
+      "SupervisorService",
+    ),
+  ),
+  Layer.succeed(
+    DiscordClient,
+    unusedService<Context.Tag.Service<typeof DiscordClient>>("DiscordClient"),
+  ),
+  Layer.succeed(
+    DiscordEventBus,
+    unusedService<Context.Tag.Service<typeof DiscordEventBus>>(
+      "DiscordEventBus",
+    ),
+  ),
+  Layer.succeed(
+    UserService,
+    unusedService<Context.Tag.Service<typeof UserService>>("UserService"),
+  ),
+  Layer.succeed(
+    MessageCacheService,
+    unusedService<Context.Tag.Service<typeof MessageCacheService>>(
+      "MessageCacheService",
+    ),
+  ),
+);
+
+const runHandler = (effect: Effect.Effect<void, unknown, RuntimeContext>) =>
+  Effect.runPromise(effect.pipe(Effect.provide(fullRuntimeContext)));
 
 const makeGuildCreateEvent = (overrides: any = {}) => ({
   type: "GuildCreate" as const,

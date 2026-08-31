@@ -8,7 +8,63 @@
     "index.prod.js"
   ],
   "compilerOptions": {
-    "plugins": [{ "name": "@effect/language-service" }],
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        // Severity is set per-rule so that Effect diagnostics gate CI (via
+        // `npm run check:effect`) instead of being editor-only advice.
+        //
+        // "error" = the rule protects a TYPE CONTRACT. Each of these catches a
+        // way a program can break WITHOUT its signature changing, which is
+        // exactly what we need the types to rule out.
+        // "off"   = the rule is a style/idiom preference. Real opinions, but
+        //           they are not load-bearing, and leaving them on buries the
+        //           contract violations under ~100 advisory messages.
+        "diagnosticSeverity": {
+          // --- error channel honesty ---
+          "unknownInEffectCatch": "error",
+          "globalErrorInEffectCatch": "error",
+          "globalErrorInEffectFailure": "error",
+          // Off deliberately: it flags every place `unknown` APPEARS in an error
+          // channel, which is mostly propagation from a handful of real sources
+          // plus test-helper signatures (~34 hits in *.test.ts alone). The rule
+          // that actually protects the contract is `unknownInEffectCatch`, which
+          // fires where `unknown` ENTERS the channel. Fix the entry points and
+          // the propagation goes away on its own.
+          "anyUnknownInErrorContext": "off",
+          "missingEffectError": "error",
+          "effectInFailure": "error",
+          "catchUnfailableEffect": "error",
+          // --- requirement (R) channel honesty ---
+          "missingEffectContext": "error",
+          "missingLayerContext": "error",
+          "leakingRequirements": "error",
+          "missingEffectServiceDependency": "error",
+          "scopeInLayerEffect": "error",
+          "layerMergeAllWithDependencies": "error",
+          // --- effects that silently do nothing / escape the runtime ---
+          "floatingEffect": "error",
+          "runEffectInsideEffect": "error",
+          "effectInVoidSuccess": "error",
+          "missingStarInYieldEffectGen": "error",
+          "missingReturnYieldStar": "error",
+          "tryCatchInEffectGen": "error",
+          "multipleEffectProvide": "error",
+          "duplicatePackage": "error",
+          // --- style / idiom: not contract-bearing, keep the signal clean ---
+          "effectFnOpportunity": "off",
+          "preferSchemaOverJson": "off",
+          "unnecessaryFailYieldableError": "off",
+          "unnecessaryEffectGen": "off",
+          "removeUnnecessaryEffectGen": "off",
+          "unnecessaryPipe": "off",
+          "unnecessaryPipeChain": "off",
+          "missedPipeableOpportunity": "off",
+          "importFromBarrel": "off",
+          "strictBooleanExpressions": "off"
+        }
+      }
+    ],
     "types": ["vite/client", "vitest/globals"],
     "rootDirs": [".", "./.react-router/types"],
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
