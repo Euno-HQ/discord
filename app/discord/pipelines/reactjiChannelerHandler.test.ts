@@ -58,10 +58,21 @@ const makeMockDb = (configs: any[] = []) => ({
 // change on the interface is still a compile error at the call site.
 const unusedService = <T extends object>(name: string): T =>
   new Proxy({} as T, {
-    get: (_t, prop) => () => {
-      throw new Error(
-        `${name}.${String(prop)} called unexpectedly in a test that stubs it as unused`,
-      );
+    get: (_t, prop) => {
+      // Return undefined for probes rather than a function. The trap used to
+      // hand back a function for EVERY property, which meant `stub.then` looked
+      // like a thenable: any await or promise-resolution path would call it and
+      // throw from inside a microtask, taking the vitest worker down with it
+      // ("Worker exited unexpectedly") instead of failing a test. Symbols cover
+      // inspection/iteration probes from vitest and node's inspector.
+      if (typeof prop === "symbol") return undefined;
+      if (["then", "catch", "finally", "toJSON", "inspect"].includes(prop))
+        return undefined;
+      return () => {
+        throw new Error(
+          `${name}.${prop} called unexpectedly in a test that stubs it as unused`,
+        );
+      };
     },
   });
 
