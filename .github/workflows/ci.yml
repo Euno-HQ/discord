@@ -24,7 +24,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.19.0
 
       - run: npm ci
 
@@ -41,7 +41,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.19.0
 
       - run: npm ci
 
@@ -58,7 +58,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.19.0
 
       - run: npm ci
 
@@ -75,7 +75,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.19.0
 
       - run: npm ci
 
