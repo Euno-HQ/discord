@@ -47,6 +47,9 @@ export const testGuild = getEnv("DISCORD_TEST_GUILD");
 // meanwhile — their code is intentionally left in place.
 export const messageContentIntentEnabled =
   getEnv("DISCORD_MESSAGE_CONTENT_INTENT", true) === "true";
+// Server Members is privileged too and was revoked in the same action.
+export const guildMembersIntentEnabled =
+  getEnv("DISCORD_GUILD_MEMBERS_INTENT", true) === "true";
 export const sentryIngest = getEnv("SENTRY_INGEST", true);
 export const sentryReleases = getEnv("SENTRY_RELEASES", true);
 export const stripeSecretKey = getEnv("STRIPE_SECRET_KEY");

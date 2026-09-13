@@ -29,6 +29,7 @@ vi.mock("discord.js", async () => {
 vi.mock("#~/helpers/env.server", () => ({
   discordToken: "test-bot-token",
   messageContentIntentEnabled: false,
+  guildMembersIntentEnabled: false,
 }));
 vi.mock("#~/helpers/botPermissions", () => ({ botInviteUrl: () => "invite" }));
 vi.mock("#~/helpers/observability", () => ({
