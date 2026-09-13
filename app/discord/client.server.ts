@@ -2,7 +2,10 @@ import { ActivityType, Client, GatewayIntentBits, Partials } from "discord.js";
 import { Context, Layer } from "effect";
 
 import { botInviteUrl } from "#~/helpers/botPermissions";
-import { discordToken } from "#~/helpers/env.server";
+import {
+  discordToken,
+  messageContentIntentEnabled,
+} from "#~/helpers/env.server";
 import { log, trackPerformance } from "#~/helpers/observability";
 
 // Construct the discord.js Client. Factored out so the Layer owns construction
@@ -13,7 +16,6 @@ const makeClient = (): Client =>
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMembers,
       GatewayIntentBits.GuildEmojisAndStickers,
-      GatewayIntentBits.MessageContent,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.GuildMessageReactions,
       GatewayIntentBits.GuildModeration,
@@ -21,6 +23,10 @@ const makeClient = (): Client =>
       GatewayIntentBits.DirectMessageReactions,
       GatewayIntentBits.AutoModerationExecution,
       GatewayIntentBits.AutoModerationConfiguration,
+      // See messageContentIntentEnabled for why this is opt-in.
+      ...(messageContentIntentEnabled
+        ? [GatewayIntentBits.MessageContent]
+        : []),
     ],
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
   });
