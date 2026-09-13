@@ -26,7 +26,10 @@ vi.mock("discord.js", async () => {
   };
 });
 
-vi.mock("#~/helpers/env.server", () => ({ discordToken: "test-bot-token" }));
+vi.mock("#~/helpers/env.server", () => ({
+  discordToken: "test-bot-token",
+  messageContentIntentEnabled: false,
+}));
 vi.mock("#~/helpers/botPermissions", () => ({ botInviteUrl: () => "invite" }));
 vi.mock("#~/helpers/observability", () => ({
   // eslint-disable-next-line @typescript-eslint/no-empty-function
