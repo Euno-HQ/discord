@@ -4,6 +4,7 @@ import { Context, Layer } from "effect";
 import { botInviteUrl } from "#~/helpers/botPermissions";
 import {
   discordToken,
+  guildMembersIntentEnabled,
   messageContentIntentEnabled,
 } from "#~/helpers/env.server";
 import { log, trackPerformance } from "#~/helpers/observability";
@@ -14,7 +15,6 @@ const makeClient = (): Client =>
   new Client({
     intents: [
       GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMembers,
       GatewayIntentBits.GuildEmojisAndStickers,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.GuildMessageReactions,
@@ -27,6 +27,7 @@ const makeClient = (): Client =>
       ...(messageContentIntentEnabled
         ? [GatewayIntentBits.MessageContent]
         : []),
+      ...(guildMembersIntentEnabled ? [GatewayIntentBits.GuildMembers] : []),
     ],
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
   });
