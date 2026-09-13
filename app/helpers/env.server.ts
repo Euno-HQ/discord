@@ -40,6 +40,13 @@ export const discordSecret = getEnv("DISCORD_SECRET");
 export const applicationId = getEnv("DISCORD_APP_ID");
 export const discordToken = getEnv("DISCORD_HASH");
 export const testGuild = getEnv("DISCORD_TEST_GUILD");
+// Message Content is a privileged intent Discord has revoked for us (policy
+// change, 2026-09). Requesting it without approval closes the gateway with
+// 4014 and the process exits, so it is opt-in until we're re-approved.
+// Content-dependent features (spam scan, edit diffs) see empty content
+// meanwhile — their code is intentionally left in place.
+export const messageContentIntentEnabled =
+  getEnv("DISCORD_MESSAGE_CONTENT_INTENT", true) === "true";
 export const sentryIngest = getEnv("SENTRY_INGEST", true);
 export const sentryReleases = getEnv("SENTRY_RELEASES", true);
 export const stripeSecretKey = getEnv("STRIPE_SECRET_KEY");

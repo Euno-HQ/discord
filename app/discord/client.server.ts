@@ -1,7 +1,10 @@
 import { ActivityType, Client, GatewayIntentBits, Partials } from "discord.js";
 
 import { botInviteUrl } from "#~/helpers/botPermissions";
-import { discordToken } from "#~/helpers/env.server";
+import {
+  discordToken,
+  messageContentIntentEnabled,
+} from "#~/helpers/env.server";
 import { log, trackPerformance } from "#~/helpers/observability";
 import Sentry from "#~/helpers/sentry.server";
 
@@ -10,7 +13,6 @@ export const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildEmojisAndStickers,
-    GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.GuildModeration,
@@ -18,6 +20,8 @@ export const client = new Client({
     GatewayIntentBits.DirectMessageReactions,
     GatewayIntentBits.AutoModerationExecution,
     GatewayIntentBits.AutoModerationConfiguration,
+    // See messageContentIntentEnabled for why this is opt-in.
+    ...(messageContentIntentEnabled ? [GatewayIntentBits.MessageContent] : []),
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
