@@ -11,7 +11,7 @@ import {
 import { Effect } from "effect";
 
 import { logUserMessage } from "#~/commands/report/userLog.ts";
-import { client } from "#~/discord/client.server";
+import { DiscordClient } from "#~/discord/client.server";
 import {
   deleteMessage,
   fetchChannelFromClient,
@@ -92,6 +92,7 @@ export const Command = [
     command: { type: InteractionType.MessageComponent, name: "delete-tracked" },
     handler: (interaction) =>
       Effect.gen(function* () {
+        const client = yield* DiscordClient;
         const [, reportId] = interaction.customId.split("|");
 
         const report = yield* getReportById(reportId);

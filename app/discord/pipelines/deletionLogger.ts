@@ -2,7 +2,7 @@
 import { Effect, Stream } from "effect";
 
 import type { RuntimeContext } from "#~/AppRuntime";
-import { client } from "#~/discord/client.server";
+import { DiscordClient } from "#~/discord/client.server";
 import { DiscordEventBus } from "#~/discord/eventBus";
 import { isGuildMessageEvent } from "#~/discord/events";
 import { MessageCacheService } from "#~/discord/messageCacheService";
@@ -23,6 +23,7 @@ export const deletionLoggerPipeline: Effect.Effect<
   const { stream } = yield* DiscordEventBus;
   const cache = yield* MessageCacheService;
   const flags = yield* FeatureFlagService;
+  const client = yield* DiscordClient;
 
   yield* stream.pipe(
     Stream.filter(isGuildMessageEvent),

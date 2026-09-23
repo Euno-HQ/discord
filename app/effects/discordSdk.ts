@@ -8,6 +8,7 @@
  * performance tracing. Span names use a `discord.` prefix consistently.
  */
 import type {
+  AutoModerationRule,
   ChatInputCommandInteraction,
   Client,
   Guild,
@@ -59,6 +60,31 @@ export const fetchChannelFromClient = <T = GuildTextBasedChannel>(
   ).pipe(
     Effect.withSpan("discord.fetchChannel", {
       attributes: { channelId, variant: "fromClient" },
+    }),
+  );
+
+/**
+ * Resolve an automod rule by id, returning `null` instead of failing when the
+ * rule can't be fetched (e.g. it was deleted, or the bot lacks permission).
+ *
+ * The `AutoModerationActionExecution` event payload only reliably carries
+ * `ruleId`; its `autoModerationRule` getter reads from a cache that is usually
+ * empty at action time, so callers that need the rule name must fetch it.
+ */
+export const fetchAutomodRuleOrNull = (
+  guild: Guild,
+  ruleId: string,
+): Effect.Effect<AutoModerationRule | null, never, never> =>
+  Effect.tryPromise({
+    try: () => guild.autoModerationRules.fetch(ruleId),
+    catch: () => null,
+  }).pipe(
+    Effect.catchAll(() => Effect.succeed(null)),
+    Effect.tap((result) =>
+      Effect.annotateCurrentSpan({ found: result !== null }),
+    ),
+    Effect.withSpan("discord.fetchAutomodRule", {
+      attributes: { guildId: guild.id, ruleId, variant: "orNull" },
     }),
   );
 

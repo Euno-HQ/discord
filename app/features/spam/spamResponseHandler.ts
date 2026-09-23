@@ -7,7 +7,7 @@ import type { GuildMember, Message } from "discord.js";
 import { Effect } from "effect";
 
 import { logUserMessage } from "#~/commands/report/userLog.ts";
-import { client } from "#~/discord/client.server.ts";
+import { DiscordClient } from "#~/discord/client.server.ts";
 import { deleteMessage, softbanMember } from "#~/effects/discordSdk.ts";
 import { isDiscordError } from "#~/effects/errorHandling.ts";
 import { logEffect } from "#~/effects/observability.ts";
@@ -170,6 +170,7 @@ export const executeResponse = (
  */
 const checkCrossGuildSpam = (userId: string) =>
   Effect.gen(function* () {
+    const client = yield* DiscordClient;
     const guildCount = yield* getSpamReportGuildCount(userId);
     if (guildCount < CROSS_GUILD_SPAM_THRESHOLD) return;
 
@@ -237,6 +238,7 @@ const checkCrossGuildSpam = (userId: string) =>
 /** Log a spam report to the mod thread */
 const logSpamReport = (message: Message, verdict: SpamVerdict) =>
   Effect.gen(function* () {
+    const client = yield* DiscordClient;
     const extra = `Score ${verdict.totalScore} (${verdict.tier}): ${verdict.summary}`;
 
     const result = yield* logUserMessage({

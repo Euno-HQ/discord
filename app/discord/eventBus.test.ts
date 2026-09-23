@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { Context, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -14,6 +15,8 @@ vi.mock("#~/helpers/observability", () => ({
 }));
 vi.mock("#~/discord/client.server", () => ({
   client: {},
+  DiscordClient: Context.GenericTag("DiscordClient"),
+  DiscordClientLayer: Layer.empty,
 }));
 
 // --- Helpers ---

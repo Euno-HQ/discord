@@ -2,6 +2,7 @@ import { formatDistanceToNowStrict } from "date-fns";
 import {
   AuditLogEvent,
   type AutoModerationActionExecution,
+  type AutoModerationRule,
   type Guild,
   type GuildBan,
   type GuildMember,
@@ -13,10 +14,20 @@ import { Effect } from "effect";
 import { resolveApplicationsForDeparture } from "#~/commands/memberApplications";
 import { logAutomod } from "#~/commands/report/automodLog.ts";
 import { AUDIT_LOG_WINDOW_MS, fetchAuditLogEntry } from "#~/discord/auditLog";
-import { fetchUser } from "#~/effects/discordSdk.ts";
+import { fetchAutomodRuleOrNull, fetchUser } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 
 import { logModAction } from "./modActionLog";
+
+/**
+ * Resolve the display name for an automod rule, preferring a freshly fetched
+ * rule, then the (often-empty) cached rule on the execution payload, then a
+ * stable fallback. Pure so it can be unit-tested without a Discord client.
+ */
+export const resolveRuleName = (
+  fetchedRule: AutoModerationRule | null,
+  cachedRule: AutoModerationRule | null,
+): string => fetchedRule?.name ?? cachedRule?.name ?? "Unknown rule";
 
 export const banAddEffect = (ban: GuildBan) =>
   Effect.gen(function* () {
@@ -200,10 +211,17 @@ export const automodActionEffect = (execution: AutoModerationActionExecution) =>
       messageId,
       content,
       action,
+      ruleId,
       matchedContent,
       matchedKeyword,
       autoModerationRule,
     } = execution;
+
+    // The execution payload's `autoModerationRule` getter reads from a cache
+    // that is usually empty at action time, so fetch the rule by id to get a
+    // reliable name (falling back to the cached rule, then a stable default).
+    const fetchedRule = yield* fetchAutomodRuleOrNull(guild, ruleId);
+    const ruleName = resolveRuleName(fetchedRule, autoModerationRule);
 
     yield* logEffect("info", "Automod", "Automod action executed", {
       userId,
@@ -211,7 +229,8 @@ export const automodActionEffect = (execution: AutoModerationActionExecution) =>
       channelId,
       messageId,
       actionType: action.type,
-      ruleName: autoModerationRule?.name,
+      ruleId,
+      ruleName,
       matchedKeyword,
     });
 
@@ -223,7 +242,7 @@ export const automodActionEffect = (execution: AutoModerationActionExecution) =>
       content: content ?? matchedContent ?? "[Content not available]",
       channelId: channelId ?? undefined,
       messageId: messageId ?? undefined,
-      ruleName: autoModerationRule?.name ?? "Unknown rule",
+      ruleName,
       matchedKeyword: matchedKeyword ?? matchedContent ?? undefined,
       actionType: action.type,
     });

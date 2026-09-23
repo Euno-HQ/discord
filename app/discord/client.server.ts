@@ -1,4 +1,5 @@
 import { ActivityType, Client, GatewayIntentBits, Partials } from "discord.js";
+import { Context, Layer } from "effect";
 
 import { botInviteUrl } from "#~/helpers/botPermissions";
 import {
@@ -9,23 +10,46 @@ import {
 import { log, trackPerformance } from "#~/helpers/observability";
 import Sentry from "#~/helpers/sentry.server";
 
-export const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildEmojisAndStickers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildMessageReactions,
-    GatewayIntentBits.GuildModeration,
-    GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.DirectMessageReactions,
-    GatewayIntentBits.AutoModerationExecution,
-    GatewayIntentBits.AutoModerationConfiguration,
-    // See messageContentIntentEnabled for why this is opt-in.
-    ...(messageContentIntentEnabled ? [GatewayIntentBits.MessageContent] : []),
-    ...(guildMembersIntentEnabled ? [GatewayIntentBits.GuildMembers] : []),
-  ],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
-});
+// Construct the discord.js Client. Factored out so the Layer owns construction
+// rather than a bare module-level singleton.
+const makeClient = (): Client =>
+  new Client({
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildEmojisAndStickers,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.GuildMessageReactions,
+      GatewayIntentBits.GuildModeration,
+      GatewayIntentBits.DirectMessages,
+      GatewayIntentBits.DirectMessageReactions,
+      GatewayIntentBits.AutoModerationExecution,
+      GatewayIntentBits.AutoModerationConfiguration,
+      // See messageContentIntentEnabled for why this is opt-in.
+      ...(messageContentIntentEnabled
+        ? [GatewayIntentBits.MessageContent]
+        : []),
+      ...(guildMembersIntentEnabled ? [GatewayIntentBits.GuildMembers] : []),
+    ],
+    partials: [Partials.Message, Partials.Channel, Partials.Reaction],
+  });
+
+/**
+ * The bot's discord.js Client, exposed as an Effect service.
+ *
+ * Bot-only: the client lives in `AppLayer` (part of `RuntimeContext`), so any
+ * bot-side effect can `yield* DiscordClient` to reach it. The single instance
+ * is created once when the Layer is built and held for the process lifetime.
+ *
+ * NOTE: this is deliberately NOT the path web/shared code uses to talk to
+ * Discord — that's the REST-based `ssrDiscordSdk` in `app/discord/api.ts`,
+ * which stays separate pending the #317 boundary decision.
+ */
+export class DiscordClient extends Context.Tag("DiscordClient")<
+  DiscordClient,
+  Client
+>() {}
+
+export const DiscordClientLayer = Layer.sync(DiscordClient, makeClient);
 
 /**
  * Whether the bot half of the process reached Discord.
@@ -90,7 +114,7 @@ const isUnauthorized = (error: unknown): boolean => {
   return code === "TokenInvalid" || status === 401;
 };
 
-const announceReady = async () => {
+const announceReady = async (client: Client) => {
   client.user?.setActivity("server activity…", {
     type: ActivityType.Watching,
   });
@@ -126,7 +150,7 @@ const announceReady = async () => {
  * every visitor. A bot that cannot reach Discord is a degraded bot, not a dead
  * website — so we record the failure, alert, and leave the process running.
  */
-export const login = async (): Promise<BotConnectionState> => {
+export const login = async (client: Client): Promise<BotConnectionState> => {
   for (let attempt = 1; attempt <= MAX_LOGIN_ATTEMPTS; attempt++) {
     try {
       return await trackPerformance(
@@ -139,7 +163,7 @@ export const login = async (): Promise<BotConnectionState> => {
           log("info", "Client", "Discord client login successful", { attempt });
           setBotConnection({ state: "connected", attempts: attempt });
 
-          await announceReady();
+          await announceReady(client);
 
           return "connected" as const;
         },

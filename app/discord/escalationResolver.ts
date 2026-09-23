@@ -1,46 +1,37 @@
 import type { Client } from "discord.js";
 import { Effect, Layer } from "effect";
 
-import { runEffectExit } from "#~/AppRuntime";
+import type { RuntimeContext } from "#~/AppRuntime";
 import { checkPendingEscalationsEffect } from "#~/commands/escalate/escalationResolver";
-import { getFailure } from "#~/commands/escalate/index";
 import { EscalationServiceLive } from "#~/commands/escalate/service.ts";
-import { log } from "#~/helpers/observability";
-import { scheduleTask } from "#~/helpers/schedule";
+import { logEffect } from "#~/effects/observability.ts";
+import { scheduleTaskEffect } from "#~/helpers/schedule.server";
 
 const ONE_MINUTE = 60 * 1000;
 
 /**
- * Check pending escalations using Effect-based resolver.
+ * Escalation resolver scheduler.
+ * Runs every 15 minutes to check for escalations that should be auto-resolved.
+ *
+ * A long-lived Effect — fork it with `Effect.forkDaemon` / `runtime.runFork`
+ * once the client is ready (see `server.ts`). Per-run failures are caught and
+ * logged so the repeating schedule is never torn down.
  */
-async function checkPendingEscalations(client: Client): Promise<void> {
-  const exit = await runEffectExit(
+export const escalationResolverSchedule = (
+  client: Client,
+): Effect.Effect<void, never, RuntimeContext> =>
+  scheduleTaskEffect(
+    "EscalationResolver",
+    ONE_MINUTE * 15,
     checkPendingEscalationsEffect(client).pipe(
       Effect.provide(Layer.mergeAll(EscalationServiceLive)),
+      Effect.catchAll((error) =>
+        logEffect(
+          "error",
+          "EscalationResolver",
+          "Failed to check pending escalations",
+          { error },
+        ),
+      ),
     ),
   );
-
-  if (exit._tag === "Failure") {
-    const error = getFailure(exit.cause);
-    log("error", "EscalationResolver", "Failed to check pending escalations", {
-      error,
-    });
-  }
-}
-
-/**
- * Start the escalation resolver scheduler.
- * Runs every 15 minutes to check for escalations that should be auto-resolved.
- */
-export function startEscalationResolver(client: Client): void {
-  log(
-    "info",
-    "EscalationResolver",
-    "Starting escalation resolver scheduler",
-    {},
-  );
-
-  scheduleTask("EscalationResolver", ONE_MINUTE * 15, () => {
-    void checkPendingEscalations(client);
-  });
-}

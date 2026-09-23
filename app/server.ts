@@ -25,12 +25,9 @@ import {
   deployCommands,
   registerCommand,
 } from "#~/discord/deployCommands.server";
-import { startEscalationResolver } from "#~/discord/escalationResolver";
+import { escalationResolverSchedule } from "#~/discord/escalationResolver";
 import { initDiscordBot } from "#~/discord/gateway";
-import {
-  MessageCacheService,
-  startMessageCacheExpiration,
-} from "#~/discord/messageCacheService";
+import { messageCacheExpirationSchedule } from "#~/discord/messageCacheService";
 import { activityTrackerPipeline } from "#~/discord/pipelines/activityTracker";
 import { automodPipeline } from "#~/discord/pipelines/automod";
 import { deletionLoggerPipeline } from "#~/discord/pipelines/deletionLogger";
@@ -44,7 +41,7 @@ import "#~/jobs/bulkRoleAssignment";
 
 import { runJobRunner } from "#~/jobs/jobRunner";
 
-import { runEffect, runtime, warmRuntime } from "./AppRuntime";
+import { runtime, warmRuntime } from "./AppRuntime";
 import { checkpointWal, runIntegrityCheck } from "./Database";
 import { tryDiscord } from "./effects/classifyDiscordError";
 import { logEffect } from "./effects/observability";
@@ -139,28 +136,11 @@ const startup = Effect.gen(function* () {
   if (!globalThis.__discordOneTimeSetupDone) {
     globalThis.__discordOneTimeSetupDone = true;
 
-    // Message cache expiration (was inside startDeletionLogging, now standalone)
-    startMessageCacheExpiration(() =>
-      runEffect(
-        Effect.gen(function* () {
-          const cache = yield* MessageCacheService;
-          yield* cache.expireContent();
-          yield* cache.expireRows();
-        }).pipe(
-          Effect.catchAll((e) =>
-            logEffect(
-              "warn",
-              "MessageCacheExpiration",
-              "Expiration run failed",
-              {
-                error: e,
-              },
-            ),
-          ),
-        ),
-      ),
-    );
-
+    // Periodic schedulers — long-lived Effects forked off the runtime so they
+    // outlive `startup`. Each self-recovers per run (see scheduleTaskEffect),
+    // so a single failure never tears the schedule down. These two need no
+    // gateway, so they run even in web-only degraded mode.
+    runtime.runFork(messageCacheExpirationSchedule);
     runtime.runFork(runJobRunner);
 
     // Everything below needs a live gateway. When Discord has rejected us the
@@ -170,8 +150,8 @@ const startup = Effect.gen(function* () {
     if (botConnected) {
       yield* tryDiscord("init", () => deployCommands(discordClient));
 
-      // Start escalation resolver scheduler (must be after client is ready)
-      startEscalationResolver(discordClient);
+      // Escalation resolver scheduler (must be after client is ready)
+      runtime.runFork(escalationResolverSchedule(discordClient));
 
       yield* logEffect("info", "Gateway", "Gateway initialization completed", {
         guildCount: discordClient.guilds.cache.size,

@@ -22,6 +22,15 @@ const tryStripe = <A>(operation: string, fn: () => Promise<A>) =>
     },
   });
 
+// Stripe reports code "resource_missing" (HTTP 404) when an id no longer exists
+// in its system. Structural check (no instanceof / no string-cast) so we can
+// branch on the raw SDK error carried in StripeError.cause.
+const isStripeResourceMissing = (cause: unknown): boolean =>
+  typeof cause === "object" &&
+  cause !== null &&
+  "code" in cause &&
+  (cause as { code?: unknown }).code === "resource_missing";
+
 const createCheckoutSession = (
   variant: string,
   coupon: string,
@@ -231,32 +240,32 @@ const cancelSubscription = (
       subscriptionId,
     });
 
-    const cancelled = yield* tryStripe("cancelSubscription", () =>
+    return yield* tryStripe("cancelSubscription", () =>
       stripe.subscriptions.cancel(subscriptionId),
     ).pipe(
-      Effect.tapError((error) =>
-        logEffect("error", "Stripe", "Failed to cancel subscription", {
+      Effect.flatMap(() =>
+        logEffect("info", "Stripe", "Subscription cancelled successfully", {
           subscriptionId,
-          error,
-        }),
+        }).pipe(Effect.as(true)),
       ),
-      Effect.as(true),
-      // Prior behavior: errors recover as false.
-      Effect.catchTag("StripeError", () => Effect.succeed(false)),
+      Effect.catchTag("StripeError", (error) =>
+        // A stale/already-removed subscription id (resource_missing, 404) means
+        // there is nothing left to cancel — cancellation is idempotent, so treat
+        // it as success rather than surfacing CANCEL_FAILED to the user.
+        isStripeResourceMissing(error.cause)
+          ? logEffect(
+              "info",
+              "Stripe",
+              "Subscription already cancelled or no longer exists; treating as success",
+              { subscriptionId },
+            ).pipe(Effect.as(true))
+          : // Prior behavior: other errors recover as false.
+            logEffect("error", "Stripe", "Failed to cancel subscription", {
+              subscriptionId,
+              error,
+            }).pipe(Effect.as(false)),
+      ),
     );
-
-    if (cancelled) {
-      yield* logEffect(
-        "info",
-        "Stripe",
-        "Subscription cancelled successfully",
-        {
-          subscriptionId,
-        },
-      );
-    }
-
-    return cancelled;
   }).pipe(
     Effect.withSpan("Stripe.cancelSubscription", {
       attributes: { subscriptionId },

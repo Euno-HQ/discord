@@ -7,24 +7,13 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // endpoint, and nginx served 503 for the whole site. These tests pin the
 // invariant that a Discord auth failure never takes the process down.
 
+// Stand-in for the discord.js Client that `login()` now takes as an argument.
 const discordClient = vi.hoisted(() => ({
   login: vi.fn(),
   user: { setActivity: vi.fn() },
   guilds: { fetch: vi.fn().mockResolvedValue(new Map()) },
   application: null,
-}));
-
-vi.mock("discord.js", async () => {
-  const actual = await vi.importActual<any>("discord.js");
-  // Arrow functions are not constructible, so `new Client(...)` needs a
-  // real function here.
-  return {
-    ...actual,
-    Client: vi.fn(function (this: unknown) {
-      return discordClient;
-    }),
-  };
-});
+})) as any;
 
 vi.mock("#~/helpers/env.server", () => ({
   discordToken: "test-bot-token",
@@ -65,7 +54,7 @@ describe("login", () => {
     discordClient.login.mockRejectedValue(unauthorized);
 
     const { login } = await importFresh();
-    const state = await login();
+    const state = await login(discordClient);
 
     expect(state).toBe("unauthorized");
     expect(exit).not.toHaveBeenCalled();
@@ -78,7 +67,7 @@ describe("login", () => {
     );
 
     const { login, getBotConnection } = await importFresh();
-    await login();
+    await login(discordClient);
 
     // A rotated token cannot be recovered in-process — env is read once at
     // boot — so retrying a 401 is pure noise against Discord's API.
@@ -93,7 +82,7 @@ describe("login", () => {
       .mockResolvedValueOnce(undefined);
 
     const { login, getBotConnection } = await importFresh();
-    const pending = login();
+    const pending = login(discordClient);
     await vi.runAllTimersAsync();
     const state = await pending;
 
@@ -111,7 +100,7 @@ describe("login", () => {
     discordClient.login.mockRejectedValue(new Error("gateway unreachable"));
 
     const { login } = await importFresh();
-    const pending = login();
+    const pending = login(discordClient);
     await vi.runAllTimersAsync();
     const state = await pending;
 
