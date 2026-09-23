@@ -66,4 +66,6 @@ export const scheduleTaskEffect = <E, R>(
       ),
       Effect.repeat(Schedule.fixed(`${interval} millis`)),
     );
-  }).pipe(Effect.withSpan("scheduleTaskEffect", { attributes: { serviceName } }));
+  }).pipe(
+    Effect.withSpan("scheduleTaskEffect", { attributes: { serviceName } }),
+  );
