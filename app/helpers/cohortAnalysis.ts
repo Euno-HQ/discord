@@ -1,7 +1,8 @@
 import { sql } from "kysely";
 import { partition } from "lodash-es";
 
-import { db, run } from "#~/AppRuntime";
+import { runEffect } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
 import type { CodeStats } from "#~/helpers/discord";
 import { descriptiveStats, percentile } from "#~/helpers/statistics";
 import { createMessageStatsQuery } from "#~/models/activity.server";
@@ -265,42 +266,47 @@ export async function getCohortMetrics(
   end: string,
   minMessageThreshold = 10,
 ): Promise<UserCohortMetrics[]> {
-  // Get aggregated user data
-  const userStatsQuery = createMessageStatsQuery(db, guildId, start, end)
-    .select((eb) => [
-      "author_id",
-      eb.fn.count<number>("author_id").as("message_count"),
-      eb.fn.sum<number>("word_count").as("word_count"),
-      eb.fn.sum<number>("react_count").as("reaction_count"),
-      eb.fn("group_concat", ["code_stats"]).as("code_stats_json"),
-      eb
-        .fn("date", [eb("sent_at", "/", eb.lit(1000)), sql.lit("unixepoch")])
-        .as("date"),
-    ])
-    .groupBy("author_id")
-    .having((eb) =>
-      eb(eb.fn.count<number>("author_id"), ">=", minMessageThreshold),
-    );
+  // Live DB handle from the runtime; each query builder is an
+  // Effect<rows, SqlError> run through `runEffect` (this helpers/ module is in
+  // the client-reachable zone, so it must not import `effect` directly).
+  const db = await runEffect(DatabaseService);
 
-  const userStats = await run(userStatsQuery);
+  // Get aggregated user data
+  const userStats = await runEffect(
+    createMessageStatsQuery(db, guildId, start, end)
+      .select((eb) => [
+        "author_id",
+        eb.fn.count<number>("author_id").as("message_count"),
+        eb.fn.sum<number>("word_count").as("word_count"),
+        eb.fn.sum<number>("react_count").as("reaction_count"),
+        eb.fn("group_concat", ["code_stats"]).as("code_stats_json"),
+        eb
+          .fn("date", [eb("sent_at", "/", eb.lit(1000)), sql.lit("unixepoch")])
+          .as("date"),
+      ])
+      .groupBy("author_id")
+      .having((eb) =>
+        eb(eb.fn.count<number>("author_id"), ">=", minMessageThreshold),
+      ),
+  );
 
   // Get daily activity for streak calculation
-  const dailyActivityQuery = createMessageStatsQuery(db, guildId, start, end)
-    .select(({ fn, eb, lit }) => [
-      "author_id",
-      fn.count<number>("author_id").as("message_count"),
-      eb
-        .fn("date", [eb("sent_at", "/", lit(1000)), sql.lit("unixepoch")])
-        .as("date"),
-    ])
-    .groupBy(["author_id", "date"])
-    .where(
-      "author_id",
-      "in",
-      userStats.map((u) => u.author_id),
-    );
-
-  const dailyActivity = await run(dailyActivityQuery);
+  const dailyActivity = await runEffect(
+    createMessageStatsQuery(db, guildId, start, end)
+      .select(({ fn, eb, lit }) => [
+        "author_id",
+        fn.count<number>("author_id").as("message_count"),
+        eb
+          .fn("date", [eb("sent_at", "/", lit(1000)), sql.lit("unixepoch")])
+          .as("date"),
+      ])
+      .groupBy(["author_id", "date"])
+      .where(
+        "author_id",
+        "in",
+        userStats.map((u) => u.author_id),
+      ),
+  );
 
   // Group daily activity by user
   const dailyActivityByUser = dailyActivity.reduce(

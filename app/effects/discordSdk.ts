@@ -170,10 +170,7 @@ export const editMessage = (
   );
 
 export const forwardMessageSafe = (message: Message, targetChannelId: string) =>
-  Effect.tryPromise({
-    try: () => message.forward(targetChannelId),
-    catch: (error) => error,
-  }).pipe(
+  tryDiscord("forwardMessage", () => message.forward(targetChannelId)).pipe(
     Effect.catchAll((error) =>
       logEffect("error", "Discord SDK", "failed to forward to modLog", {
         error,

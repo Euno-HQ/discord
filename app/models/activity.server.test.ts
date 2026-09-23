@@ -45,8 +45,9 @@ const TestBase = Layer.mergeAll(TestSqliteLive, TestKyselyLive);
 
 const testRuntime = ManagedRuntime.make(TestBase);
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const runTest = <A>(effect: Effect.Effect<A, any, any>) =>
+type TestR = Layer.Layer.Success<typeof TestBase>;
+
+const runTest = <A, E>(effect: Effect.Effect<A, E, TestR>) =>
   testRuntime.runPromise(effect);
 
 beforeAll(async () => {

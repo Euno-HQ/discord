@@ -7,6 +7,12 @@ import { logEffect } from "#~/effects/observability";
 import Sentry from "#~/helpers/sentry.server";
 
 export type ProductTier = "free" | "paid" | "custom";
+
+const PRODUCT_TIERS: readonly string[] = ["free", "paid", "custom"];
+
+/** Narrow a raw DB string to ProductTier. The column is untyped text. */
+const isProductTier = (value: string): value is ProductTier =>
+  PRODUCT_TIERS.includes(value);
 // These must match Stripe price lookup_keys
 export type PaidVariants = "standard_annual";
 
@@ -271,8 +277,21 @@ const getProductTier = (
       },
     );
 
-    // Type assertion since we control the values
-    return subscription.product_tier as unknown as ProductTier;
+    if (isProductTier(subscription.product_tier)) {
+      return subscription.product_tier;
+    }
+
+    // The column is a plain string, so "we control the values" is a convention,
+    // not a guarantee -- a bad row, a hand-edit, or a future tier written by
+    // another process lands here. Fail closed to "free": granting paid access on
+    // an unrecognised value is the one outcome that must not happen silently.
+    yield* logEffect(
+      "error",
+      "SubscriptionService",
+      "Unrecognised product_tier in DB; treating as free",
+      { guildId, productTier: subscription.product_tier },
+    );
+    return "free" as const;
   }).pipe(
     Effect.withSpan("SubscriptionService.getProductTier", {
       attributes: { guildId },

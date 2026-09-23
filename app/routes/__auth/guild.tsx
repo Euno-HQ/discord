@@ -1,7 +1,8 @@
 import { data, Link, useLoaderData } from "react-router";
 
-import { db, run, runEffect } from "#~/AppRuntime";
+import { runEffect } from "#~/AppRuntime";
 import { Sparkline } from "#~/components/Sparkline";
+import { DatabaseService } from "#~/Database";
 import { ssrDiscordSdk, userDiscordSdkFromRequest } from "#~/discord/api";
 import { getCachedGuilds } from "#~/helpers/guildCache.server";
 import { requireUser } from "#~/models/session.server";
@@ -46,6 +47,11 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     Date.now() - 30 * 24 * 60 * 60 * 1000,
   ).toISOString();
 
+  // Live DB handle from the runtime; each query builder is an
+  // Effect<rows, SqlError> run through `runEffect` (this client-reachable
+  // route module must not import `effect` directly).
+  const db = await runEffect(DatabaseService);
+
   const [
     dailyReportRows,
     modActionsByType,
@@ -54,7 +60,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     tier,
   ] = await Promise.all([
     // Daily report counts for sparkline (30 days)
-    run(
+    runEffect(
       db
         .selectFrom("reported_messages")
         .select((eb) => [
@@ -70,7 +76,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     ),
 
     // Mod action counts grouped by action_type
-    run(
+    runEffect(
       db
         .selectFrom("mod_actions")
         .select((eb) => ["action_type", eb.fn.countAll<number>().as("count")])
@@ -80,7 +86,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     ),
 
     // Report counts grouped by reason
-    run(
+    runEffect(
       db
         .selectFrom("reported_messages")
         .select((eb) => ["reason", eb.fn.countAll<number>().as("count")])
@@ -91,7 +97,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     ),
 
     // Open escalations (full rows, limited to 10)
-    run(
+    runEffect(
       db
         .selectFrom("escalations")
         .select([

@@ -78,6 +78,60 @@ export default [
       "prefer-const": "error",
       "no-var": "error",
 
+      // Two ways an Effect signature can lie about how a program fails. Both are
+      // at zero repo-wide with no suppressions; keep them there.
+      "no-restricted-syntax": [
+        "warn",
+        {
+          // `Effect.promise` asserts in the TYPE that a promise cannot reject.
+          // When one does, the rejection is a DEFECT: absent from the error
+          // channel, it kills the fiber and surfaces as an opaque FiberFailure —
+          // a program breaking in a way its signature never admitted was
+          // possible. It cost a real safety net once already: fetchAuditLogEntry
+          // looked infallible, so a catchAll guarding it was deleted as dead code.
+          selector:
+            "MemberExpression[object.name='Effect'][property.name='promise']",
+          message:
+            "Effect.promise hides a rejection as a defect. Use Effect.tryPromise with a typed catch (tryDiscord for Discord calls).",
+        },
+        {
+          // `any` in ANY of Effect's three type arguments defeats the point of
+          // the type. In the error channel a caller can't discriminate failures;
+          // in the REQUIREMENT channel a program can start needing a whole new
+          // service and every caller — including its tests — still compiles.
+          //
+          // This one deliberately applies to test files too (see the override
+          // below). Tests are how "manually verified" gets established, so an
+          // `Effect<A, any, any>` test helper is the most expensive place for
+          // this lie to live: it verifies nothing about requirements while
+          // looking like it does.
+          selector:
+            "TSTypeReference[typeName.right.name='Effect'] > TSTypeParameterInstantiation > TSAnyKeyword",
+          message:
+            "`any` in an Effect type argument erases the error or requirement channel. Name the real type (Layer.Layer.Success<typeof TestLayer> works well for a test runtime's R).",
+        },
+        {
+          // The bare `Effect.tryPromise(() => …)` form says "this can fail" but
+          // not HOW: the failure becomes UnknownException, so callers can't
+          // discriminate it and toUserResponse can only give it generic copy.
+          //
+          // This rule exists because `check:effect` structurally CANNOT see it —
+          // `unknownInEffectCatch` only fires on the `{ try, catch }` shape. 13
+          // of these sat invisible behind a green gate until the debt ratchet
+          // counted them, and the AST rule then found 11 more that the ratchet's
+          // regex had missed. Between the two rules both shapes are now covered.
+          //
+          // Match on the argument being a FUNCTION, not merely on argument count:
+          // the correct `Effect.tryPromise({ try, catch })` form is also a single
+          // argument, so an arguments.length check would forbid the fix as well
+          // as the defect.
+          selector:
+            "CallExpression[callee.object.name='Effect'][callee.property.name='tryPromise'] > :matches(ArrowFunctionExpression, FunctionExpression)",
+          message:
+            "Single-arg Effect.tryPromise erases the failure into UnknownException. Pass { try, catch } with a tagged error (or use tryDiscord for Discord calls).",
+        },
+      ],
+
       // React rules
       "react/react-in-jsx-scope": "off",
       "react-hooks/exhaustive-deps": "warn",
@@ -205,6 +259,31 @@ export default [
                 "Effect must not reach the client bundle. Move Effect code into a *.server.ts module (or a confirmed server-only dir) and have client code reach it through a route loader/action. See notes/EFFECT.md.",
             },
           ],
+        },
+      ],
+    },
+  },
+  {
+    // The Effect.promise ban targets PRODUCTION defects — a rejection that no
+    // signature admitted was possible. In a test, `Effect.promise(() =>
+    // Promise.reject(...))` is often the point: it deliberately constructs a
+    // defect to assert the code under test survives one. Allowed here.
+    files: ["**/*.test.ts", "**/*.test.tsx"],
+    // Tests may construct a defect on purpose (`Effect.promise(() =>
+    // Promise.reject(...))` to prove the code under test survives one), and may
+    // use the bare tryPromise form for a fixture. But `any` in an Effect type
+    // argument is NOT excusable here — it is worse in a test than in production,
+    // because it makes the test look like it verifies requirements when it does
+    // not. So the rule is re-declared with only that selector rather than
+    // switched off wholesale.
+    rules: {
+      "no-restricted-syntax": [
+        "warn",
+        {
+          selector:
+            "TSTypeReference[typeName.right.name='Effect'] > TSTypeParameterInstantiation > TSAnyKeyword",
+          message:
+            "`any` in an Effect type argument erases the error or requirement channel. Name the real type (Layer.Layer.Success<typeof TestLayer> works well for a test runtime's R).",
         },
       ],
     },

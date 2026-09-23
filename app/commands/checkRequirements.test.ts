@@ -1,6 +1,8 @@
 import { PermissionFlagsBits } from "discord-api-types/v10";
+import { PermissionsBitField } from "discord.js";
 
 import {
+  applyLogChannelPerms,
   buildHoneypotResult,
   buildLogChannelResult,
   buildOptionalPermissionResults,
@@ -134,5 +136,77 @@ describe("buildOptionalPermissionResults", () => {
       return true;
     });
     expect(checked).toContain(PermissionFlagsBits.ManageGuild);
+  });
+});
+
+describe("applyLogChannelPerms", () => {
+  // Built from real discord.js primitives, not a hand-shaped mock. The bug this
+  // guards against was invisible to mocks precisely because the mocks never
+  // modelled the difference between "channel resolved" and "bot can use it":
+  // guild.channels.fetch() is served from cache, so a revoked ViewChannel
+  // produces no API error at all and the check went green while every write to
+  // the channel failed with Missing Access.
+  const channelWith = (perms: bigint) => ({
+    id: "chan-1",
+    permissionsFor: () => new PermissionsBitField(perms),
+  });
+  const guildWith = (channel: unknown) =>
+    ({
+      members: { me: { id: "bot-1" } },
+      channels: { fetch: () => Promise.resolve(channel) },
+    }) as never;
+
+  const ALL =
+    PermissionFlagsBits.ViewChannel |
+    PermissionFlagsBits.SendMessages |
+    PermissionFlagsBits.CreatePrivateThreads |
+    PermissionFlagsBits.ManageThreads;
+
+  const okResult = () => ({
+    name: "Mod Log Channel",
+    ok: true,
+    detail: "<#chan-1>",
+  });
+
+  it("leaves an ok result alone when the bot has every needed permission", () => {
+    const channel = channelWith(ALL);
+    expect(
+      applyLogChannelPerms(okResult(), guildWith(channel), {
+        kind: "ok",
+        value: channel,
+      }),
+    ).toEqual(okResult());
+  });
+
+  it("fails the check and names the permission when ViewChannel is revoked", () => {
+    const channel = channelWith(ALL & ~PermissionFlagsBits.ViewChannel);
+    const result = applyLogChannelPerms(okResult(), guildWith(channel), {
+      kind: "ok",
+      value: channel,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("ViewChannel");
+  });
+
+  it("names every missing permission, not just the first", () => {
+    const channel = channelWith(PermissionFlagsBits.ViewChannel);
+    const result = applyLogChannelPerms(okResult(), guildWith(channel), {
+      kind: "ok",
+      value: channel,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("SendMessages");
+    expect(result.detail).toContain("ManageThreads");
+  });
+
+  it("does not second-guess a result that already failed", () => {
+    const failed = {
+      name: "Mod Log Channel",
+      ok: false,
+      detail: "Not configured",
+    };
+    expect(
+      applyLogChannelPerms(failed, guildWith(null), { kind: "missing" }),
+    ).toEqual(failed);
   });
 });

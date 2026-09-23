@@ -1,6 +1,7 @@
 import type { AuditLogEvent, Guild, PartialUser, User } from "discord.js";
 import { Effect } from "effect";
 
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { logEffect } from "#~/effects/observability";
 
 // Time window to check audit log for matching entries (5 seconds)
@@ -29,7 +30,7 @@ export const fetchAuditLogEntry = (
     for (let attempt = 0; attempt < 3; attempt++) {
       yield* Effect.sleep("500 millis");
 
-      const auditLogs = yield* Effect.promise(() =>
+      const auditLogs = yield* tryDiscord("fetchAuditLogs", () =>
         guild.fetchAuditLogs({ type: auditLogType, limit: 5 }),
       ).pipe(
         Effect.withSpan("discord.fetchAuditLogs", {
@@ -58,4 +59,45 @@ export const fetchAuditLogEntry = (
     Effect.withSpan("fetchAuditLogEntry", {
       attributes: { userId, guildId: guild.id },
     }),
+  );
+
+/**
+ * `fetchAuditLogEntry`, but any lookup failure degrades to "no entry found"
+ * instead of failing the caller. Audit-log attribution is best-effort — it
+ * decides whether a log entry names an executor, never whether the entry
+ * gets written at all. `component` tags the `logEffect` call so failures
+ * show up under the calling module (e.g. "ModActionLogger", "AutomodLog").
+ *
+ * `ForbiddenError` (the bot lacks View Audit Log) logs at `warn`: it's an
+ * actionable misconfiguration, not a blip. Every other tag — a
+ * `RateLimitError`/`TransientError` surviving `fetchAuditLogEntry`'s own
+ * 3-attempt retry loop means Discord is genuinely unavailable — logs at
+ * `debug` and is treated the same way.
+ */
+export const fetchAuditLogEntryOrNull = (
+  component: string,
+  guild: Guild,
+  userId: string,
+  auditLogType: AuditLogEvent,
+  findEntry: (
+    entries: Awaited<ReturnType<typeof guild.fetchAuditLogs>>["entries"],
+  ) => AuditLogEntryResult | undefined,
+) =>
+  fetchAuditLogEntry(guild, userId, auditLogType, findEntry).pipe(
+    Effect.catchTag("ForbiddenError", (error) =>
+      logEffect(
+        "warn",
+        component,
+        "Bot lacks View Audit Log permission; continuing without executor attribution",
+        { guildId: guild.id, userId, error },
+      ).pipe(Effect.as(undefined)),
+    ),
+    Effect.catchAll((error) =>
+      logEffect(
+        "debug",
+        component,
+        "Audit log lookup failed; continuing without executor attribution",
+        { guildId: guild.id, userId, error },
+      ).pipe(Effect.as(undefined)),
+    ),
   );

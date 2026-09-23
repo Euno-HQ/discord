@@ -6,7 +6,6 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { runEffect } from "#~/AppRuntime";
 import { type DatabaseService, type SqlError } from "#~/Database";
 import {
   fetchMessage,
@@ -44,14 +43,6 @@ import {
   isForwardedMessage,
   ReadableReasons,
 } from "./constructLog";
-
-interface Reported {
-  message: Message;
-  warnings: number;
-  thread: AnyThreadChannel;
-  latestReport?: Message;
-  reportId: string;
-}
 
 export function logUserMessage({
   reason,
@@ -247,12 +238,3 @@ export function logUserMessage({
     }),
   );
 }
-
-export const logUserMessageLegacy = ({
-  reason,
-  message,
-  extra,
-  staff,
-}: Omit<Report, "date">): Promise<
-  Reported & { allReportedMessages: Report[] }
-> => runEffect(logUserMessage({ reason, message, extra, staff }));
