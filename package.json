@@ -6,6 +6,9 @@
   "imports": {
     "#~/*": "./app/*"
   },
+  "overrides": {
+    "better-sqlite3": "$better-sqlite3"
+  },
   "scripts": {
     "dev": "npm run dev:init; npm run dev:bot",
     "start": "npm run start:migrate; npm run start:bot",
