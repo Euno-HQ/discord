@@ -1,15 +1,15 @@
-import {
-  db,
-  isFeatureEnabled,
-  run,
-  runEffect,
-  runTakeFirst,
-} from "#~/AppRuntime";
+import { isFeatureEnabled, runEffect } from "#~/AppRuntime";
+import { DatabaseService } from "#~/Database";
 import { log, trackPerformance } from "#~/helpers/observability";
 import { requireUser } from "#~/models/session.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
 import type { Route } from "./+types/export-data";
+
+// This route module is client-reachable, so it must not import `effect`
+// directly. Instead, resolve the live DB handle from the runtime
+// (`runEffect(DatabaseService)`) and run each query builder — itself an
+// Effect<rows, SqlError> — through `runEffect`. A SqlError rejects the promise.
 
 /**
  * GDPR Data Export Route
@@ -65,9 +65,11 @@ export async function loader({ request }: Route.LoaderArgs) {
         });
 
         // Get guild settings
-        const guild = await runTakeFirst(
+        const db = await runEffect(DatabaseService);
+        const guildRows = await runEffect(
           db.selectFrom("guilds").selectAll().where("id", "=", guildId),
         );
+        const guild = guildRows[0];
 
         if (guild) {
           exportData.guild = {
@@ -91,7 +93,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
 
         // Get message statistics (aggregated, no actual message content)
-        const messageStats = await run(
+        const messageStats = await runEffect(
           db
             .selectFrom("message_stats")
             .selectAll()
@@ -112,7 +114,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
 
         // Get reported messages (sanitized)
-        const reportedMessages = await run(
+        const reportedMessages = await runEffect(
           db
             .selectFrom("reported_messages")
             .selectAll()
@@ -191,8 +193,10 @@ export async function action({ request }: Route.ActionArgs) {
         );
       }
 
+      const db = await runEffect(DatabaseService);
+
       // Soft delete reported messages for this guild
-      await run(
+      await runEffect(
         db
           .updateTable("reported_messages")
           .set({ deleted_at: new Date().toISOString() })
@@ -200,15 +204,17 @@ export async function action({ request }: Route.ActionArgs) {
       );
 
       // Delete message stats
-      await run(db.deleteFrom("message_stats").where("guild_id", "=", guildId));
+      await runEffect(
+        db.deleteFrom("message_stats").where("guild_id", "=", guildId),
+      );
 
       // Delete subscription data
-      await run(
+      await runEffect(
         db.deleteFrom("guild_subscriptions").where("guild_id", "=", guildId),
       );
 
       // Delete guild settings
-      await run(db.deleteFrom("guilds").where("id", "=", guildId));
+      await runEffect(db.deleteFrom("guilds").where("id", "=", guildId));
 
       log("info", "DataDelete", "Guild data deleted successfully", {
         userId: user.id,

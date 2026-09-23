@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Schema, type ParseResult } from "effect";
 
-import { FeatureDisabledError } from "#~/effects/errors";
+import { FeatureDisabledError, PostHogError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { PostHogService, PostHogServiceLive } from "#~/effects/posthog";
 
@@ -45,12 +45,15 @@ export const FeatureFlagServiceLive = Layer.scoped(
     return {
       isPostHogEnabled: (flag, guildId) => {
         if (!posthog) return Effect.succeed(false as boolean);
-        return Effect.tryPromise(() =>
-          posthog.isFeatureEnabled(flag, guildId, {
-            groups: { guild: guildId },
-            sendFeatureFlagEvents: false,
-          }),
-        ).pipe(
+        return Effect.tryPromise({
+          try: () =>
+            posthog.isFeatureEnabled(flag, guildId, {
+              groups: { guild: guildId },
+              sendFeatureFlagEvents: false,
+            }),
+          catch: (cause) =>
+            new PostHogError({ operation: "isFeatureEnabled", cause }),
+        }).pipe(
           Effect.map((result) => result ?? false),
           // A PostHog outage otherwise silently disables a paid feature for every
           // guild with zero signal — warn so it's visible, then fail closed.
@@ -73,12 +76,24 @@ export const FeatureFlagServiceLive = Layer.scoped(
         Effect.gen(function* () {
           let raw: unknown = undefined;
           if (posthog) {
-            const result = yield* Effect.tryPromise(() =>
-              posthog.getFeatureFlag(flag, guildId, {
-                groups: { guild: guildId },
-                sendFeatureFlagEvents: false,
-              }),
-            ).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+            const result = yield* Effect.tryPromise({
+              try: () =>
+                posthog.getFeatureFlag(flag, guildId, {
+                  groups: { guild: guildId },
+                  sendFeatureFlagEvents: false,
+                }),
+              catch: (cause) =>
+                new PostHogError({ operation: "getFeatureFlag", cause }),
+            }).pipe(
+              Effect.catchAll((error) =>
+                logEffect(
+                  "debug",
+                  "FeatureFlagService",
+                  "PostHog getFeatureFlag failed, falling back to schema default",
+                  { flag, guildId, error },
+                ).pipe(Effect.as(undefined)),
+              ),
+            );
             raw = result ?? undefined;
           }
           return yield* Schema.decodeUnknown(schema)(raw);

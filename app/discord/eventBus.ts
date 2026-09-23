@@ -1,3 +1,10 @@
+/* @effect-diagnostics runEffectInsideEffect:skip-file */
+// ^ The `client.on(...)` callbacks below are discord.js's callback boundary, not
+// Effect nesting: discord.js invokes them from its own event loop, so there is no
+// ambient fiber to `yield*` into and `Effect.runFork` is the correct entry point.
+// The rule stays at error everywhere else, where a nested run IS the anti-pattern
+// (see notes/EFFECT.md "Don't nest Effect.runPromise").
+
 import {
   Events,
   type Guild,

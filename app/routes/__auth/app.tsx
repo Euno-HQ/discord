@@ -1,8 +1,9 @@
 import { useLoaderData } from "react-router";
 
-import { db, run, runEffect } from "#~/AppRuntime";
+import { runEffect } from "#~/AppRuntime";
 import { AddEunoCard } from "#~/components/AddEunoCard";
 import { ServerCard } from "#~/components/ServerCard";
+import { DatabaseService } from "#~/Database";
 import { ssrDiscordSdk, userDiscordSdkFromRequest } from "#~/discord/api";
 import { botInviteUrl } from "#~/helpers/botPermissions";
 import { getCachedGuilds } from "#~/helpers/guildCache.server";
@@ -57,10 +58,15 @@ export async function loader({ request }: Route.LoaderArgs) {
     Date.now() - 30 * 24 * 60 * 60 * 1000,
   ).toISOString();
 
+  // Live DB handle from the runtime; each query builder is an
+  // Effect<rows, SqlError> run through `runEffect` (this client-reachable
+  // route module must not import `effect` directly).
+  const db = await runEffect(DatabaseService);
+
   const [dailyReportRows, modActionRows, escalationRows, allSubscriptions] =
     await Promise.all([
       // 1. Daily report counts for sparklines
-      run(
+      runEffect(
         db
           .selectFrom("reported_messages")
           .select((eb) => [
@@ -78,7 +84,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       ),
 
       // 2. Mod action counts (30 days)
-      run(
+      runEffect(
         db
           .selectFrom("mod_actions")
           .select((eb) => ["guild_id", eb.fn.countAll<number>().as("count")])
@@ -88,7 +94,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       ),
 
       // 3. Open escalation counts
-      run(
+      runEffect(
         db
           .selectFrom("escalations")
           .select((eb) => ["guild_id", eb.fn.countAll<number>().as("count")])

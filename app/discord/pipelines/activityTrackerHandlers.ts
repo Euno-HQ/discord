@@ -1,7 +1,6 @@
 import { ChannelType } from "discord.js";
 import { Effect } from "effect";
 
-import { type RuntimeContext } from "#~/AppRuntime";
 import { DatabaseService } from "#~/Database";
 import type {
   GuildMemberMessage,
@@ -25,9 +24,7 @@ const TRACKABLE_CHANNEL_TYPES = new Set([
   ChannelType.AnnouncementThread,
 ]);
 
-export const handleMessageCreate = (
-  e: GuildMemberMessage,
-): Effect.Effect<void, unknown, RuntimeContext> => {
+export const handleMessageCreate = (e: GuildMemberMessage) => {
   const msg = e.message;
 
   // Filter non-human messages
@@ -83,9 +80,7 @@ export const handleMessageCreate = (
   );
 };
 
-export const handleMessageUpdate = (
-  e: GuildMessageUpdate,
-): Effect.Effect<void, unknown, RuntimeContext> =>
+export const handleMessageUpdate = (e: GuildMessageUpdate) =>
   Effect.gen(function* () {
     const db = yield* DatabaseService;
     const info = yield* getMessageStats(e.newMessage);
@@ -116,9 +111,7 @@ export const handleMessageUpdate = (
     }),
   );
 
-export const handleMessageDelete = (
-  e: GuildMessageDelete,
-): Effect.Effect<void, unknown, RuntimeContext> => {
+export const handleMessageDelete = (e: GuildMessageDelete) => {
   if (e.message.system || e.message.author?.bot) {
     return Effect.void;
   }
@@ -145,9 +138,7 @@ export const handleMessageDelete = (
   );
 };
 
-export const handleReactionAdd = (
-  e: MessageReactionAddEvent,
-): Effect.Effect<void, unknown, RuntimeContext> =>
+export const handleReactionAdd = (e: MessageReactionAddEvent) =>
   Effect.gen(function* () {
     const db = yield* DatabaseService;
     yield* db
@@ -171,9 +162,7 @@ export const handleReactionAdd = (
     }),
   );
 
-export const handleReactionRemove = (
-  e: MessageReactionRemoveEvent,
-): Effect.Effect<void, unknown, RuntimeContext> =>
+export const handleReactionRemove = (e: MessageReactionRemoveEvent) =>
   Effect.gen(function* () {
     const db = yield* DatabaseService;
     yield* db

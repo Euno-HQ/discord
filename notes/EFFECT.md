@@ -67,11 +67,17 @@ interrupted the moment it finished. On HMR the previous fibers are
 `Fiber.interrupt`ed and re-forked. This distinction is load-bearing; don't
 "simplify" it to `fork`.
 
-> Legacy async/await callers reach Effect through `runEffect`. A handful of
-> `@deprecated` Promise bridges (`run`, `runTakeFirst`, `runTakeFirstOrThrow`,
-> and the lazy `db` proxy in `AppRuntime.ts`) remain for not-yet-migrated call
-> sites (notably `session.server.ts`). Don't reach for them in new code — use
-> `runEffect` with a real Effect.
+> Legacy async/await callers reach Effect through `runEffect`. The old
+> `unknown`-error Promise bridges (`run`, `runTakeFirst`, `runTakeFirstOrThrow`)
+> and the lazy `db` proxy are gone from `AppRuntime.ts` — they erased tagged
+> error types and the proxy lied about being a live handle. Async code that
+> needs the database now runs real Effects with the error type preserved:
+> server modules use `runEffect(Effect.flatMap(DatabaseService, (db) => ...))`
+> (see the file-local `dbEffect` helper in `session.server.ts`); modules in the
+> client-reachable zone, which must not import `effect` directly, first resolve
+> the live handle with `await runEffect(DatabaseService)` and then run each
+> query builder — itself an `Effect<rows, SqlError>` — through `runEffect` (see
+> `routes/healthcheck.tsx`, `helpers/cohortAnalysis.ts`).
 
 ## Reading Effect Code
 

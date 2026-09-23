@@ -4,18 +4,22 @@ import {
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  type Guild,
+  type GuildBasedChannel,
 } from "discord.js";
 import { Effect } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
 import { ssrDiscordSdk as rest } from "#~/discord/api";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import {
   fetchChannel,
   interactionDeferReply,
   interactionEditReply,
   interactionReply,
 } from "#~/effects/discordSdk.ts";
-import { toUserResponse } from "#~/effects/errorHandling";
+import { toUserResponse, withRetry } from "#~/effects/errorHandling";
+import type { DiscordError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability.ts";
 import {
   OPTIONAL_PERMISSIONS,
@@ -31,6 +35,115 @@ export interface CheckResult {
   ok: boolean;
   optional?: boolean;
   detail: string;
+}
+
+/**
+ * Outcome of a Discord fetch used by a check: distinguishes "genuinely not
+ * there" (missing) from "couldn't tell" (forbidden/transient/error), so a
+ * permission problem is never reported to a moderator as "not configured".
+ */
+type FetchOutcome<T> =
+  | { kind: "ok"; value: T }
+  | { kind: "missing" }
+  | { kind: "forbidden" }
+  | { kind: "transient" }
+  | { kind: "error" };
+
+const FORBIDDEN_DETAIL = "⚠️ Cannot verify (bot lacks permission to read this)";
+const TRANSIENT_DETAIL = "⚠️ Could not check (temporary Discord error)";
+const ERROR_DETAIL = "⚠️ Could not check (Discord error)";
+
+/**
+ * Run a Discord fetch, retrying transient failures, and classify the result
+ * so callers can report *why* a check failed instead of collapsing every
+ * failure into one "not configured" verdict.
+ */
+const checkFetch = <T>(
+  effect: Effect.Effect<T, DiscordError>,
+): Effect.Effect<FetchOutcome<T>, never> =>
+  effect.pipe(
+    withRetry,
+    Effect.map((value): FetchOutcome<T> => ({ kind: "ok", value })),
+    Effect.catchTags({
+      ResourceMissingError: () => Effect.succeed({ kind: "missing" as const }),
+      ForbiddenError: () => Effect.succeed({ kind: "forbidden" as const }),
+      RateLimitError: () => Effect.succeed({ kind: "transient" as const }),
+      TransientError: () => Effect.succeed({ kind: "transient" as const }),
+      ClientError: () => Effect.succeed({ kind: "error" as const }),
+      ServerError: () => Effect.succeed({ kind: "error" as const }),
+    }),
+  );
+
+/**
+ * Permissions a log channel needs to be usable: the bot must see it, post in it,
+ * and open/manage the threads both log pipelines create per user.
+ */
+const LOG_CHANNEL_PERMS = [
+  { flag: PermissionFlagsBits.ViewChannel, name: "ViewChannel" },
+  { flag: PermissionFlagsBits.SendMessages, name: "SendMessages" },
+  {
+    flag: PermissionFlagsBits.CreatePrivateThreads,
+    name: "CreatePrivateThreads",
+  },
+  { flag: PermissionFlagsBits.ManageThreads, name: "ManageThreads" },
+] as const;
+
+/**
+ * Names of the LOG_CHANNEL_PERMS the bot is missing on `channel`.
+ *
+ * Resolving a channel proves it EXISTS, never that we can use it:
+ * `guild.channels.fetch()` is served from discord.js's cache, so revoking the
+ * bot's ViewChannel produces no API call, no 403, and therefore no
+ * ForbiddenError for `checkFetch` to classify — the check goes green while the
+ * log pipeline is failing with "Missing Access" on every write. The permission
+ * has to be read directly. (Same reason the application-channel check below
+ * does its own `permissionsFor` pass.)
+ */
+function missingLogChannelPerms(guild: Guild, channel: unknown): string[] {
+  const botMember = guild.members.me;
+  if (!botMember || !channel || typeof channel !== "object") return [];
+  if (!("permissionsFor" in channel)) return [];
+  const perms = (channel as GuildBasedChannel).permissionsFor(botMember);
+  if (!perms) return [];
+  return LOG_CHANNEL_PERMS.filter(({ flag }) => !perms.has(flag)).map(
+    ({ name }) => name,
+  );
+}
+
+/**
+ * Downgrade an otherwise-OK log channel result when the bot can't actually use
+ * the channel, naming the missing permissions.
+ */
+export function applyLogChannelPerms(
+  result: CheckResult,
+  guild: Guild,
+  outcome: FetchOutcome<unknown> | null,
+): CheckResult {
+  if (!result.ok || outcome?.kind !== "ok") return result;
+  const missing = missingLogChannelPerms(guild, outcome.value);
+  if (missing.length === 0) return result;
+  return {
+    ...result,
+    ok: false,
+    detail: `${result.detail} — bot missing: ${missing.join(", ")}`,
+  };
+}
+
+/** Detail copy for a non-"ok" FetchOutcome; `notFoundDetail` covers "missing". */
+function fetchFailureDetail(
+  outcome: Exclude<FetchOutcome<unknown>, { kind: "ok" }>,
+  notFoundDetail: string,
+): string {
+  switch (outcome.kind) {
+    case "missing":
+      return notFoundDetail;
+    case "forbidden":
+      return FORBIDDEN_DETAIL;
+    case "transient":
+      return TRANSIENT_DETAIL;
+    case "error":
+      return ERROR_DETAIL;
+  }
 }
 
 /**
@@ -156,16 +269,22 @@ export const Command = {
 
       // --- Moderator role ---
       if (settings?.moderator) {
-        const role = yield* Effect.tryPromise(() =>
-          guild.roles.fetch(settings.moderator!),
-        ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+        const outcome = yield* checkFetch(
+          tryDiscord("fetchModeratorRole", () =>
+            guild.roles.fetch(settings.moderator!),
+          ),
+        );
+        const notFoundDetail = `Role \`${settings.moderator}\` not found`;
 
         results.push({
           name: "Moderator Role",
-          ok: !!role,
-          detail: role
-            ? `<@&${role.id}>`
-            : `Role \`${settings.moderator}\` not found`,
+          ok: outcome.kind === "ok" && !!outcome.value,
+          detail:
+            outcome.kind === "ok"
+              ? outcome.value
+                ? `<@&${outcome.value.id}>`
+                : notFoundDetail
+              : fetchFailureDetail(outcome, notFoundDetail),
         });
       } else {
         results.push({
@@ -177,51 +296,73 @@ export const Command = {
 
       // --- Mod-log channel ---
       {
-        const ch = settings?.modLog
-          ? yield* fetchChannel(guild, settings.modLog).pipe(
-              Effect.catchAll(() => Effect.succeed(null)),
-            )
+        const outcome = settings?.modLog
+          ? yield* checkFetch(fetchChannel(guild, settings.modLog))
           : null;
-        const result = buildLogChannelResult(
-          "Mod Log Channel",
-          settings?.modLog,
-          ch?.id ?? null,
-          "Not configured",
-        );
-        if (result) results.push(result);
+        if (outcome && outcome.kind !== "ok" && outcome.kind !== "missing") {
+          results.push({
+            name: "Mod Log Channel",
+            ok: false,
+            detail: fetchFailureDetail(outcome, ""),
+          });
+        } else {
+          const result = buildLogChannelResult(
+            "Mod Log Channel",
+            settings?.modLog,
+            outcome?.kind === "ok" ? (outcome.value?.id ?? null) : null,
+            "Not configured",
+          );
+          if (result)
+            results.push(applyLogChannelPerms(result, guild, outcome));
+        }
       }
 
       // --- Deletion-log channel (optional) ---
       {
-        const ch = settings?.deletionLog
-          ? yield* fetchChannel(guild, settings.deletionLog).pipe(
-              Effect.catchAll(() => Effect.succeed(null)),
-            )
+        const outcome = settings?.deletionLog
+          ? yield* checkFetch(fetchChannel(guild, settings.deletionLog))
           : null;
-        const result = buildLogChannelResult(
-          "Deletion Log Channel",
-          settings?.deletionLog,
-          ch?.id ?? null,
-          "Not configured (optional but recommended)",
-        );
-        if (result) {
-          if (!result.ok) result.optional = true;
-          results.push(result);
+        if (outcome && outcome.kind !== "ok" && outcome.kind !== "missing") {
+          results.push({
+            name: "Deletion Log Channel",
+            ok: false,
+            optional: true,
+            detail: fetchFailureDetail(outcome, ""),
+          });
+        } else {
+          const result = buildLogChannelResult(
+            "Deletion Log Channel",
+            settings?.deletionLog,
+            outcome?.kind === "ok" ? (outcome.value?.id ?? null) : null,
+            "Not configured (optional but recommended)",
+          );
+          if (result) {
+            const gated = applyLogChannelPerms(result, guild, outcome);
+            if (!gated.ok) gated.optional = true;
+            results.push(gated);
+          }
         }
       }
 
       // --- Restricted role (optional) ---
       if (settings?.restricted) {
-        const role = yield* Effect.tryPromise(() =>
-          guild.roles.fetch(settings.restricted!),
-        ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+        const outcome = yield* checkFetch(
+          tryDiscord("fetchRestrictedRole", () =>
+            guild.roles.fetch(settings.restricted!),
+          ),
+        );
+        const notFoundDetail = `Role \`${settings.restricted}\` not found`;
 
         results.push({
           name: "Restricted Role",
-          ok: !!role,
-          detail: role
-            ? `<@&${role.id}>`
-            : `Role \`${settings.restricted}\` not found`,
+          ok: outcome.kind === "ok" && !!outcome.value,
+          optional: true,
+          detail:
+            outcome.kind === "ok"
+              ? outcome.value
+                ? `<@&${outcome.value.id}>`
+                : notFoundDetail
+              : fetchFailureDetail(outcome, notFoundDetail),
         });
       } else {
         results.push({
@@ -241,16 +382,30 @@ export const Command = {
 
       {
         const validChannelIds: string[] = [];
+        const issues = new Set<string>();
         for (const row of honeypotRows) {
-          const ch = yield* fetchChannel(guild, row.channel_id).pipe(
-            Effect.catchAll(() => Effect.succeed(null)),
+          const outcome = yield* checkFetch(
+            fetchChannel(guild, row.channel_id),
           );
-          if (ch) {
-            validChannelIds.push(ch.id);
+          if (outcome.kind === "ok" && outcome.value) {
+            validChannelIds.push(outcome.value.id);
+          } else if (
+            outcome.kind === "forbidden" ||
+            outcome.kind === "transient" ||
+            outcome.kind === "error"
+          ) {
+            issues.add(fetchFailureDetail(outcome, ""));
           }
-          // Silently skip deleted/missing channels — they're not actionable here.
+          // "missing" (deleted) and ok-but-null are silently skipped, as before.
         }
-        results.push(buildHoneypotResult(honeypotRows.length, validChannelIds));
+        const result = buildHoneypotResult(
+          honeypotRows.length,
+          validChannelIds,
+        );
+        if (issues.size > 0) {
+          result.detail += ` (${[...issues].join("; ")})`;
+        }
+        results.push(result);
       }
 
       // --- Ticket configuration ---
@@ -260,14 +415,19 @@ export const Command = {
 
       let ticketFound = false;
       const ticketDetails: string[] = [];
+      const ticketIssues = new Set<string>();
       for (const row of ticketRows) {
         if (!row.channel_id) continue;
-        const ch = yield* fetchChannel(guild, row.channel_id).pipe(
-          Effect.catchAll(() => Effect.succeed(null)),
-        );
-        if (ch) {
+        const outcome = yield* checkFetch(fetchChannel(guild, row.channel_id));
+        if (outcome.kind === "ok" && outcome.value) {
           ticketFound = true;
-          ticketDetails.push(`<#${ch.id}>`);
+          ticketDetails.push(`<#${outcome.value.id}>`);
+        } else if (
+          outcome.kind === "forbidden" ||
+          outcome.kind === "transient" ||
+          outcome.kind === "error"
+        ) {
+          ticketIssues.add(fetchFailureDetail(outcome, ""));
         }
       }
 
@@ -275,16 +435,18 @@ export const Command = {
         results.push({
           name: "Tickets",
           ok: true,
-          detail: ticketDetails.join(", "),
+          detail: [ticketDetails.join(", "), ...ticketIssues].join(" "),
         });
       } else {
         results.push({
           name: "Tickets",
           ok: false,
           detail:
-            ticketRows.length > 0
-              ? "Configured but channel(s) not found"
-              : "No ticket buttons configured",
+            ticketIssues.size > 0
+              ? [...ticketIssues].join("; ")
+              : ticketRows.length > 0
+                ? "Configured but channel(s) not found"
+                : "No ticket buttons configured",
         });
       }
 
@@ -299,17 +461,22 @@ export const Command = {
 
       if (appConfig) {
         // Check channel exists and has correct permissions
-        const appCh = yield* fetchChannel(guild, appConfig.channel_id).pipe(
-          Effect.catchAll(() => Effect.succeed(null)),
+        const appChOutcome = yield* checkFetch(
+          fetchChannel(guild, appConfig.channel_id),
         );
+        const appChNotFoundDetail = `Channel \`${appConfig.channel_id}\` not found`;
 
-        if (!appCh) {
+        if (appChOutcome.kind !== "ok" || !appChOutcome.value) {
           results.push({
             name: "Application Channel",
             ok: false,
-            detail: `Channel \`${appConfig.channel_id}\` not found`,
+            detail:
+              appChOutcome.kind === "ok"
+                ? appChNotFoundDetail
+                : fetchFailureDetail(appChOutcome, appChNotFoundDetail),
           });
         } else {
+          const appCh = appChOutcome.value;
           const channelIssues: string[] = [];
 
           // Check @everyone can view the channel
@@ -370,26 +537,34 @@ export const Command = {
         }
 
         // Check button message still exists
-        const buttonMsg = yield* Effect.tryPromise(() =>
-          rest.get(
-            Routes.channelMessage(appConfig.channel_id, appConfig.message_id),
+        const buttonOutcome = yield* checkFetch(
+          tryDiscord("fetchApplicationButtonMessage", () =>
+            rest.get(
+              Routes.channelMessage(appConfig.channel_id, appConfig.message_id),
+            ),
           ),
-        ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+        );
+        const buttonNotFoundDetail =
+          "Button message not found — run `/setup` to recreate";
 
         results.push({
           name: "Apply Button",
-          ok: !!buttonMsg,
-          detail: buttonMsg
-            ? "Button message present"
-            : "Button message not found — run `/setup` to recreate",
+          ok: buttonOutcome.kind === "ok" && !!buttonOutcome.value,
+          detail:
+            buttonOutcome.kind === "ok"
+              ? buttonOutcome.value
+                ? "Button message present"
+                : buttonNotFoundDetail
+              : fetchFailureDetail(buttonOutcome, buttonNotFoundDetail),
         });
 
         // Check @everyone has ViewChannel denied server-wide
-        const everyoneRole = yield* Effect.tryPromise(() =>
-          guild.roles.fetch(guildId),
-        ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+        const everyoneOutcome = yield* checkFetch(
+          tryDiscord("fetchEveryoneRole", () => guild.roles.fetch(guildId)),
+        );
 
-        if (everyoneRole) {
+        if (everyoneOutcome.kind === "ok" && everyoneOutcome.value) {
+          const everyoneRole = everyoneOutcome.value;
           const hasViewDenied = !everyoneRole.permissions.has(
             PermissionFlagsBits.ViewChannel,
           );
@@ -400,20 +575,39 @@ export const Command = {
               ? "@everyone denied ViewChannel (server-wide)"
               : "@everyone still has ViewChannel — channels are not gated",
           });
+        } else if (everyoneOutcome.kind !== "ok") {
+          results.push({
+            name: "Channel Gating",
+            ok: false,
+            detail: fetchFailureDetail(
+              everyoneOutcome,
+              "@everyone role not found",
+            ),
+          });
         }
 
         // Check member role exists and bot can manage it
-        const memberRole = yield* Effect.tryPromise(() =>
-          guild.roles.fetch(appConfig.role_id),
-        ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+        const memberRoleOutcome = yield* checkFetch(
+          tryDiscord("fetchApplicationMemberRole", () =>
+            guild.roles.fetch(appConfig.role_id),
+          ),
+        );
+        const memberRoleNotFoundDetail = `Role \`${appConfig.role_id}\` not found`;
 
-        if (!memberRole) {
+        if (memberRoleOutcome.kind !== "ok" || !memberRoleOutcome.value) {
           results.push({
             name: "Member Role",
             ok: false,
-            detail: `Role \`${appConfig.role_id}\` not found`,
+            detail:
+              memberRoleOutcome.kind === "ok"
+                ? memberRoleNotFoundDetail
+                : fetchFailureDetail(
+                    memberRoleOutcome,
+                    memberRoleNotFoundDetail,
+                  ),
           });
         } else {
+          const memberRole = memberRoleOutcome.value;
           const botHighest = botMember?.roles.highest;
           const canManage =
             botHighest && botHighest.position > memberRole.position;

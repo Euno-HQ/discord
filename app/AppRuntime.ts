@@ -1,11 +1,10 @@
 import { Effect, Layer, Logger, LogLevel, ManagedRuntime } from "effect";
 import type { PostHog } from "posthog-node";
 
-import { DatabaseLayer, DatabaseService, type EffectKysely } from "#~/Database";
+import { DatabaseLayer } from "#~/Database";
 import { DiscordClientLayer } from "#~/discord/client.server";
 import { DiscordEventBusLive } from "#~/discord/eventBus";
 import { MessageCacheServiceLive } from "#~/discord/messageCacheService";
-import { NotFoundError } from "#~/effects/errors";
 import {
   FeatureFlagService,
   FeatureFlagServiceLive,
@@ -60,93 +59,39 @@ export type RuntimeContext = ManagedRuntime.ManagedRuntime.Context<
   typeof runtime
 >;
 
-// Lazily-warmed runtime handles. Importing AppRuntime has NO side effect; the
-// PostHog client + DB connection are resolved once at the process entry point
-// via warmRuntime() (called from app/server.ts). This keeps the import graph
-// free of an import-time DB open, so tests that transitively import AppRuntime
-// don't open the real database.
-let _realDb: EffectKysely | undefined;
+// Lazily-warmed runtime handle. Importing AppRuntime has NO side effect; the
+// PostHog client is resolved once at the process entry point via warmRuntime()
+// (called from app/server.ts). This keeps the import graph free of an
+// import-time DB open, so tests that transitively import AppRuntime don't open
+// the real database.
 let _posthog: PostHog | null = null;
 let _warmed = false;
 
 const NOT_WARMED =
-  "AppRuntime not warmed — call warmRuntime() at startup before using db/getPosthog()";
+  "AppRuntime not warmed — call warmRuntime() at startup before using getPosthog()";
 
 /**
- * Resolve the PostHog client and DB connection once. Called at the process
- * entry point (app/server.ts) before any request/event is served. Idempotent,
- * so HMR re-execution is safe.
+ * Resolve the PostHog client once. Called at the process entry point
+ * (app/server.ts) before any request/event is served. Idempotent, so HMR
+ * re-execution is safe.
  *
- * NOT safe against concurrent first-callers: the `if (_warmed) return;` guard
- * only short-circuits AFTER a prior call has resolved, so two callers racing
- * before either settles would both run `Promise.all` (a second connection).
- * This relies on the single serial top-level `await warmRuntime()` in
- * server.ts being the only caller. If a second caller is ever added, cache the
- * in-flight promise (`let _warming: Promise<void> | undefined`) and return it.
+ * Concurrency-safe: the in-flight promise is cached, so racing first-callers
+ * share one resolution. "Called exactly once before first use" is an ordering
+ * invariant types cannot express, so this cache is the guard; `getPosthog`
+ * still fails loudly if used first.
  */
-export const warmRuntime = async (): Promise<void> => {
-  if (_warmed) return;
-  const [posthog, realDb] = await Promise.all([
-    runtime.runPromise(PostHogService),
-    runtime.runPromise(DatabaseService),
-  ]);
-  _posthog = posthog;
-  _realDb = realDb;
-  _warmed = true;
-};
+let _warming: Promise<void> | undefined;
+export const warmRuntime = (): Promise<void> =>
+  (_warming ??= runtime.runPromise(PostHogService).then((posthog) => {
+    _posthog = posthog;
+    _warmed = true;
+  }));
 
 /** The PostHog client (null when no API key). Throws if used before warmRuntime(). */
 export const getPosthog = (): PostHog | null => {
   if (!_warmed) throw new Error(NOT_WARMED);
   return _posthog;
 };
-
-/**
- * Lazy EffectKysely handle for legacy async/await code. Forwards to the real
- * instance once warmRuntime() has run; throws a clear error if used before then.
- * Keeps the `db` name + type so existing consumers are unchanged.
- */
-export const db: EffectKysely = new Proxy({} as EffectKysely, {
-  get(_target, prop) {
-    if (!_warmed || !_realDb) throw new Error(NOT_WARMED);
-    const value = _realDb[prop as keyof EffectKysely];
-    return typeof value === "function" ? value.bind(_realDb) : value;
-  },
-});
-
-// --- Bridge functions for legacy async/await code ---
-
-/**
- * Convenience helpers for legacy async/await code that needs to run
- * EffectKysely query builders as Promises.
- *
- * @deprecated
- * @param effect
- */
-export const run = <A>(effect: Effect.Effect<A, unknown, never>): Promise<A> =>
-  Effect.runPromise(effect);
-
-/**
- * @deprecated
- */
-export const runTakeFirst = <A>(
-  effect: Effect.Effect<A[], unknown, never>,
-): Promise<A | undefined> =>
-  Effect.runPromise(Effect.map(effect, (rows) => rows[0]));
-
-/**
- * @deprecated
- */
-export const runTakeFirstOrThrow = <A>(
-  effect: Effect.Effect<A[], unknown, never>,
-): Promise<A> =>
-  Effect.runPromise(
-    Effect.flatMap(effect, (rows) =>
-      rows[0] !== undefined
-        ? Effect.succeed(rows[0])
-        : Effect.fail(new NotFoundError({ resource: "db record", id: "" })),
-    ),
-  );
 
 // Run an Effect through the ManagedRuntime, returning a Promise.
 export const runEffect = <A, E>(
@@ -168,28 +113,3 @@ export const isFeatureEnabled = (
 export const runEffectExit = <A, E>(
   effect: Effect.Effect<A, E, RuntimeContext>,
 ) => runtime.runPromiseExit(effect);
-
-/**
- * Run an effect only if the specified feature flag is enabled for the guild.
- * Returns void if the flag is disabled, otherwise returns the effect result.
- */
-export const runGatedFeature = <A>(
-  flag: BooleanFlag,
-  guildId: string,
-  effect: Effect.Effect<A, unknown, RuntimeContext>,
-): Promise<A | void> =>
-  runtime.runPromise(
-    Effect.gen(function* () {
-      const flags = yield* FeatureFlagService;
-      const enabled = yield* flags.isPostHogEnabled(flag, guildId);
-      if (!enabled) {
-        getPosthog()?.capture({
-          distinctId: guildId,
-          event: "premium gate hit",
-          properties: { flag, $groups: { guild: guildId } },
-        });
-        return;
-      }
-      return yield* effect;
-    }),
-  );
