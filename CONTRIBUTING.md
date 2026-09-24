@@ -71,8 +71,29 @@ Production releases follow a weekly release candidate (RC) cycle:
 5. **Ad-hoc releases**: The RC workflow can be triggered manually via
    `workflow_dispatch` for urgent releases outside the weekly cycle.
 
+### Hotfixes to production
+
+When production is broken and the open RC isn't shippable, skip the RC cycle:
+
+1. Branch `hotfix/<descriptive-name>` from `origin/release` and open a PR
+   targeting `release`. Merge it as a merge commit — the `release` ruleset only
+   allows merge commits.
+2. The PR title **must** contain a version of the form `vYYYY.WW.N` — a patch
+   on the release you're fixing (e.g. `v2026.37.1`). Bare `vYYYY.WW` is
+   reserved for RC branches. `.github/workflows/promote-release.yml` extracts
+   the version from the merged PR title to create the draft Release; without
+   one it fails and nothing deploys.
+3. Publish the draft Release to deploy. Publishing also opens a `backmerge/*`
+   PR to `main`, same as a normal promotion.
+4. Known gap: `.github/workflows/backmerge.yml` reuses an existing open
+   back-merge PR without refreshing its branch, so a second hotfix in a row
+   leaves that `backmerge/*` branch stale. Force-push `origin/release` to the
+   `backmerge/*` branch to refresh it.
+5. Also apply the hotfix to `main` (a cherry-pick PR) so the next RC includes
+   it. The back-merge covers this too, but conflicts if `main` has diverged.
+
 **Important:** The `release` branch is managed by automation. Do not push to it
-directly.
+directly — hotfix PRs (above) are the one exception.
 
 ### PR merge strategy
 
