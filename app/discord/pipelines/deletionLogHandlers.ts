@@ -38,6 +38,14 @@ interface UncachedBatch {
   fiber: Fiber.RuntimeFiber<void, never>;
 }
 
+/**
+ * Discord sends "" (not null) when message content is withheld — e.g. when the
+ * Message Content intent is unavailable — so "" means "we don't have the text",
+ * not "the text was empty". Normalise it to null so `??` fallbacks kick in.
+ */
+const presentContent = (content: string | null | undefined) =>
+  content === "" ? null : (content ?? null);
+
 const UNCACHED_BATCH_WINDOW_MS = 10_000; // 10 seconds
 const uncachedBatchesRef = Ref.unsafeMake(new Map<string, UncachedBatch>());
 
@@ -155,7 +163,8 @@ export const handleDelete = (
 
     // Resolve author: prefer live partial data, fall back to cache
     const userId = msg.author?.id ?? cached?.user_id;
-    const content = msg.content ?? cached?.content ?? null;
+    const content =
+      presentContent(msg.content) ?? presentContent(cached?.content);
 
     if (!userId) {
       // Batch uncached deletions to avoid flooding the log when someone
@@ -230,7 +239,7 @@ export const handleDelete = (
       description: [
         header,
         `<@${user.id}>`,
-        quoteMessageContent(content ?? "*(content not cached)*"),
+        content ? quoteMessageContent(content) : "*(content unavailable)*",
       ].join("\n"),
       color: Colors.Red,
     };
@@ -316,10 +325,11 @@ export const handleEdit = (
     // Prefer cached content as "before" — more reliable than the partial
     // oldMessage which Discord may not populate
     const before =
-      cached?.content ??
-      oldMessage.content ??
+      presentContent(cached?.content) ??
+      presentContent(oldMessage.content) ??
       "*(not available — message was not cached)*";
-    const after = newMessage.content ?? "*(content unavailable)*";
+    const after =
+      presentContent(newMessage.content) ?? "*(content unavailable)*";
 
     // Update cache with new content and refresh last_touched
     yield* cache.touchMessage(newMessage.id, newMessage.content ?? null);

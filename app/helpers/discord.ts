@@ -25,7 +25,7 @@ import prettyBytes from "pretty-bytes";
 
 import type { RuntimeContext } from "#~/AppRuntime";
 import { resolveMessagePartial } from "#~/effects/discordSdk";
-import { NotFoundError, type DiscordError } from "#~/effects/errors.ts";
+import type { DiscordError, NotFoundError } from "#~/effects/errors.ts";
 import {
   getChars,
   getWords,
@@ -224,9 +224,18 @@ export const getMessageStats = (
 
     const { content } = message;
     if (!content) {
-      return yield* Effect.fail(
-        new NotFoundError({ resource: "message", id: msg.id }),
-      );
+      // Discord can withhold message content entirely (e.g. the Message
+      // Content intent being unavailable). Record the message with zeroed
+      // content-derived counts rather than dropping the row — reaction and
+      // timestamp data are still valid.
+      return {
+        char_count: 0,
+        word_count: 0,
+        code_stats: [],
+        link_stats: [],
+        react_count: msg.reactions.cache.size,
+        sent_at: msg.createdTimestamp,
+      };
     }
 
     const blocks = parseMarkdownBlocks(content);

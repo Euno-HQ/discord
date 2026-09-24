@@ -60,6 +60,10 @@ function countDuplicatesInWindow(
   now: number,
   currentHash: string,
 ): number {
+  // An empty hash means we have no distinguishing content for this message
+  // (Discord can withhold message text), so every such message would look like
+  // a duplicate of every other. Never match on it.
+  if (!currentHash) return 0;
   const cutoff = now - windowMs;
   let count = 0;
   for (const msg of messages) {
@@ -232,6 +236,8 @@ export function getPriorDuplicates(
   contentHash: string,
   windowMs: number = FIVE_MINUTES_MS,
 ): RecentMessage[] {
+  // See countDuplicatesInWindow: an empty hash carries no content to match on.
+  if (!contentHash) return [];
   const cutoff = Date.now() - windowMs;
   return recentMessages.filter(
     (m) =>
