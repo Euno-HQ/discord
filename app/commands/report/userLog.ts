@@ -154,9 +154,14 @@ export function logUserMessage({
     ].filter((e): e is APIEmbed => Boolean(e));
 
     // If it has the data for a poll, use a specialized formatting function
+    const messageContent = getMessageContent(message);
     const reportedMessage = message.poll
       ? quoteAndEscapePoll(message.poll)
-      : quoteAndEscape(getMessageContent(message)).trim();
+      : messageContent
+        ? quoteAndEscape(messageContent).trim()
+        : // Discord may withhold message text (no Message Content intent).
+          // An empty quote block would be an unsendable empty message.
+          "-# *(content unavailable)*";
 
     // Send the detailed log message to thread
     const [logMessage] = yield* Effect.all([
@@ -203,6 +208,9 @@ export function logUserMessage({
       const singleLine = content.slice(0, 80).replaceAll("\n", "\\n ");
       const truncatedMsg =
         singleLine.length > 80 ? `${singleLine.slice(0, 80)}…` : singleLine;
+      const preview = truncatedMsg
+        ? `> ${escapeDisruptiveContent(truncatedMsg)}`
+        : "> *(content unavailable)*";
 
       const stats = yield* getMessageStats(message).pipe(
         Effect.catchAll(() => Effect.succeed(undefined)),
@@ -210,7 +218,7 @@ export function logUserMessage({
 
       yield* sendMessage(parentChannel, {
         allowedMentions: {},
-        content: `> ${escapeDisruptiveContent(truncatedMsg)}\n-# [${!stats ? "stats failed to load" : `${stats.char_count} chars in ${stats.word_count} words. ${stats.link_stats.length} links, ${stats.code_stats.reduce((count, { lines }) => count + lines, 0)} lines of code. ${message.attachments.size} attachments, ${message.reactions.cache.size} reactions`}](${messageLink(logMessage.channelId, logMessage.id)})`,
+        content: `${preview}\n-# [${!stats ? "stats failed to load" : `${stats.char_count} chars in ${stats.word_count} words. ${stats.link_stats.length} links, ${stats.code_stats.reduce((count, { lines }) => count + lines, 0)} lines of code. ${message.attachments.size} attachments, ${message.reactions.cache.size} reactions`}](${messageLink(logMessage.channelId, logMessage.id)})`,
       }).pipe(
         Effect.catchAll((error) =>
           logEffect("error", "logUserMessage", "failed to forward to modLog", {

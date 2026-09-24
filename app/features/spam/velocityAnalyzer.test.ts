@@ -94,6 +94,21 @@ test("detects duplicate messages", () => {
   expect(dupSignal!.score).toBe(5);
 });
 
+test("never treats an empty content hash as duplicate content", () => {
+  // Discord can withhold message text, which collapses every hash to "".
+  const now = Date.now();
+  const messages: RecentMessage[] = [
+    makeMessage({ contentHash: "", timestamp: now - 30000 }),
+    makeMessage({ contentHash: "", timestamp: now - 15000 }),
+    makeMessage({ contentHash: "", timestamp: now - 5000, channelId: "ch-2" }),
+  ];
+
+  const signals = analyzeVelocity(messages, "");
+  expect(signals.find((s) => s.name === "duplicate_messages")).toBeUndefined();
+  expect(signals.find((s) => s.name === "cross_channel_spam")).toBeUndefined();
+  expect(getPriorDuplicates(messages, "msg-current", "")).toEqual([]);
+});
+
 test("detects rapid-fire messaging", () => {
   const now = Date.now();
   const messages: RecentMessage[] = Array.from({ length: 5 }, (_, i) =>
