@@ -17,6 +17,8 @@ export const clearVelocityFlagCache = () => cache.clear();
 interface GateOpts {
   ttlMs?: number;
   now?: () => number;
+  /** See analyzeVelocity's contentIntentEnabled param. Defaults to true. */
+  contentIntentEnabled?: boolean;
 }
 
 /**
@@ -57,6 +59,11 @@ export const gatedVelocitySignals = (
     }
 
     return enabled
-      ? analyzeVelocity(recentMessages, contentHash, attachmentCount)
+      ? analyzeVelocity(
+          recentMessages,
+          contentHash,
+          attachmentCount,
+          opts.contentIntentEnabled ?? true,
+        )
       : [];
   });

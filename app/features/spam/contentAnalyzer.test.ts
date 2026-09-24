@@ -198,3 +198,8 @@ describe("buildContentHash", () => {
     expect(hash1).toBe(hash2);
   });
 });
+
+test("analyzeContent yields no signals when the Message Content intent is off", () => {
+  const signals = analyzeContent("@everyone free nitro gift claim now", false);
+  expect(signals).toEqual([]);
+});
