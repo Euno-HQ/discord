@@ -2,13 +2,14 @@ import { ActivityType, Client, GatewayIntentBits, Partials } from "discord.js";
 import { Context, Layer } from "effect";
 
 import { botInviteUrl } from "#~/helpers/botPermissions";
-import {
-  discordToken,
-  guildMembersIntentEnabled,
-  messageContentIntentEnabled,
-} from "#~/helpers/env.server";
+import { discordToken } from "#~/helpers/env.server";
 import { log, trackPerformance } from "#~/helpers/observability";
 import Sentry from "#~/helpers/sentry.server";
+
+// Discord revoked both privileged intents 2026-09; flip to true and redeploy
+// once re-approved.
+const MESSAGE_CONTENT_INTENT = false;
+const GUILD_MEMBERS_INTENT = false;
 
 // Construct the discord.js Client. Factored out so the Layer owns construction
 // rather than a bare module-level singleton.
@@ -24,11 +25,8 @@ const makeClient = (): Client =>
       GatewayIntentBits.DirectMessageReactions,
       GatewayIntentBits.AutoModerationExecution,
       GatewayIntentBits.AutoModerationConfiguration,
-      // See messageContentIntentEnabled for why this is opt-in.
-      ...(messageContentIntentEnabled
-        ? [GatewayIntentBits.MessageContent]
-        : []),
-      ...(guildMembersIntentEnabled ? [GatewayIntentBits.GuildMembers] : []),
+      ...(MESSAGE_CONTENT_INTENT ? [GatewayIntentBits.MessageContent] : []),
+      ...(GUILD_MEMBERS_INTENT ? [GatewayIntentBits.GuildMembers] : []),
     ],
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
   });
