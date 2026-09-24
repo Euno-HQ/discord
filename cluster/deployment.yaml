@@ -8,6 +8,11 @@ spec:
       app: mod-bot
   serviceName: "mod-bot"
   replicas: 1
+  # Single replica, so there's no ordering to protect. OrderedReady (the
+  # default) refuses to replace a pod that isn't Ready, which means a
+  # crash-looping pod can permanently block deploys of the fix (2026-09-13
+  # incident: the rollout wait timed out and the deploy workflow rolled back).
+  podManagementPolicy: Parallel
   updateStrategy:
     type: RollingUpdate
   template:
@@ -18,6 +23,10 @@ spec:
       containers:
         - name: mod-bot
           image: $(IMAGE)
+          # Preserve the crashed container's last log output in
+          # lastState.terminated.message (pod status), since container logs
+          # are gone by the time anyone can look after a crash loop.
+          terminationMessagePolicy: FallbackToLogsOnError
           ports:
             - containerPort: 3000
           volumeMounts:
