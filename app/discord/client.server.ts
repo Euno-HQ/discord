@@ -1,15 +1,14 @@
 import { ActivityType, Client, GatewayIntentBits, Partials } from "discord.js";
 import { Context, Layer } from "effect";
 
+import {
+  GUILD_MEMBERS_INTENT,
+  MESSAGE_CONTENT_INTENT,
+} from "#~/discord/intents";
 import { botInviteUrl } from "#~/helpers/botPermissions";
 import { discordToken } from "#~/helpers/env.server";
 import { log, trackPerformance } from "#~/helpers/observability";
 import Sentry from "#~/helpers/sentry.server";
-
-// Discord revoked both privileged intents 2026-09; flip to true and redeploy
-// once re-approved.
-const MESSAGE_CONTENT_INTENT = false;
-const GUILD_MEMBERS_INTENT = false;
 
 // Construct the discord.js Client. Factored out so the Layer owns construction
 // rather than a bare module-level singleton.

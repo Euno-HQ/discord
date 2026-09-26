@@ -151,6 +151,56 @@ test("detects cross-channel duplicate spam", () => {
   expect(signals.find((s) => s.name === "channel_hop_fast")).toBeUndefined();
 });
 
+test("content-derived signals are suppressed when the Message Content intent is off", () => {
+  // Without the intent every message's contentHash collapses to the same
+  // value, so duplicate/cross-channel detection would be all false positives
+  // — contentIntentEnabled=false must fully disable them, not just down-weight.
+  const now = Date.now();
+  const hash = "spam content";
+  const messages: RecentMessage[] = [
+    makeMessage({
+      contentHash: hash,
+      channelId: "ch-1",
+      timestamp: now - 10000,
+    }),
+    makeMessage({
+      contentHash: hash,
+      channelId: "ch-2",
+      timestamp: now - 20000,
+    }),
+    makeMessage({
+      contentHash: hash,
+      channelId: "ch-3",
+      timestamp: now - 30000,
+    }),
+  ];
+
+  const signals = analyzeVelocity(messages, hash, 0, false);
+  expect(signals.find((s) => s.name === "cross_channel_spam")).toBeUndefined();
+  expect(signals.find((s) => s.name === "duplicate_messages")).toBeUndefined();
+  // Rate-based signal still fires — channel-hop is content-independent — but
+  // always down-weighted since duplicate content can't be trusted.
+  const hopSignal = signals.find((s) => s.name === "channel_hop_fast");
+  expect(hopSignal).toBeDefined();
+  expect(hopSignal!.score).toBe(VELOCITY_TUNING.channelHopFast.distinctBase);
+});
+
+test("attachment_burst is suppressed when the Message Content intent is off", () => {
+  // Attachments are withheld along with content/embeds without the intent, so
+  // attachmentCount is content-derived too.
+  const now = Date.now();
+  const messages: RecentMessage[] = [
+    makeMessage({ timestamp: now - 25000 }),
+    makeMessage({ timestamp: now - 20000 }),
+    makeMessage({ timestamp: now - 15000 }),
+    makeMessage({ timestamp: now - 10000 }),
+    makeMessage({ timestamp: now - 5000 }),
+  ];
+
+  const signals = analyzeVelocity(messages, "new content", 3, false);
+  expect(signals.find((s) => s.name === "attachment_burst")).toBeUndefined();
+});
+
 test("should not flag duplicate messages when empty content but different attachments", () => {
   const now = Date.now();
   // Simulate two messages with empty text but different attachments.

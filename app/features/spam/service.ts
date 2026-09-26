@@ -8,6 +8,7 @@ import { Context, Effect, Layer, Schedule } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
 import { DiscordClient } from "#~/discord/client.server.ts";
+import { MESSAGE_CONTENT_INTENT } from "#~/discord/intents";
 import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
 import { getMessageContent } from "#~/helpers/discord.ts";
@@ -72,6 +73,14 @@ export const SpamDetectionServiceLive = Layer.effect(
     const db = yield* DatabaseService;
     const featureFlags = yield* FeatureFlagService;
     const client = yield* DiscordClient;
+
+    if (!MESSAGE_CONTENT_INTENT) {
+      yield* logEffect(
+        "info",
+        "Spam",
+        "Content-based spam detection disabled: Message Content intent is off",
+      );
+    }
 
     // In-memory state, lives for the bot's lifetime
     const tracker: ActivityMap = new Map();
@@ -243,7 +252,10 @@ export const SpamDetectionServiceLive = Layer.effect(
           const combinedContent = embedBody
             ? `${content} ${embedBody}`
             : content;
-          const contentSignals = analyzeContent(combinedContent);
+          const contentSignals = analyzeContent(
+            combinedContent,
+            MESSAGE_CONTENT_INTENT,
+          );
           const behaviorSignals = analyzeBehavior(message, member);
 
           const recentMessages = getRecentMessages(tracker, guildId, userId);
@@ -253,6 +265,7 @@ export const SpamDetectionServiceLive = Layer.effect(
             recentMessages,
             contentHash,
             attachmentFingerprints.length,
+            { contentIntentEnabled: MESSAGE_CONTENT_INTENT },
           );
 
           const allSignals = [

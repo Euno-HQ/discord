@@ -91,11 +91,18 @@ function countMessagesInWindow(
  * @param recentMessages - All recent messages for this user in this guild
  * @param currentContentHash - Content hash of the current message being checked
  * @param attachmentCount - Number of attachments on the current message
+ * @param contentIntentEnabled - Whether the Message Content gateway intent is
+ *   on. Without it, Discord withholds content/embeds/attachments, so every
+ *   message's contentHash collapses to the same value and attachmentCount is
+ *   always 0 — duplicate/cross-channel/attachment signals built on those
+ *   would be noise, not signal. Rate-based signals (channel-hop, rapid-fire)
+ *   are unaffected and stay on. Defaults to true (today's behaviour).
  */
 export function analyzeVelocity(
   recentMessages: RecentMessage[],
   currentContentHash: string,
   attachmentCount = 0,
+  contentIntentEnabled = true,
 ): SpamSignal[] {
   const signals: SpamSignal[] = [];
   const now = Date.now();
@@ -107,14 +114,16 @@ export function analyzeVelocity(
     ONE_MINUTE_MS,
     now,
   );
-  const duplicatesIn60s = countDuplicatesInWindow(
-    recentMessages,
-    ONE_MINUTE_MS,
-    now,
-    currentContentHash,
-  );
+  const duplicatesIn60s = contentIntentEnabled
+    ? countDuplicatesInWindow(
+        recentMessages,
+        ONE_MINUTE_MS,
+        now,
+        currentContentHash,
+      )
+    : 0;
 
-  if (channelsIn60s >= 3 && duplicatesIn60s >= 3) {
+  if (contentIntentEnabled && channelsIn60s >= 3 && duplicatesIn60s >= 3) {
     signals.push({
       name: "cross_channel_spam",
       score: 15,
@@ -168,12 +177,14 @@ export function analyzeVelocity(
   }
 
   // Duplicate messages: 2+ identical messages in 5 minutes
-  const duplicates = countDuplicatesInWindow(
-    recentMessages,
-    FIVE_MINUTES_MS,
-    now,
-    currentContentHash,
-  );
+  const duplicates = contentIntentEnabled
+    ? countDuplicatesInWindow(
+        recentMessages,
+        FIVE_MINUTES_MS,
+        now,
+        currentContentHash,
+      )
+    : 0;
   if (duplicates >= 2) {
     signals.push({
       name: "duplicate_messages",
@@ -202,7 +213,7 @@ export function analyzeVelocity(
     });
   }
 
-  if (attachmentCount > 0 && signals.length > 0) {
+  if (contentIntentEnabled && attachmentCount > 0 && signals.length > 0) {
     signals.push({
       name: "attachment_burst",
       score: Math.min(
