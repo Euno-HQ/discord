@@ -2,7 +2,7 @@
 import { Effect, Stream } from "effect";
 
 import type { RuntimeContext } from "#~/AppRuntime";
-import { client } from "#~/discord/client.server";
+import { DiscordClient } from "#~/discord/client.server";
 import { DiscordEventBus } from "#~/discord/eventBus";
 import { isGuildMessageEvent } from "#~/discord/events";
 import { MessageCacheService } from "#~/discord/messageCacheService";
@@ -23,6 +23,7 @@ export const deletionLoggerPipeline: Effect.Effect<
   const { stream } = yield* DiscordEventBus;
   const cache = yield* MessageCacheService;
   const flags = yield* FeatureFlagService;
+  const client = yield* DiscordClient;
 
   yield* stream.pipe(
     Stream.filter(isGuildMessageEvent),
@@ -31,9 +32,7 @@ export const deletionLoggerPipeline: Effect.Effect<
     // All GuildMessageEvent variants carry `guild: Guild`, so `e.guild.id` is
     // always available.
     Stream.filterEffect((e) =>
-      flags
-        .isPostHogEnabled("deletion-log", e.guild.id)
-        .pipe(Effect.catchAll(() => Effect.succeed(false))),
+      flags.isPostHogEnabled("deletion-log", e.guild.id),
     ),
 
     // Cache messages on the way through
@@ -74,28 +73,20 @@ export const deletionLoggerPipeline: Effect.Effect<
       }
     }),
 
-    // Dispatch to handlers with per-event error isolation
+    // Dispatch to handlers. Each handler already catches its own failures
+    // (see deletionLogHandlers.ts), so this never fails — no error isolation
+    // needed here.
     Stream.mapEffect((e) => {
-      const handler = (() => {
-        switch (e.type) {
-          case "GuildMemberMessage":
-            return Effect.void;
-          case "GuildMessageDelete":
-            return handleDelete(client, e);
-          case "GuildMessageUpdate":
-            return handleEdit(client, e);
-          case "GuildMessageBulkDelete":
-            return handleBulkDelete(client, e);
-        }
-      })();
-      return handler.pipe(
-        Effect.catchAll((err) =>
-          logEffect("warn", "DeletionLogger", "Pipeline handler failed", {
-            eventType: e.type,
-            error: err,
-          }),
-        ),
-      );
+      switch (e.type) {
+        case "GuildMemberMessage":
+          return Effect.void;
+        case "GuildMessageDelete":
+          return handleDelete(client, e);
+        case "GuildMessageUpdate":
+          return handleEdit(client, e);
+        case "GuildMessageBulkDelete":
+          return handleBulkDelete(client, e);
+      }
     }),
 
     Stream.runDrain,

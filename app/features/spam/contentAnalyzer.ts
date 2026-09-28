@@ -130,8 +130,19 @@ export function hasLinkInContentOrEmbeds(
   return content.includes("http") || embeds.some((e) => e.url != null);
 }
 
-/** Analyze message content and return scored signals */
-export function analyzeContent(content: string): SpamSignal[] {
+/**
+ * Analyze message content and return scored signals.
+ * @param contentIntentEnabled - Whether the Message Content gateway intent is
+ *   on. Discord sends empty content/embeds without it, so these signals are
+ *   meaningless while it's off; defaults to true (today's behaviour) so
+ *   existing callers and tests are unaffected.
+ */
+export function analyzeContent(
+  content: string,
+  contentIntentEnabled = true,
+): SpamSignal[] {
+  if (!contentIntentEnabled) return [];
+
   const signals: SpamSignal[] = [];
 
   // Spam keyword matches

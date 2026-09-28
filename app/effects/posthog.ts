@@ -2,6 +2,7 @@ import type { Collection, Guild } from "discord.js";
 import { Context, Effect, Layer } from "effect";
 import { PostHog } from "posthog-node";
 
+import { PostHogError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability.ts";
 import { posthogApiKey, posthogHost } from "#~/helpers/env.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
@@ -34,7 +35,23 @@ export const PostHogServiceLive = Layer.scoped(
     (client) =>
       Effect.gen(function* () {
         if (client) {
-          yield* Effect.promise(() => client.shutdown());
+          // Best-effort: shutdown() flushes over the network and can reject.
+          // `Effect.promise` would make that rejection a defect and fail the
+          // finalizer, taking scope teardown with it — log and continue instead.
+          yield* Effect.tryPromise({
+            try: () => client.shutdown(),
+            catch: (cause) =>
+              new PostHogError({ operation: "shutdown", cause }),
+          }).pipe(
+            Effect.catchAll((error) =>
+              logEffect(
+                "warn",
+                "PostHogService",
+                "PostHog client shutdown failed; continuing teardown",
+                { error },
+              ),
+            ),
+          );
           yield* logEffect(
             "info",
             "PostHogService",

@@ -8,6 +8,10 @@ metadata:
 spec:
   serviceName: mod-bot-uat
   replicas: 1
+  # Single replica, so there's no ordering to protect. OrderedReady (the
+  # default) refuses to replace a pod that isn't Ready, which can block a
+  # deploy when the pod is crash-looping. See cluster/deployment.yaml.
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: mod-bot-uat

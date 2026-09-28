@@ -5,7 +5,6 @@ import type { RuntimeContext } from "#~/AppRuntime";
 import { DiscordEventBus } from "#~/discord/eventBus";
 import type { DiscordEvent } from "#~/discord/events";
 import { FeatureFlagService } from "#~/effects/featureFlags";
-import { logEffect } from "#~/effects/observability";
 
 import {
   handleMessageCreate,
@@ -65,35 +64,27 @@ export const activityTrackerPipeline: Effect.Effect<
     Stream.filterEffect((e) => {
       const guildId = getGuildId(e);
       if (!guildId) return Effect.succeed(false);
-      return flags
-        .isPostHogEnabled("analytics", guildId)
-        .pipe(Effect.catchAll(() => Effect.succeed(false)));
+      return flags.isPostHogEnabled("analytics", guildId);
     }),
 
-    // Dispatch to handlers with per-event error isolation
+    // Dispatch to handlers. Each handler already isolates and logs its own
+    // failures with per-handler context (messageId, etc.), so their error type is
+    // `never` and a catchAll here would be dead code. If a handler ever stops
+    // catching internally, its error escapes into this stream's type rather than
+    // being silently absorbed — which is the signal we want.
     Stream.mapEffect((e) => {
-      const handler = (() => {
-        switch (e.type) {
-          case "GuildMemberMessage":
-            return handleMessageCreate(e);
-          case "GuildMessageUpdate":
-            return handleMessageUpdate(e);
-          case "GuildMessageDelete":
-            return handleMessageDelete(e);
-          case "MessageReactionAdd":
-            return handleReactionAdd(e);
-          case "MessageReactionRemove":
-            return handleReactionRemove(e);
-        }
-      })();
-      return handler.pipe(
-        Effect.catchAll((err) =>
-          logEffect("warn", "ActivityTracker", "Pipeline handler failed", {
-            eventType: e.type,
-            error: err,
-          }),
-        ),
-      );
+      switch (e.type) {
+        case "GuildMemberMessage":
+          return handleMessageCreate(e);
+        case "GuildMessageUpdate":
+          return handleMessageUpdate(e);
+        case "GuildMessageDelete":
+          return handleMessageDelete(e);
+        case "MessageReactionAdd":
+          return handleReactionAdd(e);
+        case "MessageReactionRemove":
+          return handleReactionRemove(e);
+      }
     }),
 
     Stream.runDrain,

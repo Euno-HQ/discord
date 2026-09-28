@@ -19,6 +19,23 @@ import {
 import { complement, intersection } from "#~/helpers/sets.js";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
+/**
+ * The subset of Discord's /users/@me payload we read. Previously this response
+ * was cast to `Record<string, string>`, which declared `mfa_enabled` — a boolean
+ * — to be a string, and the lie then had to be undone at the use site with
+ * `has2FA as unknown as boolean`. Naming the real shape removes both.
+ */
+interface DiscordUserResponse {
+  id: string;
+  username: string;
+  discriminator: string;
+  email: string;
+  verified: string;
+  locale: string;
+  mfa_enabled: boolean;
+  avatar: string;
+}
+
 export interface DiscordUserInfo {
   id: string;
   username: string;
@@ -64,7 +81,7 @@ export const fetchUser = (
         locale,
         mfa_enabled: has2FA,
         avatar,
-      } = (await res.json()) as Record<string, string>;
+      } = (await res.json()) as DiscordUserResponse;
 
       return {
         id,
@@ -74,7 +91,7 @@ export const fetchUser = (
         email,
         verified,
         locale,
-        has2FA: has2FA as unknown as boolean,
+        has2FA,
         avatar,
       } satisfies DiscordUserInfo;
     },

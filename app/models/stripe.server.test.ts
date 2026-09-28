@@ -112,6 +112,20 @@ describe("StripeService recover-as-default branches", () => {
     if (Exit.isSuccess(exit)) expect(exit.value).toBe(true);
   });
 
+  it("cancelSubscription treats an already-gone subscription (resource_missing) as success", async () => {
+    // Stripe returns code "resource_missing" (HTTP 404) when the stored
+    // subscription id no longer exists — already cancelled or deleted.
+    // Cancelling is idempotent, so this must succeed, not surface CANCEL_FAILED.
+    subscriptionsCancel.mockRejectedValueOnce(
+      Object.assign(new Error("No such subscription: 'sub_1'"), {
+        code: "resource_missing",
+      }),
+    );
+    const exit = await run(StripeService.cancelSubscription("sub_1"));
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) expect(exit.value).toBe(true);
+  });
+
   it("listInvoices returns [] on SDK error", async () => {
     invoicesList.mockRejectedValueOnce(new Error("boom"));
     const exit = await run(StripeService.listInvoices("cus_1"));

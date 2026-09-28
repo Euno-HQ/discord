@@ -4,9 +4,11 @@
  */
 
 import type { GuildMember, Message } from "discord.js";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Schedule } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
+import { DiscordClient } from "#~/discord/client.server.ts";
+import { MESSAGE_CONTENT_INTENT } from "#~/discord/intents";
 import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
 import { getMessageContent } from "#~/helpers/discord.ts";
@@ -70,15 +72,29 @@ export const SpamDetectionServiceLive = Layer.effect(
   Effect.gen(function* () {
     const db = yield* DatabaseService;
     const featureFlags = yield* FeatureFlagService;
+    const client = yield* DiscordClient;
+
+    if (!MESSAGE_CONTENT_INTENT) {
+      yield* logEffect(
+        "info",
+        "Spam",
+        "Content-based spam detection disabled: Message Content intent is off",
+      );
+    }
 
     // In-memory state, lives for the bot's lifetime
     const tracker: ActivityMap = new Map();
     const honeypotCache = new Map<string, HoneypotCacheEntry>();
 
-    // Periodic cleanup
-    setInterval(
-      () => cleanupTracker(tracker, TRACKER_MAX_AGE),
-      TRACKER_CLEANUP_INTERVAL,
+    // Periodic cleanup — a daemon fiber forked off the runtime that builds this
+    // layer, so it lives for the whole process (matching the old setInterval).
+    // cleanupTracker is a pure mutation, wrapped in Effect.sync.
+    yield* Effect.forkDaemon(
+      Effect.sync(() => cleanupTracker(tracker, TRACKER_MAX_AGE)).pipe(
+        // delay the first run one interval, matching setInterval semantics
+        Effect.delay(`${TRACKER_CLEANUP_INTERVAL} millis`),
+        Effect.repeat(Schedule.fixed(`${TRACKER_CLEANUP_INTERVAL} millis`)),
+      ),
     );
 
     // ── Honeypot lookup ──
@@ -236,7 +252,10 @@ export const SpamDetectionServiceLive = Layer.effect(
           const combinedContent = embedBody
             ? `${content} ${embedBody}`
             : content;
-          const contentSignals = analyzeContent(combinedContent);
+          const contentSignals = analyzeContent(
+            combinedContent,
+            MESSAGE_CONTENT_INTENT,
+          );
           const behaviorSignals = analyzeBehavior(message, member);
 
           const recentMessages = getRecentMessages(tracker, guildId, userId);
@@ -246,6 +265,7 @@ export const SpamDetectionServiceLive = Layer.effect(
             recentMessages,
             contentHash,
             attachmentFingerprints.length,
+            { contentIntentEnabled: MESSAGE_CONTENT_INTENT },
           );
 
           const allSignals = [
@@ -277,25 +297,16 @@ export const SpamDetectionServiceLive = Layer.effect(
           }
 
           return verdict;
-        }).pipe(
-          Effect.catchAll((error) =>
-            Effect.gen(function* () {
-              yield* logEffect(
-                "error",
-                "SpamDetection",
-                "Spam check failed, falling through",
-                { error },
-              );
-              // Spam detection failure should never block message processing
-              return computeVerdict([]);
-            }),
-          ),
-          Effect.withSpan("SpamDetection.checkMessage"),
-        ),
+        }).pipe(Effect.withSpan("SpamDetection.checkMessage")),
 
       executeResponse: (verdict, message, member) =>
         executeResponse(verdict, message, member).pipe(
-          Effect.provide(Layer.succeed(DatabaseService, db)),
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.succeed(DatabaseService, db),
+              Layer.succeed(DiscordClient, client),
+            ),
+          ),
           Effect.catchAll((error) =>
             logEffect("error", "SpamDetection", "Response execution failed", {
               error,

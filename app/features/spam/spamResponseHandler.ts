@@ -7,7 +7,8 @@ import type { GuildMember, Message } from "discord.js";
 import { Effect } from "effect";
 
 import { logUserMessage } from "#~/commands/report/userLog.ts";
-import { client } from "#~/discord/client.server.ts";
+import { DiscordClient } from "#~/discord/client.server.ts";
+import { tryDiscord } from "#~/effects/classifyDiscordError.ts";
 import { deleteMessage, softbanMember } from "#~/effects/discordSdk.ts";
 import { isDiscordError } from "#~/effects/errorHandling.ts";
 import { logEffect } from "#~/effects/observability.ts";
@@ -139,12 +140,21 @@ export const executeResponse = (
           ),
         );
 
-        yield* Effect.tryPromise(() =>
+        yield* tryDiscord("autoKickReply", () =>
           logMessage.reply({
             content: `Automatically removed <@${userId}> for spam (last hour of messages also deleted)`,
             allowedMentions: {},
           }),
-        ).pipe(Effect.catchAll(() => Effect.void));
+        ).pipe(
+          Effect.catchAll((error) =>
+            logEffect(
+              "warn",
+              "SpamResponse",
+              "Failed to post autokick notice in log channel",
+              { error, userId, guildId },
+            ),
+          ),
+        );
 
         featureStats.spamKicked(guildId, userId, spamCount);
       }
@@ -170,6 +180,7 @@ export const executeResponse = (
  */
 const checkCrossGuildSpam = (userId: string) =>
   Effect.gen(function* () {
+    const client = yield* DiscordClient;
     const guildCount = yield* getSpamReportGuildCount(userId);
     if (guildCount < CROSS_GUILD_SPAM_THRESHOLD) return;
 
@@ -187,7 +198,7 @@ const checkCrossGuildSpam = (userId: string) =>
     const guilds = [...client.guilds.cache.values()];
     yield* Effect.all(
       guilds.map((guild) =>
-        Effect.tryPromise(async () => {
+        tryDiscord("crossGuildTimeout", async () => {
           const targetMember = await guild.members
             .fetch(userId)
             .catch(() => null);
@@ -211,7 +222,7 @@ const checkCrossGuildSpam = (userId: string) =>
     // DM the user once per bot session to inform them their account may be compromised
     if (!crossGuildDmSent.has(userId)) {
       crossGuildDmSent.add(userId);
-      yield* Effect.tryPromise(() =>
+      yield* tryDiscord("crossGuildDm", () =>
         client.users.send(
           userId,
           "⚠️ **Your account has been flagged for spam across multiple servers.**\n\n" +
@@ -237,6 +248,7 @@ const checkCrossGuildSpam = (userId: string) =>
 /** Log a spam report to the mod thread */
 const logSpamReport = (message: Message, verdict: SpamVerdict) =>
   Effect.gen(function* () {
+    const client = yield* DiscordClient;
     const extra = `Score ${verdict.totalScore} (${verdict.tier}): ${verdict.summary}`;
 
     const result = yield* logUserMessage({

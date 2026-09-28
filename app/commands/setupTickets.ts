@@ -14,11 +14,13 @@ import { Effect } from "effect";
 
 import { DatabaseService } from "#~/Database.ts";
 import { ssrDiscordSdk as rest } from "#~/discord/api";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import {
   fetchChannel,
   interactionReply,
   sendMessage,
 } from "#~/effects/discordSdk.ts";
+import { NotFoundError } from "#~/effects/errors";
 import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
 import {
@@ -62,7 +64,7 @@ export const Command = [
         // @ts-expect-error busted types
         modal.addComponents(actionRow);
 
-        yield* Effect.tryPromise(() => interaction.showModal(modal));
+        yield* tryDiscord("showModal", () => interaction.showModal(modal));
       }).pipe(
         Effect.catchAll(() => Effect.void),
         Effect.withSpan("openTicketModal", {
@@ -126,10 +128,12 @@ export const Command = [
             .values({ message_id: interaction.message.id, role_id: mod });
           config = insertedRows[0];
           if (!config) {
-            yield* Effect.fail(
-              new Error("Something went wrong while fixing tickets config"),
+            return yield* Effect.fail(
+              new NotFoundError({
+                resource: "ticketsConfig",
+                id: interaction.message.id,
+              }),
             );
-            return;
           }
         }
 
@@ -150,7 +154,7 @@ export const Command = [
           return;
         }
 
-        const thread = yield* Effect.tryPromise(() =>
+        const thread = yield* tryDiscord("createTicketThread", () =>
           ticketsChannel.threads.create({
             name: `${user.username} – ${format(new Date(), "PP kk:mmX")}`,
             autoArchiveDuration: 60 * 24 * 7,
@@ -251,10 +255,10 @@ export const Command = [
         const interactionUserId = user.id;
 
         yield* Effect.all([
-          Effect.tryPromise(() =>
+          tryDiscord("removeThreadMember", () =>
             rest.delete(Routes.threadMembers(threadId, ticketOpenerUserId)),
           ),
-          Effect.tryPromise(() =>
+          tryDiscord("postTicketCloseLog", () =>
             rest.post(Routes.channelMessages(modLog), {
               body: {
                 content: `<@${ticketOpenerUserId}>'s ticket <#${threadId}> closed by <@${interactionUserId}>${feedback ? `. feedback: ${feedback}` : ""}`,

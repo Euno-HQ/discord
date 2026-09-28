@@ -44,6 +44,33 @@ describe("gatedVelocitySignals", () => {
     expect(result).toEqual(analyzeVelocity(messages, "h"));
   });
 
+  test("passes contentIntentEnabled through to analyzeVelocity", async () => {
+    const flags = makeFlags(true);
+    const dupMessages = [
+      {
+        messageId: "1",
+        channelId: "c",
+        contentHash: "h",
+        timestamp: NOW,
+        hasLink: false,
+      },
+      {
+        messageId: "2",
+        channelId: "c",
+        contentHash: "h",
+        timestamp: NOW,
+        hasLink: false,
+      },
+    ];
+    const result = await Effect.runPromise(
+      gatedVelocitySignals(flags, "g1", dupMessages, "h", 0, {
+        now: () => NOW,
+        contentIntentEnabled: false,
+      }),
+    );
+    expect(result.find((s) => s.name === "duplicate_messages")).toBeUndefined();
+  });
+
   test("returns [] when the flag is disabled", async () => {
     const flags = makeFlags(false);
     const result = await Effect.runPromise(

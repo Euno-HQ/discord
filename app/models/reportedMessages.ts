@@ -4,7 +4,7 @@ import type { Selectable } from "kysely";
 
 import { DatabaseService } from "#~/Database";
 import type { DB } from "#~/db";
-import { client } from "#~/discord/client.server";
+import { DiscordClient } from "#~/discord/client.server";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { logEffect } from "#~/effects/observability";
 
@@ -514,10 +514,10 @@ const deleteSingleMessage = (
   guildId: string,
 ) =>
   Effect.gen(function* () {
-    const channel = yield* Effect.tryPromise({
-      try: () => client.channels.fetch(channelId),
-      catch: (error) => error,
-    });
+    const client = yield* DiscordClient;
+    const channel = yield* tryDiscord("fetchChannel", () =>
+      client.channels.fetch(channelId),
+    );
 
     if (!channel || !("messages" in channel)) {
       yield* logEffect(

@@ -9,11 +9,13 @@ import {
 import { Effect } from "effect";
 
 import { DatabaseService, type SqlError } from "#~/Database";
+import { tryDiscord } from "#~/effects/classifyDiscordError";
 import {
   interactionDeferUpdate,
   interactionEditReply,
   interactionUpdate,
 } from "#~/effects/discordSdk";
+import { ValidationError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import type { MessageComponentCommand } from "#~/helpers/discord";
 import { commandStats } from "#~/helpers/metrics";
@@ -79,6 +81,24 @@ const FIELD_MAP = {
 } as const;
 
 type FieldKey = keyof typeof FIELD_MAP;
+
+/** Keys of PendingSetup that FIELD_MAP can name. */
+type StateKey = (typeof FIELD_MAP)[FieldKey];
+
+/**
+ * Write one wizard field. TypeScript can't prove a write through a union-typed
+ * key is sound (each key admits a different value type), so the assignment is
+ * narrowed here once via a generic rather than cast away at each call site with
+ * `state as unknown as Record<string, ...>` — which erased PendingSetup entirely
+ * and would have let any key/value pair through.
+ */
+function setStateField<K extends StateKey>(
+  state: PendingSetup,
+  key: K,
+  value: PendingSetup[K],
+): void {
+  state[key] = value;
+}
 
 // --- Helper functions ---
 
@@ -194,9 +214,7 @@ export function buildSetupScreen1Message(
   const toggleRow = {
     type: ComponentType.ActionRow,
     components: OPTIONAL_CHANNELS.map(({ field, label }) => {
-      const value = (state as unknown as Record<string, string | null>)[
-        FIELD_MAP[field]
-      ];
+      const value = state[FIELD_MAP[field]];
       const isDisabled = value === null;
       return {
         type: ComponentType.Button,
@@ -674,8 +692,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         const screen = parts[4] ?? "1";
 
         if (!guildId || !field || !(field in FIELD_MAP)) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Invalid customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Invalid customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -691,13 +713,16 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         } else if (interaction.isChannelSelectMenu()) {
           value = interaction.values[0];
         } else {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Unexpected interaction type"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "interactionType",
+              message: "Unexpected interaction type",
+            }),
+          );
         }
 
         if (value) {
-          const stateKey = FIELD_MAP[field];
-          (state as unknown as Record<string, string>)[stateKey] = value;
+          setStateField(state, FIELD_MAP[field], value);
         }
 
         yield* interactionUpdate(
@@ -728,8 +753,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         const screen = parts[4] ?? "1";
 
         if (!guildId || !field || !(field in FIELD_MAP)) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Invalid customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Invalid customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -739,9 +768,11 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           return;
         }
 
-        const stateKey = FIELD_MAP[field];
-        (state as unknown as Record<string, string | null>)[stateKey] =
-          action === "disable" ? null : CREATE_SENTINEL;
+        setStateField(
+          state,
+          FIELD_MAP[field],
+          action === "disable" ? null : CREATE_SENTINEL,
+        );
 
         yield* interactionUpdate(
           interaction,
@@ -769,8 +800,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       Effect.gen(function* () {
         const guildId = interaction.customId.split("|")[1];
         if (!guildId) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Missing guildId in customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Missing guildId in customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -815,8 +850,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       Effect.gen(function* () {
         const guildId = interaction.customId.split("|")[1];
         if (!guildId) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Missing guildId in customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Missing guildId in customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -852,8 +891,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       Effect.gen(function* () {
         const guildId = interaction.customId.split("|")[1];
         if (!guildId) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Missing guildId in customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Missing guildId in customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -881,7 +924,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
         let permCheck: SetupPermissionCheckResult | undefined;
 
         if (guild && botMember) {
-          permCheck = yield* Effect.tryPromise(() =>
+          permCheck = yield* tryDiscord("checkSetupPermissions", () =>
             checkSetupPermissions(guild, botMember, state),
           );
         }
@@ -930,8 +973,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       Effect.gen(function* () {
         const guildId = interaction.customId.split("|")[1];
         if (!guildId) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Missing guildId in customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Missing guildId in customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);
@@ -964,8 +1011,12 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
       Effect.gen(function* () {
         const guildId = interaction.customId.split("|")[1];
         if (!guildId) {
-          // @effect-diagnostics-next-line globalErrorInEffectFailure:off
-          return yield* Effect.fail(new Error("Missing guildId in customId"));
+          return yield* Effect.fail(
+            new ValidationError({
+              field: "customId",
+              message: "Missing guildId in customId",
+            }),
+          );
         }
 
         const key = setupKey(guildId, interaction.user.id);

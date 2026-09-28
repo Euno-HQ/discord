@@ -77,6 +77,16 @@ export class StripeError extends Data.TaggedError("StripeError")<{
 }> {}
 
 /**
+ * A raw `fetch` to an outgoing alert webhook (e.g. the emergency Discord/Slack
+ * webhook used by integrity-check alerting) failed. Not part of the
+ * `DiscordError` taxonomy — this is a bare `fetch`, not an SDK call.
+ */
+export class WebhookAlertError extends Data.TaggedError("WebhookAlertError")<{
+  operation: string;
+  cause: Error;
+}> {}
+
+/**
  * Raw `fetch` to a Discord OAuth endpoint (e.g. `/users/@me`) failed: either the
  * request rejected (network) or returned a non-2xx status. This is distinct from
  * the `DiscordError` taxonomy, which classifies `@discordjs/rest` SDK rejection
@@ -87,6 +97,45 @@ export class StripeError extends Data.TaggedError("StripeError")<{
 export class OAuthFetchError extends Data.TaggedError("OAuthFetchError")<{
   operation: string;
   status?: number;
+  cause: Error;
+}> {}
+
+/**
+ * The DB-backed session storage (`createSessionStorage` in session.server.ts)
+ * rejected — `getSession`/`commitSession` failed because the underlying DB
+ * read/write inside `readData`/`updateData`/etc. failed, or `readData`'s
+ * `JSON.parse` of stored session data threw. Distinct from `SqlError`: the
+ * rejection crosses the react-router session-storage library boundary, so by
+ * the time it reaches the caller it's an unknown rejection, not a typed
+ * `SqlError` value — except when it already is one, in which case the
+ * original `SqlError` passes through unwrapped (see call sites).
+ */
+export class SessionStoreError extends Data.TaggedError("SessionStoreError")<{
+  operation: string;
+  cause: Error;
+}> {}
+
+/**
+ * A PostHog SDK call rejected (flag check, flag value fetch, client
+ * shutdown). `operation` names the call site; `cause` carries the raw
+ * rejection (never stringified — every caller fails closed/best-effort rather
+ * than surface PostHog-specific copy to a user).
+ */
+export class PostHogError extends Data.TaggedError("PostHogError")<{
+  operation: string;
+  cause: unknown;
+}> {}
+
+/**
+ * Reading the raw incoming request body (`request.text()`) rejected — an
+ * aborted or truncated request stream. Distinct from `WebhookAlertError`
+ * (an outgoing alert fetch) and `OAuthFetchError` (an OAuth fetch): this is
+ * reading the request the app itself is handling.
+ */
+export class RequestBodyReadError extends Data.TaggedError(
+  "RequestBodyReadError",
+)<{
+  operation: string;
   cause: Error;
 }> {}
 
@@ -175,6 +224,9 @@ export type AppError =
   | SubscriptionNotFoundError
   | StripeError
   | OAuthFetchError
+  | SessionStoreError
+  | PostHogError
+  | RequestBodyReadError
   | SqlErrorType
   /** Effect.tryPromise wraps thrown exceptions in UnknownException; command-level
    *  catchAll blocks see this whenever a raw promise rejects with an untyped error. */
