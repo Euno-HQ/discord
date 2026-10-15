@@ -286,7 +286,7 @@ export const Command = [
             rest.post(Routes.channelMessages(modLog), {
               body: {
                 content: `<@${ticketOpenerUserId}>'s ticket <#${threadId}> closed by <@${interactionUserId}>${feedback ? `. feedback: ${feedback}` : ""}`,
-                allowedMentions: {},
+                allowed_mentions: { parse: [] },
               },
             }),
           ),
