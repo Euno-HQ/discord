@@ -34,6 +34,7 @@ import { deletionLoggerPipeline } from "#~/discord/pipelines/deletionLogger";
 import { modActionLoggerPipeline } from "#~/discord/pipelines/modActionLogger";
 import { onboardGuildPipeline } from "#~/discord/pipelines/onboardGuild";
 import { reactjiChannelerPipeline } from "#~/discord/pipelines/reactjiChanneler";
+import { requirementsCheckSchedule } from "#~/discord/requirementsCheckSchedule";
 import { applicationKey } from "#~/helpers/env.server";
 
 // Side-effect import: registers job handler and notification builder
@@ -157,6 +158,9 @@ const startup = Effect.gen(function* () {
 
       // Escalation resolver scheduler (must be after client is ready)
       yield* escalationResolverSchedule(discordClient).pipe(Effect.forkDaemon);
+
+      // Daily proactive /check-requirements (needs the guild cache populated)
+      yield* requirementsCheckSchedule(discordClient).pipe(Effect.forkDaemon);
 
       yield* logEffect("info", "Gateway", "Gateway initialization completed", {
         guildCount: discordClient.guilds.cache.size,
