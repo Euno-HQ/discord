@@ -204,7 +204,8 @@ export function buildLogChannelResult(
   unconfiguredDetail: string,
 ): CheckResult | null {
   if (!channelId) {
-    return notConfigured(name, unconfiguredDetail);
+    // Callers decide severity: Mod Log is core (🔴); Deletion Log marks it optional.
+    return { name, ok: false, detail: unconfiguredDetail };
   }
   if (!fetchedChannelId) {
     // Configured but deleted — not actionable here, skip silently.
@@ -234,42 +235,49 @@ export function buildHoneypotResult(
 }
 
 /**
- * Build the Tickets CheckResult from tickets_config channel ids, checking the
- * bot can actually open tickets in each channel that belongs to `guild`.
+ * Build the Tickets CheckResult from tickets_config rows, checking the bot can
+ * actually open tickets in each configured channel that belongs to `guild`.
  *
- * tickets_config has no guild_id, so rows are scoped by cache membership, with
- * no API calls: Discord's GUILD_CREATE carries every channel in the guild
- * regardless of the bot's ViewChannel, and discord.js caches them unfiltered
- * (Guild#_patch → ChannelManager#_add), so a channel the bot can't see is still
- * in `guild.channels.cache`. Ids not in the cache belong to another guild (or
- * were deleted — indistinguishable without a guild_id) and are skipped. A null
- * channel_id means "thread in the button's channel", which isn't stored, so
- * those rows can't be checked either.
+ * tickets_config has no guild_id, so rows are scoped by `role_id` (required;
+ * a role belongs to exactly one guild) with no API calls. Rows whose role isn't
+ * in this guild belong to another guild (or their role was deleted) and are
+ * ignored. A null channel_id means "thread in the button's channel", which isn't
+ * stored, so it can't be checked. A set channel_id missing from the cache was
+ * deleted: Discord's GUILD_CREATE carries every channel regardless of the bot's
+ * ViewChannel and discord.js caches them unfiltered (Guild#_patch →
+ * ChannelManager#_add), so a channel the bot merely can't see is still cached.
  */
 export function buildTicketResult(
   guild: Guild,
-  channelIds: (string | null)[],
+  rows: { role_id: string; channel_id: string | null }[],
 ): CheckResult {
-  const channels = [...new Set(channelIds)].flatMap((id) => {
-    const channel = id ? guild.channels.cache.get(id) : undefined;
-    return channel ? [channel] : [];
-  });
-  if (channels.length === 0) return notConfigured("Tickets");
+  const ours = rows.filter((row) => guild.roles.cache.has(row.role_id));
+  if (ours.length === 0) return notConfigured("Tickets");
 
-  const entries = channels.map((channel) => ({
-    id: channel.id,
-    missing: missingChannelPerms(guild, channel, TICKET_CHANNEL_PERMS),
-  }));
+  const channelIds = [
+    ...new Set(ours.flatMap((row) => (row.channel_id ? [row.channel_id] : []))),
+  ];
+  if (channelIds.length === 0) {
+    return {
+      name: "Tickets",
+      ok: true,
+      detail: "Ticket button(s) post in their own channel",
+    };
+  }
+
+  const entries = channelIds.map((id) => {
+    const channel = guild.channels.cache.get(id);
+    if (!channel)
+      return { ok: false, text: `Channel \`${id}\` not found (deleted?)` };
+    const missing = missingChannelPerms(guild, channel, TICKET_CHANNEL_PERMS);
+    return missing.length === 0
+      ? { ok: true, text: `<#${id}>` }
+      : { ok: false, text: `<#${id}> — bot missing: ${missing.join(", ")}` };
+  });
   return {
     name: "Tickets",
-    ok: entries.every((e) => e.missing.length === 0),
-    detail: entries
-      .map((e) =>
-        e.missing.length === 0
-          ? `<#${e.id}>`
-          : `<#${e.id}> — bot missing: ${e.missing.join(", ")}`,
-      )
-      .join(", "),
+    ok: entries.every((e) => e.ok),
+    detail: entries.map((e) => e.text).join(", "),
   };
 }
 
@@ -350,7 +358,11 @@ export const runRequirementChecks = (guild: Guild) =>
             : fetchFailureDetail(outcome, notFoundDetail),
       });
     } else {
-      results.push(notConfigured("Moderator Role"));
+      results.push({
+        name: "Moderator Role",
+        ok: false,
+        detail: "Not configured",
+      });
     }
 
     // --- Mod-log channel ---
@@ -450,13 +462,8 @@ export const runRequirementChecks = (guild: Guild) =>
     // --- Ticket configuration ---
     const ticketRows = yield* db
       .selectFrom("tickets_config")
-      .select("channel_id");
-    results.push(
-      buildTicketResult(
-        guild,
-        ticketRows.map((row) => row.channel_id),
-      ),
-    );
+      .select(["role_id", "channel_id"]);
+    results.push(buildTicketResult(guild, ticketRows));
 
     const botMember = guild.members.me;
 

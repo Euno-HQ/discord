@@ -11,7 +11,7 @@ import {
 } from "./checkRequirements";
 
 describe("buildLogChannelResult", () => {
-  it("returns optional (🔵) with unconfigured detail when channelId is undefined", () => {
+  it("returns ok:false (🔴) with unconfigured detail when channelId is undefined", () => {
     const result = buildLogChannelResult(
       "Mod Log Channel",
       undefined,
@@ -21,7 +21,6 @@ describe("buildLogChannelResult", () => {
     expect(result).toEqual({
       name: "Mod Log Channel",
       ok: false,
-      optional: true,
       detail: "Not configured",
     });
   });
@@ -68,7 +67,6 @@ describe("buildLogChannelResult", () => {
     expect(unconfiguredResult).toEqual({
       name: "Deletion Log Channel",
       ok: false,
-      optional: true,
       detail: "Not configured (optional but recommended)",
     });
   });
@@ -225,20 +223,28 @@ describe("buildTicketResult", () => {
     id,
     permissionsFor: () => new PermissionsBitField(perms),
   });
-  // A fetch that fails the test if called: scoping must be cache-only.
+  // fetch throws if called: scoping must be cache-only, no API calls.
+  const noFetch = () => {
+    throw new Error("ticket check must not hit the API");
+  };
   const guildWith = (...channels: { id: string }[]) =>
     ({
       members: { me: { id: "bot-1" } },
+      roles: { cache: new Map([["mod", {}]]), fetch: noFetch },
       channels: {
         cache: new Map(channels.map((c) => [c.id, c])),
-        fetch: () => {
-          throw new Error("ticket check must not hit the API");
-        },
+        fetch: noFetch,
       },
     }) as never;
+  const row = (channel_id: string | null, role_id = "mod") => ({
+    role_id,
+    channel_id,
+  });
 
-  it("ignores rows for channels outside this guild without fetching", () => {
-    const result = buildTicketResult(guildWith(), ["other-guild-chan", null]);
+  it("ignores other guilds' rows without fetching", () => {
+    const result = buildTicketResult(guildWith(), [
+      row("other-guild-chan", "other-role"),
+    ]);
     expect(result).toEqual({
       name: "Tickets",
       ok: false,
@@ -247,10 +253,28 @@ describe("buildTicketResult", () => {
     });
   });
 
+  it("is OK when this guild's buttons all post in their own channel", () => {
+    const result = buildTicketResult(guildWith(), [row(null)]);
+    expect(result.ok).toBe(true);
+    expect(result.detail).toBe("Ticket button(s) post in their own channel");
+  });
+
   it("passes when the bot can open tickets in the channel", () => {
     const guild = guildWith(channelWith("t1", TICKET_PERMS));
-    const result = buildTicketResult(guild, ["t1", "elsewhere", "t1"]);
+    const result = buildTicketResult(guild, [
+      row("t1"),
+      row("t1"),
+      row(null),
+      row("elsewhere", "other-role"),
+    ]);
     expect(result).toEqual({ name: "Tickets", ok: true, detail: "<#t1>" });
+  });
+
+  it("reports a deleted channel for this guild's row as a required failure", () => {
+    const result = buildTicketResult(guildWith(), [row("gone")]);
+    expect(result.ok).toBe(false);
+    expect(result.optional).toBeUndefined();
+    expect(result.detail).toBe("Channel `gone` not found (deleted?)");
   });
 
   it("is a required failure naming the channel and missing perms", () => {
@@ -258,7 +282,7 @@ describe("buildTicketResult", () => {
       channelWith("t1", TICKET_PERMS),
       channelWith("t2", PermissionFlagsBits.SendMessagesInThreads),
     );
-    const result = buildTicketResult(guild, ["t1", "t2"]);
+    const result = buildTicketResult(guild, [row("t1"), row("t2")]);
     expect(result.ok).toBe(false);
     expect(result.optional).toBeUndefined();
     expect(result.detail).toBe(
