@@ -2,14 +2,16 @@ import { PermissionFlagsBits } from "discord-api-types/v10";
 import { PermissionsBitField } from "discord.js";
 
 import {
+  alertableFailures,
   applyLogChannelPerms,
   buildHoneypotResult,
   buildLogChannelResult,
   buildOptionalPermissionResults,
+  buildTicketResult,
 } from "./checkRequirements";
 
 describe("buildLogChannelResult", () => {
-  it("returns ok:false with unconfigured detail when channelId is undefined", () => {
+  it("returns optional (🔵) with unconfigured detail when channelId is undefined", () => {
     const result = buildLogChannelResult(
       "Mod Log Channel",
       undefined,
@@ -19,6 +21,7 @@ describe("buildLogChannelResult", () => {
     expect(result).toEqual({
       name: "Mod Log Channel",
       ok: false,
+      optional: true,
       detail: "Not configured",
     });
   });
@@ -65,18 +68,20 @@ describe("buildLogChannelResult", () => {
     expect(unconfiguredResult).toEqual({
       name: "Deletion Log Channel",
       ok: false,
+      optional: true,
       detail: "Not configured (optional but recommended)",
     });
   });
 });
 
 describe("buildHoneypotResult", () => {
-  it("returns ok:false when no rows are configured", () => {
+  it("returns optional (🔵) when no rows are configured", () => {
     const result = buildHoneypotResult(0, []);
     expect(result).toEqual({
       name: "Honeypot",
       ok: false,
-      detail: "No honeypot channels configured",
+      optional: true,
+      detail: "Not configured",
     });
   });
 
@@ -208,5 +213,68 @@ describe("applyLogChannelPerms", () => {
     expect(
       applyLogChannelPerms(failed, guildWith(null), { kind: "missing" }),
     ).toEqual(failed);
+  });
+});
+
+describe("buildTicketResult", () => {
+  const TICKET_PERMS =
+    PermissionFlagsBits.ViewChannel |
+    PermissionFlagsBits.CreatePrivateThreads |
+    PermissionFlagsBits.SendMessagesInThreads;
+  const channelWith = (id: string, perms: bigint) => ({
+    id,
+    permissionsFor: () => new PermissionsBitField(perms),
+  });
+  // A fetch that fails the test if called: scoping must be cache-only.
+  const guildWith = (...channels: { id: string }[]) =>
+    ({
+      members: { me: { id: "bot-1" } },
+      channels: {
+        cache: new Map(channels.map((c) => [c.id, c])),
+        fetch: () => {
+          throw new Error("ticket check must not hit the API");
+        },
+      },
+    }) as never;
+
+  it("ignores rows for channels outside this guild without fetching", () => {
+    const result = buildTicketResult(guildWith(), ["other-guild-chan", null]);
+    expect(result).toEqual({
+      name: "Tickets",
+      ok: false,
+      optional: true,
+      detail: "Not configured",
+    });
+  });
+
+  it("passes when the bot can open tickets in the channel", () => {
+    const guild = guildWith(channelWith("t1", TICKET_PERMS));
+    const result = buildTicketResult(guild, ["t1", "elsewhere", "t1"]);
+    expect(result).toEqual({ name: "Tickets", ok: true, detail: "<#t1>" });
+  });
+
+  it("is a required failure naming the channel and missing perms", () => {
+    const guild = guildWith(
+      channelWith("t1", TICKET_PERMS),
+      channelWith("t2", PermissionFlagsBits.SendMessagesInThreads),
+    );
+    const result = buildTicketResult(guild, ["t1", "t2"]);
+    expect(result.ok).toBe(false);
+    expect(result.optional).toBeUndefined();
+    expect(result.detail).toBe(
+      "<#t1>, <#t2> — bot missing: ViewChannel, CreatePrivateThreads",
+    );
+  });
+});
+
+describe("alertableFailures", () => {
+  it("keeps only required, conclusive failures", () => {
+    const results = [
+      { name: "ok", ok: true, detail: "" },
+      { name: "blue", ok: false, optional: true, detail: "Not configured" },
+      { name: "flaky", ok: false, inconclusive: true, detail: "⚠️" },
+      { name: "red", ok: false, detail: "broken" },
+    ];
+    expect(alertableFailures(results).map((r) => r.name)).toEqual(["red"]);
   });
 });
