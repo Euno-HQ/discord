@@ -1,4 +1,4 @@
-FROM node:24-alpine AS build
+FROM node:24.22.1-alpine AS build
 WORKDIR /app
 
 # Install build dependencies for native modules (better-sqlite3)
@@ -16,7 +16,7 @@ COPY PRIVACY_POLICY.md TERMS_OF_SERVICE.md ./
 RUN npm run build
 
 # Build the production image with minimal footprint
-FROM node:24-alpine
+FROM node:24.22.1-alpine
 WORKDIR /app
 
 ENV NODE_ENV=production
