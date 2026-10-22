@@ -2,12 +2,12 @@ import type {
   AutoModerationActionExecution,
   AutoModerationRule,
   Guild,
+  GuildAuditLogsEntry,
   GuildBan,
   GuildMember,
   GuildTextBasedChannel,
   Message,
   MessageReaction,
-  PartialGuildMember,
   PartialMessage,
   PartialMessageReaction,
   PartialUser,
@@ -63,15 +63,10 @@ export interface GuildBanRemoveEvent {
   readonly ban: GuildBan;
 }
 
-export interface GuildMemberRemoveEvent {
-  readonly type: "GuildMemberRemove";
-  readonly member: GuildMember | PartialGuildMember;
-}
-
-export interface GuildMemberUpdateEvent {
-  readonly type: "GuildMemberUpdate";
-  readonly oldMember: GuildMember | PartialGuildMember;
-  readonly newMember: GuildMember;
+export interface GuildAuditLogEntryCreateEvent {
+  readonly type: "GuildAuditLogEntryCreate";
+  readonly entry: GuildAuditLogsEntry;
+  readonly guild: Guild;
 }
 
 export interface GuildCreateEvent {
@@ -131,8 +126,7 @@ export type DiscordEvent =
   | GuildMessageEvent
   | GuildBanAddEvent
   | GuildBanRemoveEvent
-  | GuildMemberRemoveEvent
-  | GuildMemberUpdateEvent
+  | GuildAuditLogEntryCreateEvent
   | GuildCreateEvent
   | GuildDeleteEvent
   | AutoModerationActionEvent

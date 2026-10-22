@@ -9,11 +9,10 @@ import {
 } from "#~/commands/report/automodRuleLog";
 // Import the existing Effect builders from the old file
 import {
+  auditLogEntryEffect,
   automodActionEffect,
   banAddEffect,
   banRemoveEffect,
-  memberRemoveEffect,
-  memberUpdateEffect,
 } from "#~/commands/report/modActionLogger";
 import { DiscordEventBus } from "#~/discord/eventBus";
 import { logEffect } from "#~/effects/observability";
@@ -30,8 +29,7 @@ export const modActionLoggerPipeline: Effect.Effect<
       (e) =>
         e.type === "GuildBanAdd" ||
         e.type === "GuildBanRemove" ||
-        e.type === "GuildMemberRemove" ||
-        e.type === "GuildMemberUpdate" ||
+        e.type === "GuildAuditLogEntryCreate" ||
         e.type === "AutoModerationActionExecution" ||
         e.type === "AutoModerationRuleCreate" ||
         e.type === "AutoModerationRuleDelete" ||
@@ -45,10 +43,8 @@ export const modActionLoggerPipeline: Effect.Effect<
             return banAddEffect(e.ban);
           case "GuildBanRemove":
             return banRemoveEffect(e.ban);
-          case "GuildMemberRemove":
-            return memberRemoveEffect(e.member);
-          case "GuildMemberUpdate":
-            return memberUpdateEffect(e.oldMember, e.newMember);
+          case "GuildAuditLogEntryCreate":
+            return auditLogEntryEffect(e.entry, e.guild);
           case "AutoModerationActionExecution":
             return automodActionEffect(e.execution);
           case "AutoModerationRuleCreate":
