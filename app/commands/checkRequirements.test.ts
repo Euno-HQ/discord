@@ -2,14 +2,16 @@ import { PermissionFlagsBits } from "discord-api-types/v10";
 import { PermissionsBitField } from "discord.js";
 
 import {
+  alertableFailures,
   applyLogChannelPerms,
   buildHoneypotResult,
   buildLogChannelResult,
   buildOptionalPermissionResults,
+  buildTicketResult,
 } from "./checkRequirements";
 
 describe("buildLogChannelResult", () => {
-  it("returns ok:false with unconfigured detail when channelId is undefined", () => {
+  it("returns ok:false (🔴) with unconfigured detail when channelId is undefined", () => {
     const result = buildLogChannelResult(
       "Mod Log Channel",
       undefined,
@@ -71,12 +73,13 @@ describe("buildLogChannelResult", () => {
 });
 
 describe("buildHoneypotResult", () => {
-  it("returns ok:false when no rows are configured", () => {
+  it("returns optional (🔵) when no rows are configured", () => {
     const result = buildHoneypotResult(0, []);
     expect(result).toEqual({
       name: "Honeypot",
       ok: false,
-      detail: "No honeypot channels configured",
+      optional: true,
+      detail: "Not configured",
     });
   });
 
@@ -208,5 +211,94 @@ describe("applyLogChannelPerms", () => {
     expect(
       applyLogChannelPerms(failed, guildWith(null), { kind: "missing" }),
     ).toEqual(failed);
+  });
+});
+
+describe("buildTicketResult", () => {
+  const TICKET_PERMS =
+    PermissionFlagsBits.ViewChannel |
+    PermissionFlagsBits.CreatePrivateThreads |
+    PermissionFlagsBits.SendMessagesInThreads;
+  const channelWith = (id: string, perms: bigint) => ({
+    id,
+    permissionsFor: () => new PermissionsBitField(perms),
+  });
+  // fetch throws if called: scoping must be cache-only, no API calls.
+  const noFetch = () => {
+    throw new Error("ticket check must not hit the API");
+  };
+  const guildWith = (...channels: { id: string }[]) =>
+    ({
+      members: { me: { id: "bot-1" } },
+      roles: { cache: new Map([["mod", {}]]), fetch: noFetch },
+      channels: {
+        cache: new Map(channels.map((c) => [c.id, c])),
+        fetch: noFetch,
+      },
+    }) as never;
+  const row = (channel_id: string | null, role_id = "mod") => ({
+    role_id,
+    channel_id,
+  });
+
+  it("ignores other guilds' rows without fetching", () => {
+    const result = buildTicketResult(guildWith(), [
+      row("other-guild-chan", "other-role"),
+    ]);
+    expect(result).toEqual({
+      name: "Tickets",
+      ok: false,
+      optional: true,
+      detail: "Not configured",
+    });
+  });
+
+  it("is OK when this guild's buttons all post in their own channel", () => {
+    const result = buildTicketResult(guildWith(), [row(null)]);
+    expect(result.ok).toBe(true);
+    expect(result.detail).toBe("Ticket button(s) post in their own channel");
+  });
+
+  it("passes when the bot can open tickets in the channel", () => {
+    const guild = guildWith(channelWith("t1", TICKET_PERMS));
+    const result = buildTicketResult(guild, [
+      row("t1"),
+      row("t1"),
+      row(null),
+      row("elsewhere", "other-role"),
+    ]);
+    expect(result).toEqual({ name: "Tickets", ok: true, detail: "<#t1>" });
+  });
+
+  it("reports a deleted channel for this guild's row as a required failure", () => {
+    const result = buildTicketResult(guildWith(), [row("gone")]);
+    expect(result.ok).toBe(false);
+    expect(result.optional).toBeUndefined();
+    expect(result.detail).toBe("Channel `gone` not found (deleted?)");
+  });
+
+  it("is a required failure naming the channel and missing perms", () => {
+    const guild = guildWith(
+      channelWith("t1", TICKET_PERMS),
+      channelWith("t2", PermissionFlagsBits.SendMessagesInThreads),
+    );
+    const result = buildTicketResult(guild, [row("t1"), row("t2")]);
+    expect(result.ok).toBe(false);
+    expect(result.optional).toBeUndefined();
+    expect(result.detail).toBe(
+      "<#t1>, <#t2> — bot missing: ViewChannel, CreatePrivateThreads",
+    );
+  });
+});
+
+describe("alertableFailures", () => {
+  it("keeps only required, conclusive failures", () => {
+    const results = [
+      { name: "ok", ok: true, detail: "" },
+      { name: "blue", ok: false, optional: true, detail: "Not configured" },
+      { name: "flaky", ok: false, inconclusive: true, detail: "⚠️" },
+      { name: "red", ok: false, detail: "broken" },
+    ];
+    expect(alertableFailures(results).map((r) => r.name)).toEqual(["red"]);
   });
 });

@@ -97,7 +97,7 @@ const resolveLogMessage = (
       rest.patch(Routes.channelMessage(modLog, app.log_message_id!), {
         body: {
           content,
-          allowedMentions: {},
+          allowed_mentions: { parse: [] },
         },
       }),
     );
@@ -370,7 +370,7 @@ export const Command = [
           rest.post(Routes.channelMessages(modLog), {
             body: {
               content: `<@${user.id}> applied to join — [review application](${reviewLink})`,
-              allowedMentions: {},
+              allowed_mentions: { parse: [] },
             },
           }),
         )) as { id: string };

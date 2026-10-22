@@ -161,7 +161,31 @@ export const Command = [
             type: ChannelType.PrivateThread,
             invitable: false,
           }),
+        ).pipe(
+          // Usually the configured ticket channel isn't where the button lives
+          // and the bot can't see it. Log both ids so the drift is visible.
+          Effect.catchTag("ForbiddenError", (error) =>
+            Effect.gen(function* () {
+              yield* logEffect(
+                "error",
+                "TicketsModal",
+                "Bot lacks access to ticket channel",
+                {
+                  error,
+                  ticketsChannelId: ticketsChannel.id,
+                  interactionChannelId: interaction.channelId,
+                },
+              );
+              yield* interactionReply(interaction, {
+                content:
+                  "Couldn't make a ticket! The bot doesn't have access to the configured ticket channel. Please tell the admins.",
+                flags: MessageFlags.Ephemeral,
+              });
+              return null;
+            }),
+          ),
         );
+        if (!thread) return;
 
         yield* sendMessage(thread, {
           content: `<@${user.id}>, this is a private space only visible to you and the <@&${config.role_id}> role.`,
@@ -262,7 +286,7 @@ export const Command = [
             rest.post(Routes.channelMessages(modLog), {
               body: {
                 content: `<@${ticketOpenerUserId}>'s ticket <#${threadId}> closed by <@${interactionUserId}>${feedback ? `. feedback: ${feedback}` : ""}`,
-                allowedMentions: {},
+                allowed_mentions: { parse: [] },
               },
             }),
           ),
