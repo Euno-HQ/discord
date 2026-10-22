@@ -12,6 +12,7 @@ export const BooleanFlag = Schema.Literal(
   "analytics",
   "deletion-log",
   "velocity-spam",
+  // Only referenced by app/explorations/membershipGate (deprecated).
   "member-applications",
   "data-export",
 );

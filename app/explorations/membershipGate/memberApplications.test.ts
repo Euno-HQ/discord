@@ -1,3 +1,5 @@
+// DEPRECATED EXPLORATION (membership gate). Not imported by any live code and
+// not registered anywhere. Preserved for future optionality; see ./README.md.
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -89,7 +91,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-const loadModule = () => import("#~/commands/memberApplications.ts");
+const loadModule = () => import("./memberApplications.ts");
 
 const insertApplication = (
   overrides: Partial<{

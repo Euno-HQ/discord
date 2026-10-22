@@ -150,7 +150,8 @@ export default function Features() {
               ]}
               asset={{
                 kind: "recording",
-                caption: "A member files an anonymous report from the right-click menu",
+                caption:
+                  "A member files an anonymous report from the right-click menu",
               }}
             />
           </div>
@@ -193,7 +194,8 @@ export default function Features() {
               what was said after someone tries to cover their tracks.
             </CompactItem>
             <CompactItem name="Force-ban">
-              Ban a user who already left the server, so alts can't slip back in.
+              Ban a user who already left the server, so alts can't slip back
+              in.
             </CompactItem>
             <CompactItem name="Purge recent messages">
               Clear a user's last hour through seven days of messages in one
@@ -224,7 +226,8 @@ export default function Features() {
               ]}
               asset={{
                 kind: "recording",
-                caption: "A mod escalates a ban, the team votes, Euno resolves it",
+                caption:
+                  "A mod escalates a ban, the team votes, Euno resolves it",
               }}
             />
             <FeatureBlock
@@ -239,15 +242,10 @@ export default function Features() {
               ]}
               asset={{
                 kind: "recording",
-                caption: "A member opens a ticket; it lands in a shared mod thread",
+                caption:
+                  "A member opens a ticket; it lands in a shared mod thread",
               }}
             />
-          </div>
-          <div className="mt-12 grid gap-x-8 gap-y-8 md:grid-cols-2">
-            <CompactItem name="Member applications" badge="Team">
-              Gate entry behind a short application, reviewed by the team in a
-              private thread — approve or deny in one click.
-            </CompactItem>
           </div>
         </div>
       </section>
@@ -305,7 +303,7 @@ export default function Features() {
             <FeatureBlock
               reverse
               title="Set up in minutes"
-              why="One command walks you through the whole configuration — mod role, mod-log and deletion-log channels, honeypot, tickets, applications, member roles. No config files, no guesswork."
+              why="One command walks you through the whole configuration — mod role, mod-log and deletion-log channels, honeypot, tickets. No config files, no guesswork."
               steps={[
                 "Run /setup in your server",
                 "Answer a short series of prompts for roles and channels",
@@ -367,7 +365,6 @@ export default function Features() {
               <ul className="mt-6 space-y-3 text-sm text-stone-700">
                 <li>Escalation voting</li>
                 <li>Shared ticketing</li>
-                <li>Member applications</li>
                 <li>Velocity &amp; raid detection</li>
                 <li>/modreport analytics</li>
                 <li>Extended history (beyond 30 days)</li>

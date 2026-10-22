@@ -11,7 +11,6 @@ import { createRequestHandler } from "@react-router/express";
 import { Command as checkRequirements } from "#~/commands/checkRequirements";
 import { EscalationCommands } from "#~/commands/escalationControls";
 import { Command as forceBan } from "#~/commands/force-ban";
-import { Command as memberApplications } from "#~/commands/memberApplications";
 import { Command as modreport } from "#~/commands/modreport";
 import { PurgeMessagesCommands } from "#~/commands/purgeMessages";
 import { Command as report } from "#~/commands/report";
@@ -35,9 +34,7 @@ import { modActionLoggerPipeline } from "#~/discord/pipelines/modActionLogger";
 import { onboardGuildPipeline } from "#~/discord/pipelines/onboardGuild";
 import { reactjiChannelerPipeline } from "#~/discord/pipelines/reactjiChanneler";
 import { applicationKey } from "#~/helpers/env.server";
-
 // Side-effect import: registers job handler and notification builder
-import "#~/jobs/bulkRoleAssignment";
 
 import { runJobRunner } from "#~/jobs/jobRunner";
 
@@ -113,7 +110,6 @@ const startup = Effect.gen(function* () {
     registerCommand(SetupComponentCommands),
     registerCommand(checkRequirements),
     registerCommand(modreport),
-    registerCommand(memberApplications),
     registerCommand(PurgeMessagesCommands),
   ]);
 
