@@ -14,10 +14,10 @@ Deeper reference for constructs beyond the day-to-day. Each section is tagged:
 | Queues | 🟢 Core | the broadcast queue in `eventBus.ts` |
 | Schedule combinators | 🟡 Used | `withRetry` (`errorHandling.ts`), 6h integrity repeat (`Database.ts`) |
 | Ref | 🟡 Used | single-flight dedup (`models/userThreads.ts`), in-memory caches |
-| Fiber supervision | 🟡 Used | `forkDaemon` pipelines + `SupervisorService` (`supervisor.ts`) |
+| Fiber supervision | 🟡 Used | `forkDetach` pipelines + `trackJob` registry (`supervisor.ts`) |
 | Sink | ⚪ Not used yet | — |
 | Config module | ⚪ Not used yet | env read via `app/helpers/env.server.ts` instead |
-| `acquireUseRelease` | ⚪ Not used yet | `Layer.scoped` + `acquireRelease` used at the Layer level instead |
+| `acquireUseRelease` | ⚪ Not used yet | `Layer.effect` + `acquireRelease` used at the Layer level instead |
 
 ## Stream Processing
 
@@ -52,7 +52,7 @@ const processed = stream.pipe(
 | File lines      | `Stream.fromReadableStream` | `Stream.transduce`                 |
 
 **In this codebase:** The `DiscordEventBus` Layer (`app/discord/eventBus.ts`)
-uses `Stream.fromQueue` and `Stream.broadcastDynamic` to distribute Discord
+uses `Stream.fromQueue` and `Stream.broadcast` to distribute Discord
 events to consumer pipelines. The deletion logger pipeline
 (`app/discord/pipelines/deletionLogger.ts`) uses `Stream.filter`,
 `Stream.filterEffect`, `Stream.tap`, `Stream.mapEffect`, and `Stream.runDrain`
@@ -137,7 +137,7 @@ const config = yield* Config.struct({
 ## Resource Management
 
 ⚪ **Not used at the effect level.** We manage resource lifetimes at the **Layer**
-boundary instead — `Layer.scoped` + `Effect.acquireRelease` (e.g.
+boundary instead — `Layer.effect` + `Effect.acquireRelease` (e.g.
 `PostHogService` flush-on-shutdown in `app/effects/posthog.ts`, the SQLite client
 in `app/Database.ts`). Reach for `acquireUseRelease` only for a resource scoped
 to a single operation rather than the app lifetime.
@@ -201,19 +201,20 @@ const value = yield* Ref.get(counter);
 
 ## Fiber Supervision
 
-🟡 **Used.** The six event pipelines are `Effect.forkDaemon`ed at startup and
-`Fiber.interrupt`ed + re-forked on HMR (`app/server.ts`); `SupervisorService`
-(`app/effects/supervisor.ts`) registers an Effect `Supervisor` so background job
-fibers are observable. Note the distinction: **`forkDaemon`** (not `fork`) for
+🟡 **Used.** The six event pipelines are `Effect.forkDetach`ed at startup and
+`Fiber.interrupt`ed + re-forked on HMR (`app/server.ts`). v4 has no `Supervisor`
+(or `FiberRef`), so running jobs register themselves with `trackJob`
+(`app/effects/supervisor.ts`) and `SupervisorService.getActiveJobMeta` reads that
+registry. Note the distinction: **`forkDetach`** (not `forkChild`) for
 anything that must outlive the fiber that spawned it — see EFFECT.md →
 "Runtime & Boundaries".
 
 ```typescript
 // Fork a background task tied to the current scope
-const fiber = yield* Effect.fork(backgroundTask);
+const fiber = yield* Effect.forkChild(backgroundTask);
 
 // Fork a daemon that outlives the spawning fiber (what the pipelines use)
-const daemon = yield* Effect.forkDaemon(longLivedTask);
+const daemon = yield* Effect.forkDetach(longLivedTask);
 
 // Wait for it later, or interrupt it
 const result = yield* Fiber.join(fiber);
@@ -224,12 +225,12 @@ yield* Fiber.interrupt(daemon);
 
 ⚪ **Rare.** The Promise→Effect migration is essentially complete; most external
 APIs we touch are Promise-based (use `Effect.tryPromise` / `tryDiscord`). Reach
-for `Effect.async` only for a genuinely callback-style API (no Promise):
+for `Effect.callback` only for a genuinely callback-style API (no Promise):
 
 ```typescript
 // Convert callback-based APIs to Effect
 const readFile = (path: string): Effect.Effect<string, FileError, never> =>
-  Effect.async<string, FileError>((resume) => {
+  Effect.callback<string, FileError>((resume) => {
     fs.readFile(path, "utf8", (err, data) => {
       if (err) resume(Effect.fail(new FileError(err.message)));
       else resume(Effect.succeed(data));
@@ -240,8 +241,8 @@ const readFile = (path: string): Effect.Effect<string, FileError, never> =>
 ## Class-based Service → Effect Service
 
 🟡 This is exactly how `UserService` (`app/models/user.server.ts`) is built — it
-captures `db` once at layer construction, so its methods require nothing
-(`R = never`). It's the one model-layer `Context.Tag`; the rest of the models are
+captures `DatabaseService.run` once at layer construction, so its methods require nothing
+(`R = never`). It's the one model-layer `Context.Service`; the rest of the models are
 free functions (see EFFECT.md → "Data Access"). Keep this shape in mind when a
 class needs to become a service:
 
@@ -257,15 +258,15 @@ interface IUserService {
   readonly getUser: (id: string) => Effect.Effect<User, UserError>;
 }
 
-export class UserService extends Context.Tag("UserService")<
+export class UserService extends Context.Service<
   UserService,
   IUserService
->() {}
+>()("UserService") {}
 
 export const UserServiceLive = Layer.effect(
   UserService,
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
+    const { run } = yield* DatabaseService;
     return {
       getUser: (id) => Effect.gen(function* () { ... }),
     };

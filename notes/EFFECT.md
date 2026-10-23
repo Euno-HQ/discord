@@ -4,6 +4,35 @@ This document gets you reading and writing Effect code in this codebase. It
 covers the patterns we actually use, with references to real files. For a quick
 lookup reference, see [EFFECT_REFERENCE.md](./EFFECT_REFERENCE.md).
 
+**We are on Effect 4** (`effect@4.0.6`). `node_modules/effect` (source +
+`ai-docs/`, and its `CLAUDE.md`) is the ground truth for API names; much of
+what you remember from v3 is renamed. The ones that bite here:
+
+| v3 | v4 |
+| --- | --- |
+| `Context.Tag("Id")<Self, Shape>()` | `Context.Service<Self, Shape>()("Id")` |
+| `Effect.catchAll` / `catchAllCause` | `Effect.catch` / `Effect.catchCause` |
+| `Effect.either`, `Either` | `Effect.result`, `Result` |
+| `Effect.fork` / `forkDaemon` | `Effect.forkChild` / `Effect.forkDetach` |
+| `Effect.async` | `Effect.callback` |
+| `Layer.scoped` | `Layer.effect` (it handles `Scope` now) |
+| `FiberRef`, `Effect.locally` | `References.*` / `Context.Reference` + `Effect.provideService` |
+| `Logger.replace(defaultLogger, l)`, `Logger.minimumLogLevel` | `Logger.layer([l])`, `References.MinimumLogLevel` |
+| `Supervisor` | removed — see `trackJob` in `app/effects/supervisor.ts` |
+| `Cause.UnknownException` | `Cause.UnknownError` (what bare `tryPromise` fails with) |
+| `@effect/sql`, `@effect/experimental/Reactivity` | `effect/sql`, `effect/reactivity/Reactivity` |
+| `Schema.Literal("a", "b")`, `Schema.decodeUnknown` | `Schema.Literals(["a", "b"])`, `Schema.decodeUnknownEffect` |
+| `Stream.broadcastDynamic(s, n)` | `Stream.broadcast(s, { capacity: n })` |
+| `Exit.cause._tag === "Fail"` | `Cause.findErrorOption(exit.cause)` (causes are a flat `reasons` array) |
+| `TestContext.TestContext` | `TestClock.layer()` from `effect/testing` |
+
+For a reusable effectful function, prefer `Effect.fn("Name")(function* (args) { ... })`
+over `(args) => Effect.gen(...).pipe(Effect.withSpan("Name"))` — same span, plus
+better stack traces. Extra combinators go as further arguments to `Effect.fn`,
+not `.pipe`. Note `Effect.fn` pipeables can't close over the function's
+parameters; if a span needs per-call `attributes`, keep `withSpan` (or
+`Effect.annotateCurrentSpan` inside).
+
 ## Effect Stays on the Server
 
 **Principle:** Effect never leaves the server. It lives in `*.server.ts` modules
@@ -58,26 +87,24 @@ the outside (an HTTP request, a Discord callback, process startup):
 | --- | --- | --- |
 | `runEffect(effect)` | `runtime.runPromise` — run to a `Promise<A>` | route loaders/actions, the gateway interaction handler, schedulers |
 | `runEffectExit(effect)` | `runtime.runPromiseExit` — run to an `Exit` (no throw) | callers that must inspect success/failure |
-| `Effect.forkDaemon` | fork a long-lived background fiber off the runtime | the six event pipelines, started in `server.ts` |
+| `Effect.forkDetach` | fork a long-lived background fiber off the runtime | the six event pipelines, started in `server.ts` |
 
-**`forkDaemon`, not `fork`.** The pipelines are forked with `Effect.forkDaemon`
+**`forkDetach`, not `forkChild`.** The pipelines are forked with `Effect.forkDetach`
 (`server.ts`) specifically so they outlive the `startup` fiber that spawns them —
-a plain `Effect.fork` would tie their lifetime to startup and they'd be
+a plain `Effect.forkChild` would tie their lifetime to startup and they'd be
 interrupted the moment it finished. On HMR the previous fibers are
 `Fiber.interrupt`ed and re-forked. This distinction is load-bearing; don't
-"simplify" it to `fork`.
+"simplify" it to `forkChild`.
 
 > Legacy async/await callers reach Effect through `runEffect`. The old
 > `unknown`-error Promise bridges (`run`, `runTakeFirst`, `runTakeFirstOrThrow`)
 > and the lazy `db` proxy are gone from `AppRuntime.ts` — they erased tagged
 > error types and the proxy lied about being a live handle. Async code that
 > needs the database now runs real Effects with the error type preserved:
-> server modules use `runEffect(Effect.flatMap(DatabaseService, (db) => ...))`
-> (see the file-local `dbEffect` helper in `session.server.ts`); modules in the
-> client-reachable zone, which must not import `effect` directly, first resolve
-> the live handle with `await runEffect(DatabaseService)` and then run each
-> query builder — itself an `Effect<rows, SqlError>` — through `runEffect` (see
-> `routes/healthcheck.tsx`, `helpers/cohortAnalysis.ts`).
+> `await runEffect(run(db.selectFrom(...)))` — `run` is an
+> `Effect<rows, SqlError>`, so even modules in the client-reachable zone (which
+> must not import `effect` directly) can use it (see `routes/healthcheck.tsx`,
+> `helpers/cohortAnalysis.ts`, and the `dbQuery` helper in `session.server.ts`).
 
 ## Reading Effect Code
 
@@ -116,7 +143,7 @@ export const myHandler = (input: Input) =>
     return result;
   }).pipe(
     // DatabaseLayer is provided by the ManagedRuntime — no need to provide it here
-    Effect.catchAll((e) => ...), // Handle errors
+    Effect.catch((e) => ...), // Handle errors
     Effect.withSpan("myHandler"), // Add tracing
   );
 ```
@@ -126,7 +153,7 @@ export const myHandler = (input: Input) =>
 `yield*` is like `await` — it unwraps an Effect and gives you the value:
 
 - `const user = yield* fetchUser(id)` — user is `User`, not `Effect<User>`
-- `const db = yield* DatabaseService` — db is the service implementation
+- `const users = yield* UserService` — `users` is the service implementation
 - If the Effect fails, execution stops and the error propagates
 
 ### The `.pipe()` Pattern
@@ -136,7 +163,7 @@ export const myHandler = (input: Input) =>
 ```typescript
 someEffect.pipe(
   Effect.map((x) => x + 1), // Transform success value
-  Effect.catchAll((e) => ...), // Handle errors
+  Effect.catch((e) => ...), // Handle errors
   Effect.withSpan("name"), // Add tracing
 );
 ```
@@ -182,7 +209,7 @@ Catch all errors uniformly:
 
 ```typescript
 effect.pipe(
-  Effect.catchAll((error) =>
+  Effect.catch((error) =>
     logEffect("error", "Handler", "Operation failed", {
       error,
     }),
@@ -215,7 +242,7 @@ decision they drive, not by HTTP family:
 | `ServiceUnavailableError` | Escalated outage — exhausted retriable failure, carries `lastCause` |
 
 `type AppError` is the app-wide union (DiscordError + domain errors + SqlError +
-`Cause.UnknownException`) used for `toUserResponse` exhaustiveness.
+`Cause.UnknownError`) used for `toUserResponse` exhaustiveness.
 
 **Classifier boundary** (`app/effects/classifyDiscordError.ts`): the only place
 `instanceof` against `@discordjs/rest` SDK errors is allowed. Converts an
@@ -273,7 +300,7 @@ yield* tryDiscord("addMemberRole", () => ssrDiscordSdk.put(...)).pipe(
 ```typescript
 // before: ad-hoc generic string
 // after:
-Effect.catchAll((e) =>
+Effect.catch((e) =>
   Effect.all([
     logEffect("error", "Commands", "Operation failed", { error: e }), // full structured payload
     interactionReply(interaction, toUserResponse(e)),                  // safe, specific-where-known
@@ -286,15 +313,22 @@ Effect.catchAll((e) =>
 
 ### Parallel Operations
 
-Use `Effect.all` with `withConcurrency("unbounded")` for independent operations:
+`Effect.all` is **sequential** unless you pass `concurrency` in its options.
+(The v3 code piped `Effect.withConcurrency("unbounded")`, which only affects
+`concurrency: "inherit"` and so did nothing; it's gone in v4. The escalation
+resolver still runs these sequentially — making it concurrent is a behaviour
+change to make deliberately.)
 
 ```typescript
-const [settings, reportedUser, guild, channel] = yield* Effect.all([
-  fetchSettingsEffect(escalation.guild_id, [SETTINGS.modLog]),
-  fetchUserOrNull(client, escalation.reported_user_id),
-  fetchGuild(client, escalation.guild_id),
-  fetchChannelFromClient<ThreadChannel>(client, escalation.thread_id),
-]).pipe(Effect.withConcurrency("unbounded"));
+const [settings, reportedUser, guild, channel] = yield* Effect.all(
+  [
+    fetchSettingsEffect(escalation.guild_id, [SETTINGS.modLog]),
+    fetchUserOrNull(client, escalation.reported_user_id),
+    fetchGuild(client, escalation.guild_id),
+    fetchChannelFromClient<ThreadChannel>(client, escalation.thread_id),
+  ],
+  { concurrency: "unbounded" },
+);
 ```
 
 **See:** `app/commands/escalate/escalationResolver.ts:94-102`
@@ -307,7 +341,7 @@ rate limits):
 ```typescript
 const results = yield* Effect.forEach(due, (escalation) =>
   processEscalationEffect(client, escalation).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       logEffect("error", "EscalationResolver", "Error processing escalation", {
         escalationId: escalation.id,
         error,
@@ -324,16 +358,17 @@ const results = yield* Effect.forEach(due, (escalation) =>
 Discord events are processed through **Effect `Stream` pipelines** — this is the
 backbone of the bot, not an advanced extra. The flow:
 
-1. `DiscordEventBus` (`app/discord/eventBus.ts`) is a `Layer.scoped` service that
+1. `DiscordEventBus` (`app/discord/eventBus.ts`) is a `Layer.effect` service that
    registers ~18 `client.on(...)` discord.js listeners. Each listener enriches
    the raw event into a tagged `DiscordEvent` and offers it to a
-   `Queue.sliding(1024)` (drops oldest under load rather than blocking the
-   callback). The queue is exposed as a `Stream.broadcastDynamic` so every
+   `Queue.sliding(1024)` with the synchronous `Queue.offerUnsafe` (drops oldest
+   under load rather than blocking the callback). The queue is exposed via
+   `Stream.broadcast(..., { capacity: 1024 })` so every
    pipeline gets its own independently-backpressured copy.
 2. Each of the six pipelines (`app/discord/pipelines/*`) subscribes to that
    stream, narrows by event type, optionally gates on a feature flag, and
    dispatches a handler — all as `Effect.Effect<void, never, RuntimeContext>`.
-3. `server.ts` forks all six with `Effect.forkDaemon` at startup.
+3. `server.ts` forks all six with `Effect.forkDetach` at startup.
 
 The canonical pipeline body (`app/discord/pipelines/automod.ts`):
 
@@ -348,7 +383,7 @@ export const automodPipeline: Effect.Effect<void, never, RuntimeContext> =
       Stream.mapEffect((e) =>
         handleMessage(e, spamService).pipe(
           // per-event recovery: one failure must NOT kill the stream
-          Effect.catchAll((err) =>
+          Effect.catch((err) =>
             logEffect("warn", "Automod", "Pipeline handler failed", {
               ...logContext(e),
               error: err, // tagged error passed whole, never stringified
@@ -364,7 +399,7 @@ export const automodPipeline: Effect.Effect<void, never, RuntimeContext> =
 Key idioms:
 
 - **`never` error channel is structural.** Every handler ends in
-  `Effect.catchAll`, so the pipeline type is `…, never, …`. A pipeline that can
+  `Effect.catch`, so the pipeline type is `…, never, …`. A pipeline that can
   fail would tear down on the first bad event; the type makes that impossible.
 - **`Stream.filter` with a type-guard** narrows `DiscordEvent` to the variant a
   pipeline cares about. Use `Stream.filterEffect` when the gate is itself an
@@ -391,12 +426,9 @@ database out of context on its first line:
 // app/models/guilds.server.ts — the shape almost every model function takes
 export const fetchGuild = (guildId: string) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    const row = yield* db
-      .selectFrom("guilds")
-      .selectAll()
-      .where("id", "=", guildId)
-      .pipe(/* ...takeFirst... */);
+    const [row] = yield* run(
+      db.selectFrom("guilds").selectAll().where("id", "=", guildId),
+    );
     if (!row) return yield* Effect.fail(new NotFoundError({ resource: "guild", id: guildId }));
     return row;
   }).pipe(Effect.withSpan("Guild.fetchGuild", { attributes: { guildId } }));
@@ -404,15 +436,16 @@ export const fetchGuild = (guildId: string) =>
 
 These functions have requirement type `DatabaseService` (satisfied by the
 runtime). Callers compose them with `yield*` inside larger Effects, or cross a
-boundary with `await runEffect(fetchGuild(id))`. The Kysely builder is itself
-yieldable — `yield* db.selectFrom(...)` runs the query; there's no `.execute()`.
+boundary with `await runEffect(fetchGuild(id))`. `db` (from `#~/Database`) is a
+compile-only Kysely builder; `run(query)` executes it through effect/sql and is
+what puts `DatabaseService` in the requirement type. Never call `.execute()`.
 DB failures surface automatically as `SqlError` in the error channel; domain
 "not found" is a deliberate `Effect.fail(new NotFoundError(...))`.
 
 The model files (`app/models/*.server.ts`) are the reference for this pattern.
 `subscriptions.server.ts` and `stripe.server.ts` group their free functions
 under an exported object (`SubscriptionService` / `StripeService`) for
-namespacing — note these are **plain objects of functions, not `Context.Tag`
+namespacing — note these are **plain objects of functions, not `Context.Service`
 services** despite the name.
 
 > There are no DB transactions in the codebase — idempotency leans on SQLite
@@ -422,8 +455,8 @@ services** despite the name.
 
 ### Services & Dependency Injection
 
-Reach for a `Context.Tag` service only when a free function won't do — when you
-need **lifetime-held state** (an in-memory cache, a Supervisor registration, a
+Reach for a `Context.Service` service only when a free function won't do — when you
+need **lifetime-held state** (an in-memory cache, an active-job registry, a
 long-lived connection) or a **swappable implementation**. The nine production
 services are `DatabaseService`, `DiscordEventBus`, `MessageCacheService`,
 `SpamDetectionService`, `UserService`, `EscalationService`, `FeatureFlagService`,
@@ -450,10 +483,10 @@ export interface IEscalationService {
 **2. Create the tag (using class pattern):**
 
 ```typescript
-export class EscalationService extends Context.Tag("EscalationService")<
+export class EscalationService extends Context.Service<
   EscalationService,
   IEscalationService
->() {}
+>()("EscalationService") {}
 ```
 
 **3. Implement with Layer.effect:**
@@ -462,11 +495,11 @@ export class EscalationService extends Context.Tag("EscalationService")<
 export const EscalationServiceLive = Layer.effect(
   EscalationService,
   Effect.gen(function* () {
-    const db = yield* DatabaseService; // satisfied by AppLayer — no Layer.provide
+    const { run } = yield* DatabaseService; // satisfied by AppLayer — no Layer.provide
     return {
       getEscalation: (id) =>
         Effect.gen(function* () {
-          // implementation using db
+          // implementation using run(db...)
         }),
     };
   }),
@@ -546,7 +579,7 @@ export const fetchMemberOrNull = (guild: Guild, userId: string) =>
   Effect.tryPromise({
     try: () => guild.members.fetch(userId),
     catch: () => null,
-  }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+  }).pipe(Effect.catch(() => Effect.succeed(null)));
 ```
 
 **See:** `app/effects/discordSdk.ts` (Discord wrappers),
@@ -557,8 +590,8 @@ export const fetchMemberOrNull = (guild: Guild, userId: string) =>
 
 ### Checklist
 
-1. **Reach for a free function first** — an exported `(args) => Effect.gen(...)`
-   that does `const db = yield* DatabaseService`. Only define a `Context.Tag`
+1. **Reach for a free function first** — an exported `Effect.fn("Name")(...)` (or
+   `(args) => Effect.gen(...)`) that runs queries with `run(db...)`. Only define a `Context.Service`
    service if you need lifetime-held state or a swappable implementation.
 2. **Define errors** — add to `app/effects/errors.ts` using `Data.TaggedError`;
    for Discord calls, let `tryDiscord` produce the `DiscordError` for you
@@ -575,16 +608,13 @@ export const fetchMemberOrNull = (guild: Guild, userId: string) =>
 
 ```typescript
 import { Effect } from "effect";
-import { DatabaseService } from "#~/Database";
+import { db, run } from "#~/Database";
 import { logEffect } from "#~/effects/observability";
 
 export const handleMyCommand = (input: Input) =>
   Effect.gen(function* () {
-    // Get services
-    const db = yield* DatabaseService;
-
     // Do work
-    const result = yield* db.selectFrom("table").selectAll().where(...);
+    const result = yield* run(db.selectFrom("table").selectAll().where(...));
 
     yield* logEffect("info", "MyCommand", "Handled command", {
       inputId: input.id,
@@ -593,7 +623,7 @@ export const handleMyCommand = (input: Input) =>
     return result;
   }).pipe(
     // DatabaseLayer is provided by the ManagedRuntime — no need to provide it here
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       logEffect("error", "MyCommand", "Command failed", {
         error,
       }),
@@ -614,21 +644,21 @@ export interface IMyService {
 }
 
 // 2. Tag
-export class MyService extends Context.Tag("MyService")<
+export class MyService extends Context.Service<
   MyService,
   IMyService
->() {}
+>()("MyService") {}
 
 // 3. Implementation
 // DatabaseService is provided by the ManagedRuntime, no Layer.provide needed
 export const MyServiceLive = Layer.effect(
   MyService,
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
+    const { run } = yield* DatabaseService;
     return {
       doThing: (id) =>
         Effect.gen(function* () {
-          // Use db here
+          // Use run(db...) here
         }).pipe(
           Effect.withSpan("doThing", { attributes: { id } }),
         ),
@@ -662,14 +692,14 @@ const good = Effect.gen(function* () {
 ```typescript
 // WRONG — bypasses dependency injection
 const bad = Effect.gen(function* () {
-  const db = new DatabaseService();
-  return yield* db.getUser("123");
+  const users = new UserService();
+  return yield* users.getUserById("123");
 });
 
 // RIGHT — use yield* to get injected services
 const good = Effect.gen(function* () {
-  const db = yield* DatabaseService;
-  return yield* db.getUser("123");
+  const users = yield* UserService;
+  return yield* users.getUserById("123");
 });
 ```
 
@@ -678,7 +708,7 @@ const good = Effect.gen(function* () {
 ```typescript
 // WRONG — swallows all error information
 const bad = effect.pipe(
-  Effect.catchAll(() => Effect.succeed(null)),
+  Effect.catch(() => Effect.succeed(null)),
 );
 
 // RIGHT — handle errors specifically
@@ -708,12 +738,12 @@ These are the best files to study when learning how Effect is used here:
   Stream-based event-pipeline architecture (queue → broadcast → filter →
   mapEffect → runDrain)
 - **`app/models/guilds.server.ts`** — the dominant free-Effect-function data
-  pattern (`yield* DatabaseService`, yieldable Kysely, `withSpan`)
-- **`app/commands/escalate/escalationResolver.ts`** — parallel operations,
+  pattern (`run(db...)` over the compile-only Kysely builder, `withSpan`)
+- **`app/commands/escalate/escalationResolver.ts`** — `Effect.all` orchestration,
   sequential rate-limited processing, error recovery, span annotations
 - **`app/effects/discordSdk.ts`** + **`app/effects/classifyDiscordError.ts`** —
   `tryDiscord` Promise wrapping and boundary error classification
-- **`app/commands/escalate/service.ts`** — the full `Context.Tag` service pattern
+- **`app/commands/escalate/service.ts`** — the full `Context.Service` service pattern
   (interface, tag, Layer) for the cases that need one
 - **`app/Database.ts`** — Layer composition, merging independent layers
 - **`app/effects/observability.ts`** — `logEffect`, `tapLog`, `filterLog`
@@ -795,13 +825,18 @@ vi.mock("#~/effects/posthog", () => ({
 
 // app/discord/pipelines/deletionLogHandlers.test.ts
 vi.mock("#~/Database", () => ({
-  DatabaseService: Context.GenericTag("DatabaseService"),
+  DatabaseService: Context.Service("DatabaseService"),
   DatabaseLayer: Layer.empty,
 }));
 vi.mock("#~/AppRuntime", () => ({
   runEffect: vi.fn(),
   RuntimeContext: {},
 }));
+// A handler test that needs canned query results provides a fake executor
+// (see reactjiChannelerHandler.test.ts / activityTrackerHandlers.test.ts):
+//   Layer.succeed(DatabaseService, { run: () => Effect.succeed(rows) })
+// Inspect what ran with `query.compile().sql`. Tests that need a real DB use
+// makeDatabaseLayer(":memory:").
 // Per-test control via vi.mocked():
 vi.mocked(fetchSettingsEffect).mockReturnValue(Effect.succeed(null) as any);
 ```
