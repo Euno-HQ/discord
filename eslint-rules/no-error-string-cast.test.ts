@@ -72,9 +72,9 @@ ruleTester.run("no-error-string-cast", rule, {
       code: `const wrapped = new Error(String(error));`,
       errors: [{ messageId: "noStringify" }],
     },
-    // catchAll/catchTag/catchAllCause arrow param, even with a non-matching name.
+    // catch/catchTag/catchCause arrow param, even with a non-matching name.
     {
-      code: `pipe(self, Effect.catchAll((failure) => String(failure)));`,
+      code: `pipe(self, Effect.catch((failure) => String(failure)));`,
       errors: [{ messageId: "noStringify" }],
     },
     {

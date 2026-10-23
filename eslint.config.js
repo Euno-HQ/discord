@@ -88,7 +88,7 @@ export default [
           // channel, it kills the fiber and surfaces as an opaque FiberFailure —
           // a program breaking in a way its signature never admitted was
           // possible. It cost a real safety net once already: fetchAuditLogEntry
-          // looked infallible, so a catchAll guarding it was deleted as dead code.
+          // looked infallible, so a catch guarding it was deleted as dead code.
           selector:
             "MemberExpression[object.name='Effect'][property.name='promise']",
           message:
@@ -108,11 +108,11 @@ export default [
           selector:
             "TSTypeReference[typeName.right.name='Effect'] > TSTypeParameterInstantiation > TSAnyKeyword",
           message:
-            "`any` in an Effect type argument erases the error or requirement channel. Name the real type (Layer.Layer.Success<typeof TestLayer> works well for a test runtime's R).",
+            "`any` in an Effect type argument erases the error or requirement channel. Name the real type (Layer.Success<typeof TestLayer> works well for a test runtime's R).",
         },
         {
           // The bare `Effect.tryPromise(() => …)` form says "this can fail" but
-          // not HOW: the failure becomes UnknownException, so callers can't
+          // not HOW: the failure becomes UnknownError, so callers can't
           // discriminate it and toUserResponse can only give it generic copy.
           //
           // This rule exists because `check:effect` structurally CANNOT see it —
@@ -128,7 +128,7 @@ export default [
           selector:
             "CallExpression[callee.object.name='Effect'][callee.property.name='tryPromise'] > :matches(ArrowFunctionExpression, FunctionExpression)",
           message:
-            "Single-arg Effect.tryPromise erases the failure into UnknownException. Pass { try, catch } with a tagged error (or use tryDiscord for Discord calls).",
+            "Single-arg Effect.tryPromise erases the failure into UnknownError. Pass { try, catch } with a tagged error (or use tryDiscord for Discord calls).",
         },
       ],
 
@@ -284,7 +284,7 @@ export default [
           selector:
             "TSTypeReference[typeName.right.name='Effect'] > TSTypeParameterInstantiation > TSAnyKeyword",
           message:
-            "`any` in an Effect type argument erases the error or requirement channel. Name the real type (Layer.Layer.Success<typeof TestLayer> works well for a test runtime's R).",
+            "`any` in an Effect type argument erases the error or requirement channel. Name the real type (Layer.Success<typeof TestLayer> works well for a test runtime's R).",
         },
       ],
     },
