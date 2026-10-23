@@ -228,6 +228,7 @@ export default [
       "app/discord/**",
       "app/commands/**",
       "app/jobs/**",
+      "app/explorations/**",
       "app/models/**",
       // Mixed directories (app/helpers, app/features contain both client and
       // server files): narrow per-file exceptions for confirmed server-only

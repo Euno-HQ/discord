@@ -191,13 +191,9 @@ export const DiscordEventBusLive = Layer.scoped(
       Effect.runFork(Queue.offer(queue, { type: "GuildBanRemove", ban }));
     });
 
-    client.on(Events.GuildMemberRemove, (member) => {
-      Effect.runFork(Queue.offer(queue, { type: "GuildMemberRemove", member }));
-    });
-
-    client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
+    client.on(Events.GuildAuditLogEntryCreate, (entry, guild) => {
       Effect.runFork(
-        Queue.offer(queue, { type: "GuildMemberUpdate", oldMember, newMember }),
+        Queue.offer(queue, { type: "GuildAuditLogEntryCreate", entry, guild }),
       );
     });
 

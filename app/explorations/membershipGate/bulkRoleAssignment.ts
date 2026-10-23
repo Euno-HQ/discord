@@ -1,3 +1,5 @@
+// DEPRECATED EXPLORATION (membership gate). Not imported by any live code and
+// not registered anywhere. Preserved for future optionality; see ./README.md.
 import {
   ButtonStyle,
   PermissionFlagsBits,
@@ -12,7 +14,6 @@ import { ssrDiscordSdk } from "#~/discord/api";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { withRetry } from "#~/effects/errorHandling";
 import { logEffect } from "#~/effects/observability";
-
 import {
   checkpointJobEffect,
   completeJobEffect,
@@ -22,7 +23,7 @@ import {
   registerNotificationBuilder,
   type Job,
   type JobNotificationBuilder,
-} from "./jobRunner";
+} from "#~/jobs/jobRunner";
 
 export interface BulkRoleAssignmentCursor {
   after: string;

@@ -62,7 +62,6 @@ function makeState(overrides: Partial<Record<string, string | null>> = {}) {
     deletionLogChannel: null,
     honeypotChannel: null,
     ticketChannel: null,
-    applicationChannel: null,
     ...overrides,
   };
 }
@@ -80,7 +79,6 @@ test("all channels CREATE_SENTINEL → no issues, hasHardBlock false", async () 
       deletionLogChannel: CREATE_SENTINEL,
       honeypotChannel: CREATE_SENTINEL,
       ticketChannel: CREATE_SENTINEL,
-      applicationChannel: CREATE_SENTINEL,
     }),
   );
   expect(result.missingGuildPerms).toEqual([]);

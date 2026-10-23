@@ -1,10 +1,7 @@
 import { ActivityType, Client, GatewayIntentBits, Partials } from "discord.js";
 import { Context, Layer } from "effect";
 
-import {
-  GUILD_MEMBERS_INTENT,
-  MESSAGE_CONTENT_INTENT,
-} from "#~/discord/intents";
+import { MESSAGE_CONTENT_INTENT } from "#~/discord/intents";
 import { botInviteUrl } from "#~/helpers/botPermissions";
 import { discordToken } from "#~/helpers/env.server";
 import { log, trackPerformance } from "#~/helpers/observability";
@@ -25,7 +22,6 @@ const makeClient = (): Client =>
       GatewayIntentBits.AutoModerationExecution,
       GatewayIntentBits.AutoModerationConfiguration,
       ...(MESSAGE_CONTENT_INTENT ? [GatewayIntentBits.MessageContent] : []),
-      ...(GUILD_MEMBERS_INTENT ? [GatewayIntentBits.GuildMembers] : []),
     ],
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
   });

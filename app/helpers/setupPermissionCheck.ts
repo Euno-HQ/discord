@@ -21,7 +21,6 @@ interface SetupState {
   deletionLogChannel: string | null;
   honeypotChannel: string | null;
   ticketChannel: string | null;
-  applicationChannel: string | null;
 }
 
 const CHANNEL_SLOTS: {
@@ -32,7 +31,6 @@ const CHANNEL_SLOTS: {
   { key: "deletionLogChannel", label: "Deletion Log" },
   { key: "honeypotChannel", label: "Honeypot" },
   { key: "ticketChannel", label: "Ticket Channel" },
-  { key: "applicationChannel", label: "Application Channel" },
 ];
 
 export async function checkSetupPermissions(
