@@ -298,25 +298,24 @@ export const EscalationServiceLive = Layer.effect(
           }),
         ),
 
-      getDueEscalations: () =>
-        Effect.gen(function* () {
-          const escalations = yield* run(
-            db
-              .selectFrom("escalations")
-              .selectAll()
-              .where("resolved_at", "is", null)
-              .where("scheduled_for", "<=", new Date().toISOString()),
-          );
+      getDueEscalations: Effect.fn("getDueEscalations")(function* () {
+        const escalations = yield* run(
+          db
+            .selectFrom("escalations")
+            .selectAll()
+            .where("resolved_at", "is", null)
+            .where("scheduled_for", "<=", new Date().toISOString()),
+        );
 
-          yield* logEffect(
-            "debug",
-            "EscalationService",
-            "Found due escalations",
-            { count: escalations.length },
-          );
+        yield* logEffect(
+          "debug",
+          "EscalationService",
+          "Found due escalations",
+          { count: escalations.length },
+        );
 
-          return escalations;
-        }).pipe(Effect.withSpan("getDueEscalations")),
+        return escalations;
+      }),
 
       executeResolution: (resolution, escalation, guild) =>
         Effect.gen(function* () {

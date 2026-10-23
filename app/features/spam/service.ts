@@ -193,8 +193,8 @@ export const SpamDetectionServiceLive = Layer.effect(
       );
 
     return {
-      checkMessage: (message, member) =>
-        Effect.gen(function* () {
+      checkMessage: Effect.fn("SpamDetection.checkMessage")(
+        function* (message, member) {
           const guildId = message.guild!.id;
 
           // Correlate this trace with the message so spans can be looked up by
@@ -300,7 +300,8 @@ export const SpamDetectionServiceLive = Layer.effect(
           }
 
           return verdict;
-        }).pipe(Effect.withSpan("SpamDetection.checkMessage")),
+        },
+      ),
 
       executeResponse: (verdict, message, member) =>
         executeResponse(verdict, message, member).pipe(

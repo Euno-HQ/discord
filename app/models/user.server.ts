@@ -79,13 +79,14 @@ export const UserServiceLive = Layer.effect(
           }),
         ),
 
-      getUserByEmail: (email) =>
-        Effect.gen(function* () {
+      getUserByEmail: Effect.fn("UserService.getUserByEmail")(
+        function* (email) {
           const [user] = yield* run(
             db.selectFrom("users").selectAll().where("email", "=", email),
           );
           return user;
-        }).pipe(Effect.withSpan("UserService.getUserByEmail")),
+        },
+      ),
 
       createUser: (email, externalId) =>
         Effect.gen(function* () {
@@ -125,10 +126,11 @@ export const UserServiceLive = Layer.effect(
           }),
         ),
 
-      deleteUserByEmail: (email) =>
-        Effect.gen(function* () {
+      deleteUserByEmail: Effect.fn("UserService.deleteUserByEmail")(
+        function* (email) {
           yield* run(db.deleteFrom("users").where("email", "=", email));
-        }).pipe(Effect.withSpan("UserService.deleteUserByEmail")),
+        },
+      ),
     };
   }),
 );

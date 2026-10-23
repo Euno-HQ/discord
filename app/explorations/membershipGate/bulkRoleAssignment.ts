@@ -86,92 +86,93 @@ export const scanFinalCursorEffect = (guildId: string) =>
  * Process one batch of member role assignments.
  * Returns updated cursor, counts, and whether the phase is done.
  */
-export const processBatchEffect = (options: ProcessBatchOptions) =>
-  Effect.gen(function* () {
-    const { guildId, roleId, cursor, finalCursor, batchSize } = options;
+export const processBatchEffect = Effect.fn("processBatch")(function* (
+  options: ProcessBatchOptions,
+) {
+  const { guildId, roleId, cursor, finalCursor, batchSize } = options;
 
-    const members = (yield* tryDiscord("listGuildMembers", () =>
-      ssrDiscordSdk.get(Routes.guildMembers(guildId), {
-        query: new URLSearchParams({
-          limit: String(batchSize),
-          after: cursor.after,
-        }),
+  const members = (yield* tryDiscord("listGuildMembers", () =>
+    ssrDiscordSdk.get(Routes.guildMembers(guildId), {
+      query: new URLSearchParams({
+        limit: String(batchSize),
+        after: cursor.after,
       }),
-    )) as APIGuildMember[];
+    }),
+  )) as APIGuildMember[];
 
-    if (members.length === 0) {
-      return {
-        cursor,
-        assigned: 0,
-        errors: 0,
-        done: true,
-      } as ProcessBatchResult;
-    }
-
-    let assigned = 0;
-    let errors = 0;
-    let lastProcessedId = cursor.after;
-    let hitFinalCursor = false;
-
-    for (const member of members) {
-      if (!member.user) continue;
-
-      if (BigInt(member.user.id) > BigInt(finalCursor.lastMemberId)) {
-        hitFinalCursor = true;
-        break;
-      }
-
-      lastProcessedId = member.user.id;
-
-      if (member.user.bot) continue;
-
-      // Decision: do NOT escalateExhausted per-member. One member's outage must
-      // not abort a 100k-member migration. withRetry handles transient blips
-      // (RateLimit/Transient) with capped backoff. ResourceMissingError (member
-      // already left) is recovered silently as success-equivalent — assigning a
-      // role to a departed member is a no-op outcome, not a failure.
-      // ForbiddenError, ClientError, and exhausted-Transient fall through to
-      // the else branch below, where they are counted and logged with their full
-      // typed payload. The batch-level failJobEffect (called when totalErrors > 0)
-      // handles job-level abort. escalateExhausted is reserved for command
-      // handlers (Task 9) where a single failure IS the whole outcome.
-      const exit = yield* tryDiscord("addMemberRole", () =>
-        ssrDiscordSdk.put(
-          Routes.guildMemberRole(guildId, member.user.id, roleId),
-        ),
-      ).pipe(
-        withRetry, // RateLimit/Transient retried with capped backoff
-        // member already gone → success-equivalent, drop silently
-        Effect.catchTag("ResourceMissingError", () => Effect.void),
-        Effect.exit,
-      );
-
-      if (exit._tag === "Success") {
-        assigned++;
-      } else {
-        errors++;
-        yield* logEffect(
-          "warn",
-          "BulkRoleAssignment",
-          "Failed to assign role to member",
-          {
-            guildId,
-            userId: member.user.id,
-            error: exit.cause,
-          },
-        );
-      }
-    }
-
-    const done = hitFinalCursor || members.length < batchSize;
-
+  if (members.length === 0) {
     return {
-      cursor: { after: lastProcessedId },
-      assigned,
-      errors,
-      done,
+      cursor,
+      assigned: 0,
+      errors: 0,
+      done: true,
     } as ProcessBatchResult;
-  }).pipe(Effect.withSpan("processBatch"));
+  }
+
+  let assigned = 0;
+  let errors = 0;
+  let lastProcessedId = cursor.after;
+  let hitFinalCursor = false;
+
+  for (const member of members) {
+    if (!member.user) continue;
+
+    if (BigInt(member.user.id) > BigInt(finalCursor.lastMemberId)) {
+      hitFinalCursor = true;
+      break;
+    }
+
+    lastProcessedId = member.user.id;
+
+    if (member.user.bot) continue;
+
+    // Decision: do NOT escalateExhausted per-member. One member's outage must
+    // not abort a 100k-member migration. withRetry handles transient blips
+    // (RateLimit/Transient) with capped backoff. ResourceMissingError (member
+    // already left) is recovered silently as success-equivalent — assigning a
+    // role to a departed member is a no-op outcome, not a failure.
+    // ForbiddenError, ClientError, and exhausted-Transient fall through to
+    // the else branch below, where they are counted and logged with their full
+    // typed payload. The batch-level failJobEffect (called when totalErrors > 0)
+    // handles job-level abort. escalateExhausted is reserved for command
+    // handlers (Task 9) where a single failure IS the whole outcome.
+    const exit = yield* tryDiscord("addMemberRole", () =>
+      ssrDiscordSdk.put(
+        Routes.guildMemberRole(guildId, member.user.id, roleId),
+      ),
+    ).pipe(
+      withRetry, // RateLimit/Transient retried with capped backoff
+      // member already gone → success-equivalent, drop silently
+      Effect.catchTag("ResourceMissingError", () => Effect.void),
+      Effect.exit,
+    );
+
+    if (exit._tag === "Success") {
+      assigned++;
+    } else {
+      errors++;
+      yield* logEffect(
+        "warn",
+        "BulkRoleAssignment",
+        "Failed to assign role to member",
+        {
+          guildId,
+          userId: member.user.id,
+          error: exit.cause,
+        },
+      );
+    }
+  }
+
+  const done = hitFinalCursor || members.length < batchSize;
+
+  return {
+    cursor: { after: lastProcessedId },
+    assigned,
+    errors,
+    done,
+  } as ProcessBatchResult;
+});
 
 interface UpdatePermissionsOptions {
   guildId: string;
@@ -185,10 +186,8 @@ interface UpdatePermissionsOptions {
  * Order: grant ViewChannel on @member FIRST, then deny on @everyone.
  * Rolls back if the deny fails after grant succeeds.
  */
-export const activateMembershipGateEffect = (
-  options: UpdatePermissionsOptions,
-) =>
-  Effect.gen(function* () {
+export const activateMembershipGateEffect = Effect.fn("updatePermissions")(
+  function* (options: UpdatePermissionsOptions) {
     const { guildId, roleId, everyonePermissions, memberPermissions } = options;
     const memberPerms = BigInt(memberPermissions);
     const everyonePerms = BigInt(everyonePermissions);
@@ -260,7 +259,8 @@ export const activateMembershipGateEffect = (
 
     // Re-throw the original deny error
     yield* denyExit;
-  }).pipe(Effect.withSpan("updatePermissions"));
+  },
+);
 
 const BATCH_SIZE = 1000;
 
@@ -273,154 +273,150 @@ export const executeJobEffect = (job: Job) =>
     }
   }).pipe(Effect.withSpan("executeJob", { attributes: { jobId: job.id } }));
 
-const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
-  Effect.gen(function* () {
-    // Determine final cursor: scan on first run, reuse on resume
-    let finalCursor: BulkRoleAssignmentFinalCursor;
-    if (job.final_cursor) {
-      finalCursor = JSON.parse(
-        job.final_cursor,
-      ) as BulkRoleAssignmentFinalCursor;
-    } else {
-      yield* logEffect(
-        "info",
-        "BulkRoleAssignment",
-        "Scanning guild members to set final cursor",
-        { jobId: job.id, guildId: job.guild_id },
-      );
-      finalCursor = yield* scanFinalCursorEffect(job.guild_id);
-
-      // Persist the final cursor so a restart doesn't re-scan
-      const now = new Date().toISOString();
-      yield* run(
-        db
-          .updateTable("background_jobs")
-          .set({ final_cursor: JSON.stringify(finalCursor), updated_at: now })
-          .where("id", "=", job.id),
-      );
-
-      yield* logEffect("info", "BulkRoleAssignment", "Final cursor set", {
-        jobId: job.id,
-        lastMemberId: finalCursor.lastMemberId,
-        memberCount: finalCursor.memberCount,
-      });
-
-      // Post initial mod-log message with estimated runtime
-      if (job.notify_channel_id) {
-        const estimatedSeconds = finalCursor.memberCount; // ~1 member/sec
-        const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
-        const estimatedHours = Math.floor(estimatedMinutes / 60);
-        const remainingMinutes = estimatedMinutes % 60;
-        const timeEstimate =
-          estimatedHours > 0
-            ? `~${estimatedHours}h ${remainingMinutes}m`
-            : `~${estimatedMinutes}m`;
-
-        yield* tryDiscord("notifyMigrationStart", () =>
-          ssrDiscordSdk.post(Routes.channelMessages(job.notify_channel_id!), {
-            body: {
-              content:
-                `**Member role migration started**\n` +
-                `Assigning <@&${payload.roleId}> to ~${finalCursor.memberCount.toLocaleString()} existing members.\n` +
-                `Estimated time: ${timeEstimate}. Progress updates will be posted every 30 minutes.`,
-            },
-          }),
-        ).pipe(Effect.catch(() => Effect.void));
-      }
-    }
-
-    const cursor = job.cursor
-      ? (JSON.parse(job.cursor) as BulkRoleAssignmentCursor)
-      : { after: "0" };
-
-    let currentCursor = cursor;
-    let totalAssigned = job.progress_count;
-    let totalErrors = job.error_count;
-
-    const startTime = Date.now();
-    const PROGRESS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
-    let lastProgressUpdate = startTime;
-    const totalMembers = finalCursor.memberCount;
-
-    while (true) {
-      const result = yield* processBatchEffect({
-        guildId: job.guild_id,
-        roleId: payload.roleId,
-        cursor: currentCursor,
-        finalCursor,
-        batchSize: BATCH_SIZE,
-      });
-
-      totalAssigned += result.assigned;
-      totalErrors += result.errors;
-      currentCursor = result.cursor;
-
-      yield* checkpointJobEffect(job.id, currentCursor, totalAssigned);
-
-      // Post progress update every 30 minutes
-      const now = Date.now();
-      if (
-        job.notify_channel_id &&
-        now - lastProgressUpdate >= PROGRESS_INTERVAL_MS
-      ) {
-        lastProgressUpdate = now;
-        const elapsed = now - startTime;
-        const rate = totalAssigned / (elapsed / 1000); // members per second
-        const remaining = totalMembers - totalAssigned;
-        const etaSeconds = rate > 0 ? Math.ceil(remaining / rate) : 0;
-        const etaMinutes = Math.ceil(etaSeconds / 60);
-        const etaHours = Math.floor(etaMinutes / 60);
-        const etaRemainingMin = etaMinutes % 60;
-        const eta =
-          etaHours > 0
-            ? `~${etaHours}h ${etaRemainingMin}m`
-            : `~${etaMinutes}m`;
-        const pct =
-          totalMembers > 0
-            ? Math.round((totalAssigned / totalMembers) * 100)
-            : 0;
-
-        yield* tryDiscord("notifyProgress", () =>
-          ssrDiscordSdk.post(Routes.channelMessages(job.notify_channel_id!), {
-            body: {
-              content:
-                `**Member role migration progress**\n` +
-                `${totalAssigned.toLocaleString()} / ~${totalMembers.toLocaleString()} members (${pct}%)\n` +
-                `Estimated time remaining: ${eta}`,
-            },
-          }),
-        ).pipe(Effect.catch(() => Effect.void));
-      }
-
-      if (result.errors > 0) {
-        yield* recordJobErrorEffect(
-          job.id,
-          totalErrors,
-          `${result.errors} failures in batch ending at ${currentCursor.after}`,
-        );
-      }
-
-      if (result.done) break;
-    }
-
-    if (totalErrors > 0) {
-      yield* failJobEffect(
-        job.id,
-        `Phase 1 completed with ${totalErrors} errors. ` +
-          `${totalAssigned} of ${totalAssigned + totalErrors} members assigned. ` +
-          `Not proceeding to permission changes — re-run /setup to retry.`,
-      );
-      return;
-    }
-
+const executePhase1Effect = Effect.fn("executePhase1")(function* (
+  job: Job,
+  payload: BulkRoleAssignmentPayload,
+) {
+  // Determine final cursor: scan on first run, reuse on resume
+  let finalCursor: BulkRoleAssignmentFinalCursor;
+  if (job.final_cursor) {
+    finalCursor = JSON.parse(job.final_cursor) as BulkRoleAssignmentFinalCursor;
+  } else {
     yield* logEffect(
       "info",
       "BulkRoleAssignment",
-      "Phase 1 complete, role assignment finished",
-      { jobId: job.id, assigned: totalAssigned },
+      "Scanning guild members to set final cursor",
+      { jobId: job.id, guildId: job.guild_id },
     );
-    yield* completeJobEffect(job.id);
-  }).pipe(Effect.withSpan("executePhase1"));
+    finalCursor = yield* scanFinalCursorEffect(job.guild_id);
+
+    // Persist the final cursor so a restart doesn't re-scan
+    const now = new Date().toISOString();
+    yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({ final_cursor: JSON.stringify(finalCursor), updated_at: now })
+        .where("id", "=", job.id),
+    );
+
+    yield* logEffect("info", "BulkRoleAssignment", "Final cursor set", {
+      jobId: job.id,
+      lastMemberId: finalCursor.lastMemberId,
+      memberCount: finalCursor.memberCount,
+    });
+
+    // Post initial mod-log message with estimated runtime
+    if (job.notify_channel_id) {
+      const estimatedSeconds = finalCursor.memberCount; // ~1 member/sec
+      const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
+      const estimatedHours = Math.floor(estimatedMinutes / 60);
+      const remainingMinutes = estimatedMinutes % 60;
+      const timeEstimate =
+        estimatedHours > 0
+          ? `~${estimatedHours}h ${remainingMinutes}m`
+          : `~${estimatedMinutes}m`;
+
+      yield* tryDiscord("notifyMigrationStart", () =>
+        ssrDiscordSdk.post(Routes.channelMessages(job.notify_channel_id!), {
+          body: {
+            content:
+              `**Member role migration started**\n` +
+              `Assigning <@&${payload.roleId}> to ~${finalCursor.memberCount.toLocaleString()} existing members.\n` +
+              `Estimated time: ${timeEstimate}. Progress updates will be posted every 30 minutes.`,
+          },
+        }),
+      ).pipe(Effect.catch(() => Effect.void));
+    }
+  }
+
+  const cursor = job.cursor
+    ? (JSON.parse(job.cursor) as BulkRoleAssignmentCursor)
+    : { after: "0" };
+
+  let currentCursor = cursor;
+  let totalAssigned = job.progress_count;
+  let totalErrors = job.error_count;
+
+  const startTime = Date.now();
+  const PROGRESS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+  let lastProgressUpdate = startTime;
+  const totalMembers = finalCursor.memberCount;
+
+  while (true) {
+    const result = yield* processBatchEffect({
+      guildId: job.guild_id,
+      roleId: payload.roleId,
+      cursor: currentCursor,
+      finalCursor,
+      batchSize: BATCH_SIZE,
+    });
+
+    totalAssigned += result.assigned;
+    totalErrors += result.errors;
+    currentCursor = result.cursor;
+
+    yield* checkpointJobEffect(job.id, currentCursor, totalAssigned);
+
+    // Post progress update every 30 minutes
+    const now = Date.now();
+    if (
+      job.notify_channel_id &&
+      now - lastProgressUpdate >= PROGRESS_INTERVAL_MS
+    ) {
+      lastProgressUpdate = now;
+      const elapsed = now - startTime;
+      const rate = totalAssigned / (elapsed / 1000); // members per second
+      const remaining = totalMembers - totalAssigned;
+      const etaSeconds = rate > 0 ? Math.ceil(remaining / rate) : 0;
+      const etaMinutes = Math.ceil(etaSeconds / 60);
+      const etaHours = Math.floor(etaMinutes / 60);
+      const etaRemainingMin = etaMinutes % 60;
+      const eta =
+        etaHours > 0 ? `~${etaHours}h ${etaRemainingMin}m` : `~${etaMinutes}m`;
+      const pct =
+        totalMembers > 0 ? Math.round((totalAssigned / totalMembers) * 100) : 0;
+
+      yield* tryDiscord("notifyProgress", () =>
+        ssrDiscordSdk.post(Routes.channelMessages(job.notify_channel_id!), {
+          body: {
+            content:
+              `**Member role migration progress**\n` +
+              `${totalAssigned.toLocaleString()} / ~${totalMembers.toLocaleString()} members (${pct}%)\n` +
+              `Estimated time remaining: ${eta}`,
+          },
+        }),
+      ).pipe(Effect.catch(() => Effect.void));
+    }
+
+    if (result.errors > 0) {
+      yield* recordJobErrorEffect(
+        job.id,
+        totalErrors,
+        `${result.errors} failures in batch ending at ${currentCursor.after}`,
+      );
+    }
+
+    if (result.done) break;
+  }
+
+  if (totalErrors > 0) {
+    yield* failJobEffect(
+      job.id,
+      `Phase 1 completed with ${totalErrors} errors. ` +
+        `${totalAssigned} of ${totalAssigned + totalErrors} members assigned. ` +
+        `Not proceeding to permission changes — re-run /setup to retry.`,
+    );
+    return;
+  }
+
+  yield* logEffect(
+    "info",
+    "BulkRoleAssignment",
+    "Phase 1 complete, role assignment finished",
+    { jobId: job.id, assigned: totalAssigned },
+  );
+  yield* completeJobEffect(job.id);
+});
 
 // ---------------------------------------------------------------------------
 // Notification builder — Components V2 message for mod-log

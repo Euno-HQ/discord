@@ -107,8 +107,8 @@ export const MessageCacheServiceLive = Layer.effect(
           }),
         ),
 
-      expireContent: () =>
-        Effect.gen(function* () {
+      expireContent: Effect.fn("MessageCacheService.expireContent")(
+        function* () {
           const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
           yield* run(
             db
@@ -123,23 +123,18 @@ export const MessageCacheServiceLive = Layer.effect(
             "Content expiration ran",
             { cutoff },
           );
-        }).pipe(Effect.withSpan("MessageCacheService.expireContent")),
+        },
+      ),
 
-      expireRows: () =>
-        Effect.gen(function* () {
-          const cutoff = new Date(
-            Date.now() - 24 * 60 * 60 * 1000,
-          ).toISOString();
-          yield* run(
-            db.deleteFrom("message_cache").where("created_at", "<", cutoff),
-          );
-          yield* logEffect(
-            "info",
-            "MessageCacheService",
-            "Row expiration ran",
-            { cutoff },
-          );
-        }).pipe(Effect.withSpan("MessageCacheService.expireRows")),
+      expireRows: Effect.fn("MessageCacheService.expireRows")(function* () {
+        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        yield* run(
+          db.deleteFrom("message_cache").where("created_at", "<", cutoff),
+        );
+        yield* logEffect("info", "MessageCacheService", "Row expiration ran", {
+          cutoff,
+        });
+      }),
     };
   }),
 ).pipe(Layer.provide(DatabaseLayer));
