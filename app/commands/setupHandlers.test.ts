@@ -42,9 +42,7 @@ function makePendingSetup(overrides: Partial<PendingSetup> = {}): PendingSetup {
     deletionLogChannel: CREATE_SENTINEL,
     honeypotChannel: CREATE_SENTINEL,
     ticketChannel: CREATE_SENTINEL,
-    applicationChannel: null,
     restrictedRoleId: undefined,
-    memberRoleId: undefined,
     createdAt: Date.now(),
     ...overrides,
   };
@@ -211,11 +209,6 @@ describe("defaultSetup", () => {
     expect(setup.modLogChannel).toBe(CREATE_SENTINEL);
   });
 
-  test("applicationChannel defaults to null (disabled)", () => {
-    const setup = defaultSetup();
-    expect(setup.applicationChannel).toBeNull();
-  });
-
   test("modRoleId defaults to undefined", () => {
     const setup = defaultSetup();
     expect(setup.modRoleId).toBeUndefined();
@@ -265,54 +258,12 @@ describe("buildSetupConfirmMessage", () => {
       deletionLogChannel: null,
       honeypotChannel: null,
       ticketChannel: null,
-      applicationChannel: null,
     });
     const result = buildSetupConfirmMessage("guild-1", state);
     const texts = getTextDisplays(result).map((t) => t.content);
     const changesText = texts.find((t) => t.includes("Changes Euno will make"));
 
     expect(changesText).toBeUndefined();
-  });
-
-  test("application channel adds modify entries for @everyone", () => {
-    const state = makePendingSetup({
-      modLogChannel: "existing-ch-1",
-      deletionLogChannel: null,
-      honeypotChannel: null,
-      ticketChannel: null,
-      applicationChannel: CREATE_SENTINEL,
-      memberRoleId: undefined,
-    });
-    const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result).map((t) => t.content);
-    const changesText = texts.find((t) => t.includes("Changes Euno will make"));
-
-    expect(changesText).toBeDefined();
-    expect(changesText).toContain("#apply-here channel");
-    expect(changesText).toContain("@Member role");
-    expect(changesText).toContain("@everyone");
-    expect(changesText).toContain("deny View Channels");
-  });
-
-  test("existing application channel with existing member role", () => {
-    const state = makePendingSetup({
-      modLogChannel: "existing-ch-1",
-      deletionLogChannel: null,
-      honeypotChannel: null,
-      ticketChannel: null,
-      applicationChannel: "existing-app-ch",
-      memberRoleId: "role-456",
-    });
-    const result = buildSetupConfirmMessage("guild-1", state);
-    const texts = getTextDisplays(result).map((t) => t.content);
-    const changesText = texts.find((t) => t.includes("Changes Euno will make"));
-
-    expect(changesText).toBeDefined();
-    // Should not have #apply-here in Create section since using existing channel
-    expect(changesText).not.toContain("#apply-here channel");
-    // Should still have Modify entries for @everyone permissions
-    expect(changesText).toContain("@everyone");
-    expect(changesText).toContain("<@&role-456>");
   });
 
   test("permCheck with hard block disables Confirm button", () => {
@@ -347,7 +298,6 @@ describe("buildSetupConfirmMessage", () => {
       deletionLogChannel: null,
       honeypotChannel: CREATE_SENTINEL,
       ticketChannel: "ch-tickets",
-      applicationChannel: null,
       restrictedRoleId: "role-restricted",
     });
     const result = buildSetupConfirmMessage("guild-1", state);
@@ -377,15 +327,10 @@ describe("buildSetupScreen1Message", () => {
     );
   });
 
-  test("renders the four feature toggle buttons", () => {
+  test("renders the three feature toggle buttons", () => {
     const result = buildSetupScreen1Message("guild-1", makePendingSetup());
     const labels = getButtons(result).map((b) => b.label);
-    for (const f of [
-      "Deletion Log",
-      "Honeypot",
-      "Tickets",
-      "Member Applications",
-    ]) {
+    for (const f of ["Deletion Log", "Honeypot", "Tickets"]) {
       expect(labels.some((l) => l?.includes(f))).toBe(true);
     }
   });
@@ -419,21 +364,6 @@ describe("buildSetupScreen2Message", () => {
     const ids = getButtons(result).map((b) => b.custom_id);
     expect(ids).toContain("setup-back-core|guild-1");
     expect(ids).toContain("setup-continue|guild-1");
-  });
-
-  test("renders application channel + member role selects only when applications enabled", () => {
-    const off = buildSetupScreen2Message(
-      "guild-1",
-      makePendingSetup({ applicationChannel: null }),
-    );
-    const on = buildSetupScreen2Message(
-      "guild-1",
-      makePendingSetup({ applicationChannel: CREATE_SENTINEL }),
-    );
-    const idsOff = JSON.stringify(off);
-    const idsOn = JSON.stringify(on);
-    expect(idsOff).not.toContain("setup-sel|guild-1|applications");
-    expect(idsOn).toContain("setup-sel|guild-1|applications");
   });
 
   test("always renders the restricted-role select", () => {

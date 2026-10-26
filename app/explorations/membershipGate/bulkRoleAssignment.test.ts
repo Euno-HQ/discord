@@ -1,3 +1,5 @@
+// DEPRECATED EXPLORATION (membership gate). Not imported by any live code and
+// not registered anywhere. Preserved for future optionality; see ./README.md.
 import { PermissionFlagsBits } from "discord-api-types/v10";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import {
@@ -18,6 +20,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 
 import { DatabaseService } from "#~/Database";
 import type { DB } from "#~/db";
+import type { Job } from "#~/jobs/jobRunner";
 
 import {
   activateMembershipGateEffect,
@@ -25,7 +28,6 @@ import {
   processBatchEffect,
   scanFinalCursorEffect,
 } from "./bulkRoleAssignment";
-import type { Job } from "./jobRunner";
 
 // Helper to construct a DiscordAPIError with a given HTTP status.
 // 403 → ForbiddenError (non-retriable), 404 → ResourceMissingError (recovered).
@@ -67,7 +69,7 @@ const mockCompleteJob = vi.fn<AnyEffectFn>(() => Effect.void);
 const mockFailJob = vi.fn<AnyEffectFn>(() => Effect.void);
 const mockRecordJobError = vi.fn<AnyEffectFn>(() => Effect.void);
 
-vi.mock("./jobRunner", () => ({
+vi.mock("#~/jobs/jobRunner", () => ({
   checkpointJobEffect: (...args: unknown[]) => mockCheckpointJob(...args),
   completeJobEffect: (...args: unknown[]) => mockCompleteJob(...args),
   failJobEffect: (...args: unknown[]) => mockFailJob(...args),

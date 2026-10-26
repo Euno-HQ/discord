@@ -1,3 +1,5 @@
+// DEPRECATED EXPLORATION (membership gate). Not imported by any live code and
+// not registered anywhere. Preserved for future optionality; see ./README.md.
 import {
   ButtonStyle,
   OverwriteType,
@@ -34,9 +36,10 @@ import {
   type MessageComponentCommand,
   type ModalCommand,
 } from "#~/helpers/discord";
-import { activateMembershipGateEffect } from "#~/jobs/bulkRoleAssignment";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 import { getOrCreateUserThread } from "#~/models/userThreads";
+
+import { activateMembershipGateEffect } from "./bulkRoleAssignment";
 
 /**
  * Resolve any pending applications for a user who left the guild.

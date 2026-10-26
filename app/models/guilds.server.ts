@@ -13,6 +13,8 @@ export const SETTINGS = {
   restricted: "restricted",
   quorum: "quorum",
   deletionLog: "deletionLog",
+  // Legacy: only read by app/explorations/membershipGate (deprecated). Existing
+  // guild rows may still carry these keys; no migration needed to leave them.
   memberRole: "memberRole",
   applicationChannel: "applicationChannel",
 } as const;

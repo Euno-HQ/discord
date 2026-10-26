@@ -1,23 +1,24 @@
-import { formatDistanceToNowStrict } from "date-fns";
+import { formatDistanceStrict } from "date-fns";
 import {
   AuditLogEvent,
   type AutoModerationActionExecution,
   type AutoModerationRule,
   type Guild,
+  type GuildAuditLogsEntry,
   type GuildBan,
-  type GuildMember,
-  type PartialGuildMember,
-  type User,
 } from "discord.js";
 import { Effect } from "effect";
 
-import { resolveApplicationsForDeparture } from "#~/commands/memberApplications";
 import { logAutomod } from "#~/commands/report/automodLog.ts";
 import {
   AUDIT_LOG_WINDOW_MS,
   fetchAuditLogEntryOrNull,
 } from "#~/discord/auditLog";
-import { fetchAutomodRuleOrNull, fetchUser } from "#~/effects/discordSdk.ts";
+import {
+  fetchAutomodRuleOrNull,
+  fetchUser,
+  fetchUserOrNull,
+} from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 
 import { logModAction } from "./modActionLog";
@@ -120,94 +121,6 @@ export const banRemoveEffect = (ban: GuildBan) =>
     });
   }).pipe(Effect.withSpan("handleBanRemove"));
 
-const fetchKickAuditLog = (guild: Guild, user: User) =>
-  Effect.gen(function* () {
-    const entry = yield* fetchAuditLogEntryOrNull(
-      "ModActionLogger",
-      guild,
-      user.id,
-      AuditLogEvent.MemberKick,
-      (entries) =>
-        entries.find(
-          (e) =>
-            e.targetId === user.id &&
-            Date.now() - e.createdTimestamp < AUDIT_LOG_WINDOW_MS,
-        ),
-    );
-
-    // If no kick entry found after retries, user left voluntarily
-    if (!entry) {
-      yield* logEffect(
-        "debug",
-        "ModActionLogger",
-        "No kick entry found after retries, user left voluntarily",
-        { userId: user.id, guildId: guild.id },
-      );
-      return {
-        actionType: "left" as const,
-        user,
-        guild,
-        executor: undefined,
-        reason: undefined,
-      };
-    }
-
-    const { executor, reason } = entry;
-
-    if (!executor) {
-      yield* logEffect(
-        "warn",
-        "ModActionLogger",
-        `No executor found for audit log entry`,
-        { userId: user.id, guildId: guild.id },
-      );
-    }
-
-    // Skip if the bot performed this action
-    if (executor?.id === guild.client.user?.id) {
-      yield* logEffect("debug", "ModActionLogger", "Skipping self-kick", {
-        userId: user.id,
-        guildId: guild.id,
-      });
-      return undefined;
-    }
-
-    return {
-      actionType: "kick" as const,
-      user,
-      guild,
-      executor,
-      reason: reason ?? "",
-    };
-  });
-
-export const memberRemoveEffect = (member: GuildMember | PartialGuildMember) =>
-  Effect.gen(function* () {
-    const { guild, user } = member;
-
-    yield* logEffect("info", "ModActionLogger", "Member removal detected", {
-      userId: user.id,
-      guildId: guild.id,
-    });
-
-    // Resolve any pending applications for this user
-    yield* resolveApplicationsForDeparture(guild.id, user.id);
-
-    const auditLogs = yield* fetchKickAuditLog(guild, user);
-    if (!auditLogs || auditLogs.actionType === "left") {
-      return;
-    }
-
-    const { executor = null, reason = "" } = auditLogs;
-    yield* logModAction({
-      guild,
-      user,
-      actionType: "kick",
-      executor,
-      reason,
-    });
-  }).pipe(Effect.withSpan("handleMemberRemove"));
-
 export const automodActionEffect = (execution: AutoModerationActionExecution) =>
   Effect.gen(function* () {
     const {
@@ -254,102 +167,87 @@ export const automodActionEffect = (execution: AutoModerationActionExecution) =>
     });
   }).pipe(Effect.withSpan("handleAutomodAction"));
 
-export const memberUpdateEffect = (
-  oldMember: GuildMember | PartialGuildMember,
-  newMember: GuildMember | PartialGuildMember,
-) =>
+/**
+ * Kick / timeout logging via GuildAuditLogEntryCreate. Replaces the
+ * GuildMemberRemove/GuildMemberUpdate handlers, which need the privileged
+ * GuildMembers intent (revoked 2026-09). The executor and reason come
+ * straight from the entry, so no audit-log polling is needed.
+ */
+export const auditLogEntryEffect = (entry: GuildAuditLogsEntry, guild: Guild) =>
   Effect.gen(function* () {
-    const { guild, user } = newMember;
-    const oldTimeout = oldMember.communicationDisabledUntilTimestamp;
-    const newTimeout = newMember.communicationDisabledUntilTimestamp;
+    const { action, targetId, executorId } = entry;
+    const isAutomod =
+      action === AuditLogEvent.AutoModerationUserCommunicationDisabled;
+    const isKick = action === AuditLogEvent.MemberKick;
+    const timeoutChange =
+      action === AuditLogEvent.MemberUpdate || isAutomod
+        ? entry.changes.find((c) => c.key === "communication_disabled_until")
+        : undefined;
 
-    // Determine if this is a timeout applied or removed
-    const isTimeoutApplied = newTimeout !== null && newTimeout > Date.now();
-    const isTimeoutRemoved =
-      oldTimeout !== null && oldTimeout > Date.now() && newTimeout === null;
+    if (!targetId || (!isKick && !isAutomod && !timeoutChange)) return;
 
-    // No timeout change relevant to us
-    if (!isTimeoutApplied && !isTimeoutRemoved) {
-      return;
-    }
-
-    // Capture duration immediately before audit log lookup
-    const duration = isTimeoutApplied
-      ? formatDistanceToNowStrict(new Date(newTimeout))
-      : undefined;
-
-    yield* logEffect(
-      "info",
-      "ModActionLogger",
-      isTimeoutApplied ? "Timeout detected" : "Timeout removal detected",
-      {
-        userId: user.id,
-        guildId: guild.id,
-        duration,
-      },
-    );
-
-    // Look for a manual timeout first (MemberUpdate audit log)
-    let entry = yield* fetchAuditLogEntryOrNull(
-      "ModActionLogger",
-      guild,
-      user.id,
-      AuditLogEvent.MemberUpdate,
-      (entries) =>
-        entries.find((e) => {
-          if (e.targetId !== user.id) return false;
-          if (Date.now() - e.createdTimestamp >= AUDIT_LOG_WINDOW_MS)
-            return false;
-          const timeoutChange = e.changes?.find(
-            (change) => change.key === "communication_disabled_until",
-          );
-          return timeoutChange !== undefined;
-        }),
-    );
-
-    // Fall back to automod timeout if no manual entry found
-    let isAutomod = false;
-    if (!entry && isTimeoutApplied) {
-      const automodEntry = yield* fetchAuditLogEntryOrNull(
-        "ModActionLogger",
-        guild,
-        user.id,
-        AuditLogEvent.AutoModerationUserCommunicationDisabled,
-        (entries) =>
-          entries.find((e) => {
-            if (e.targetId !== user.id) return false;
-            if (Date.now() - e.createdTimestamp >= AUDIT_LOG_WINDOW_MS)
-              return false;
-            return true;
-          }),
-      );
-      if (automodEntry) {
-        isAutomod = true;
-        entry = automodEntry;
-      }
-    }
-
+    const botId = guild.client.user?.id;
     // For automod, the executor is the rule creator (misleading), so use null
-    const executor = isAutomod ? null : (entry?.executor ?? null);
-    const reason = entry?.reason ?? "";
+    const executor = isAutomod
+      ? null
+      : (entry.executor ??
+        (executorId ? yield* fetchUserOrNull(guild.client, executorId) : null));
+    const reason = entry.reason ?? "";
 
     // Skip if the bot performed this action (it's already logged elsewhere)
-    if (executor?.id === guild.client.user?.id) {
-      yield* logEffect("debug", "ModActionLogger", "Skipping self-timeout", {
-        userId: user.id,
+    if (!isAutomod && executorId && executorId === botId) {
+      yield* logEffect("debug", "ModActionLogger", "Skipping self-action", {
+        targetId,
         guildId: guild.id,
+        action,
       });
       return;
     }
 
-    if (isTimeoutApplied) {
+    const user = yield* fetchUser(guild.client, targetId);
+
+    if (isKick) {
+      yield* logEffect("info", "ModActionLogger", "Kick detected", {
+        userId: user.id,
+        guildId: guild.id,
+      });
+      yield* logModAction({
+        guild,
+        user,
+        actionType: "kick",
+        executor,
+        reason,
+      });
+      return;
+    }
+
+    // Timeout applied (new value is a future ISO timestamp) or removed.
+    // Automod entries may carry no change; they are always an application.
+    const newValue: unknown = timeoutChange?.new;
+    const until =
+      typeof newValue === "string" ? new Date(newValue).getTime() : null;
+    const isApplied = isAutomod || (until !== null && until > Date.now());
+    const isRemoved = !isApplied && until === null;
+    if (!isApplied && !isRemoved) return;
+
+    yield* logEffect(
+      "info",
+      "ModActionLogger",
+      isApplied ? "Timeout detected" : "Timeout removal detected",
+      { userId: user.id, guildId: guild.id },
+    );
+
+    if (isApplied) {
       yield* logModAction({
         guild,
         user,
         actionType: "timeout",
         executor,
         reason,
-        duration: duration!,
+        duration:
+          until !== null
+            ? formatDistanceStrict(new Date(until), entry.createdTimestamp)
+            : "unknown duration",
         isAutomod,
       });
     } else {
@@ -361,4 +259,4 @@ export const memberUpdateEffect = (
         reason,
       });
     }
-  }).pipe(Effect.withSpan("handleMemberUpdate"));
+  }).pipe(Effect.withSpan("handleAuditLogEntry"));

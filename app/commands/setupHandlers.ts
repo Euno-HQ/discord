@@ -34,9 +34,7 @@ export interface PendingSetup {
   deletionLogChannel: string | null; // channel ID, CREATE_SENTINEL, or null (disabled)
   honeypotChannel: string | null; // channel ID, CREATE_SENTINEL, or null (disabled)
   ticketChannel: string | null; // channel ID, CREATE_SENTINEL, or null (disabled)
-  applicationChannel: string | null; // channel ID, CREATE_SENTINEL, or null (disabled)
   restrictedRoleId?: string; // undefined = skip
-  memberRoleId?: string; // role ID or undefined
   createdAt: number;
 }
 
@@ -63,9 +61,7 @@ export function defaultSetup(): Omit<PendingSetup, "createdAt"> {
     deletionLogChannel: CREATE_SENTINEL,
     honeypotChannel: CREATE_SENTINEL,
     ticketChannel: CREATE_SENTINEL,
-    applicationChannel: null, // disabled by default
     restrictedRoleId: undefined,
-    memberRoleId: undefined,
   };
 }
 
@@ -75,9 +71,7 @@ const FIELD_MAP = {
   deletionLog: "deletionLogChannel",
   honeypot: "honeypotChannel",
   tickets: "ticketChannel",
-  applications: "applicationChannel",
   restrictedRole: "restrictedRoleId",
-  memberRole: "memberRoleId",
 } as const;
 
 type FieldKey = keyof typeof FIELD_MAP;
@@ -125,7 +119,6 @@ const OPTIONAL_CHANNELS = [
   { field: "deletionLog", label: "Deletion Log" },
   { field: "honeypot", label: "Honeypot" },
   { field: "tickets", label: "Tickets" },
-  { field: "applications", label: "Member Applications" },
 ] as const;
 
 function v2Payload(payload: object) {
@@ -408,50 +401,6 @@ export function buildSetupScreen2Message(
                 },
               ]
             : []),
-          ...(state.applicationChannel !== null
-            ? [
-                {
-                  type: ComponentType.TextDisplay,
-                  content:
-                    "**Application Channel** — Where members submit applications\n**Member Role** — Granted to approved applicants; all current members will receive this role",
-                },
-                {
-                  type: ComponentType.ActionRow,
-                  components: [
-                    {
-                      type: ComponentType.ChannelSelect,
-                      custom_id: `setup-sel|${guildId}|applications||2`,
-                      placeholder: "Create new #apply-here (default)",
-                      channel_types: [ChannelType.GuildText],
-                      ...(channelDefaultValues(state.applicationChannel)
-                        ? {
-                            default_values: channelDefaultValues(
-                              state.applicationChannel,
-                            ),
-                          }
-                        : {}),
-                    },
-                  ],
-                },
-                {
-                  type: ComponentType.ActionRow,
-                  components: [
-                    {
-                      type: ComponentType.RoleSelect,
-                      custom_id: `setup-sel|${guildId}|memberRole||2`,
-                      placeholder: "Create new @Member role (default)",
-                      ...(state.memberRoleId
-                        ? {
-                            default_values: roleDefaultValues(
-                              state.memberRoleId,
-                            ),
-                          }
-                        : {}),
-                    },
-                  ],
-                },
-              ]
-            : []),
           {
             type: ComponentType.TextDisplay,
             content:
@@ -551,22 +500,6 @@ export function buildSetupConfirmMessage(
     ["Deletion Log", channelValue(state.deletionLogChannel, "deletion-log")],
     ["Honeypot", channelValue(state.honeypotChannel, "honeypot")],
     ["Tickets", channelValue(state.ticketChannel, "contact-mods")],
-    [
-      "Member Applications",
-      state.applicationChannel !== null
-        ? channelValue(state.applicationChannel, "apply-here")
-        : "Disabled",
-    ],
-    ...(state.applicationChannel !== null
-      ? [
-          [
-            "Member Role",
-            state.memberRoleId
-              ? roleValue(state.memberRoleId)
-              : "Create new @Member",
-          ],
-        ]
-      : []),
     ["Restricted Role", roleValue(state.restrictedRoleId)],
   ];
 
@@ -587,17 +520,6 @@ export function buildSetupConfirmMessage(
     state.deletionLogChannel === CREATE_SENTINEL
   )
     adds.push("Euno Logs category");
-
-  if (state.applicationChannel !== null) {
-    if (state.applicationChannel === CREATE_SENTINEL)
-      adds.push("#apply-here channel");
-    if (!state.memberRoleId) adds.push("@Member role");
-    modifies.push("@everyone — deny View Channels (server-wide)");
-    modifies.push(
-      `${state.memberRoleId ? roleValue(state.memberRoleId) : "@Member"} — grant View Channels`,
-    );
-    modifies.push("All current members — grant Member role");
-  }
 
   const deltaLines: string[] = [];
   if (adds.length > 0)
@@ -1037,11 +959,6 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           deletionLogChannel: state.deletionLogChannel ?? undefined,
           honeypotChannel: state.honeypotChannel ?? undefined,
           ticketChannel: state.ticketChannel ?? undefined,
-          applicationChannel: state.applicationChannel ?? undefined,
-          memberRoleId:
-            state.applicationChannel !== null && !state.memberRoleId
-              ? CREATE_SENTINEL
-              : state.memberRoleId,
         });
 
         yield* logEffect(
@@ -1073,15 +990,10 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           result.ticketChannelId
             ? `**Tickets:** <#${result.ticketChannelId}>${result.created.includes("contact-mods") ? " (created)" : ""}`
             : "**Tickets:** Disabled",
-          result.applicationChannelId
-            ? `**Applications:** <#${result.applicationChannelId}>${result.created.includes("apply-here") ? " (created)" : ""}`
-            : "**Applications:** Disabled",
           ...(state.restrictedRoleId
             ? [`**Restricted Role:** <@&${state.restrictedRoleId}>`]
             : []),
         ];
-
-        const isAsyncSetup = !!result.applicationChannelId;
 
         yield* interactionEditReply(
           interaction,
@@ -1090,24 +1002,16 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
             components: [
               {
                 type: ComponentType.Container,
-                accent_color: isAsyncSetup ? 0x5865f2 : 0x00cc00,
+                accent_color: 0x00cc00,
                 components: [
                   {
                     type: ComponentType.TextDisplay,
-                    content: isAsyncSetup
-                      ? "## Setup in Progress"
-                      : "## Setup Complete ✓",
+                    content: "## Setup Complete ✓",
                   },
                   {
                     type: ComponentType.TextDisplay,
-                    content: isAsyncSetup
-                      ? `Created channels and roles. The following will happen automatically:\n\n` +
-                        `1. The **Member** role is being assigned to all existing members. This can take several hours for large servers.\n` +
-                        `2. Progress updates will be posted to <#${result.modLogChannelId}> every 30 minutes.\n` +
-                        `3. When complete, a button will appear in <#${result.modLogChannelId}> to activate the membership gate.\n` +
-                        `4. The **#apply-here** channel is hidden until you activate the gate.\n\n` +
-                        `Until the gate is activated, the server will continue to work normally.`
-                      : "All channels and features have been configured. Run `/check-requirements` to verify everything is working.",
+                    content:
+                      "All channels and features have been configured. Run `/check-requirements` to verify everything is working.",
                   },
                   { type: ComponentType.Separator },
                   {
