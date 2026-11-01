@@ -1,8 +1,6 @@
 import "react-router";
 
 import type { Server as HttpServer } from "node:http";
-import bodyParser from "body-parser";
-import { verifyKey } from "discord-interactions";
 import { Effect, Exit, Fiber, Scope } from "effect";
 import express from "express";
 import pinoHttp from "pino-http";
@@ -34,9 +32,6 @@ import { deletionLoggerPipeline } from "#~/discord/pipelines/deletionLogger";
 import { modActionLoggerPipeline } from "#~/discord/pipelines/modActionLogger";
 import { onboardGuildPipeline } from "#~/discord/pipelines/onboardGuild";
 import { reactjiChannelerPipeline } from "#~/discord/pipelines/reactjiChanneler";
-import { applicationKey } from "#~/helpers/env.server";
-// Side-effect import: registers job handler and notification builder
-
 import { runJobRunner } from "#~/jobs/jobRunner";
 
 import { runtime, warmRuntime } from "./AppRuntime";
@@ -65,28 +60,6 @@ app.use(
     build: () => import("virtual:react-router/server-build"),
   }),
 );
-
-// Discord signature verification
-app.post("/webhooks/discord", bodyParser.json(), async (req, res, next) => {
-  const isValidRequest = await verifyKey(
-    JSON.stringify(req.body),
-    req.header("X-Signature-Ed25519") ?? "bum signature",
-    req.header("X-Signature-Timestamp") ?? "bum timestamp",
-    applicationKey,
-  );
-  console.log("WEBHOOK", "isValidRequest:", isValidRequest);
-  if (!isValidRequest) {
-    console.log("[REQ] Invalid request signature");
-    res.status(401).send({ message: "Bad request signature" });
-    return;
-  }
-  if (req.body.type === 1) {
-    res.json({ type: 1, data: {} });
-    return;
-  }
-
-  next();
-});
 
 // Track whether one-time setup (gateway, schedulers, job runner)
 // has already run. These must not re-register on HMR reloads — the closures

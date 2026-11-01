@@ -20,7 +20,6 @@ const Env = Schema.Struct({
   ),
   SESSION_SECRET: Optional,
   EMERGENCY_WEBHOOK: Optional,
-  DISCORD_PUBLIC_KEY: Required,
   DISCORD_SECRET: Required,
   DISCORD_APP_ID: Required,
   DISCORD_HASH: Required,
@@ -40,7 +39,6 @@ const Env = Schema.Struct({
 const testEnv: Record<string, string> = {
   DATABASE_URL: ":memory:",
   SESSION_SECRET: "test-session-secret",
-  DISCORD_PUBLIC_KEY: "DISCORD_PUBLIC_KEY",
   DISCORD_SECRET: "DISCORD_SECRET",
   DISCORD_APP_ID: "DISCORD_APP_ID",
   DISCORD_HASH: "DISCORD_HASH",
@@ -80,7 +78,6 @@ if (!isTest) {
 export const databaseUrl = env.DATABASE_URL;
 export const sessionSecret = env.SESSION_SECRET ?? "";
 export const emergencyWebhook = env.EMERGENCY_WEBHOOK ?? "";
-export const applicationKey = env.DISCORD_PUBLIC_KEY;
 export const discordSecret = env.DISCORD_SECRET;
 export const applicationId = env.DISCORD_APP_ID;
 export const discordToken = env.DISCORD_HASH;
