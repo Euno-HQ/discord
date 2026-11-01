@@ -2,7 +2,7 @@ import "react-router";
 
 import bodyParser from "body-parser";
 import { verifyKey } from "discord-interactions";
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, Scope } from "effect";
 import express from "express";
 import pinoHttp from "pino-http";
 
@@ -95,6 +95,9 @@ app.post("/webhooks/discord", bodyParser.json(), async (req, res, next) => {
 declare global {
   var __discordOneTimeSetupDone: boolean | undefined;
   var __pipelineFibers: Fiber.Fiber<unknown, unknown>[] | undefined;
+  // Owns the gateway's listeners, login fiber, and client teardown (see
+  // initDiscordBot). Created once; closed by graceful shutdown.
+  var __gatewayScope: Scope.Closeable | undefined;
 }
 
 // Fork a long-lived fiber under restart supervision (see effects/supervise.ts):
@@ -123,7 +126,10 @@ const startup = Effect.gen(function* () {
   ]);
 
   yield* logEffect("debug", "Server", "initializing Discord bot");
-  const discordClient = yield* initDiscordBot;
+  globalThis.__gatewayScope ??= yield* Scope.make();
+  const discordClient = yield* initDiscordBot.pipe(
+    Scope.provide(globalThis.__gatewayScope),
+  );
   const connection = getBotConnection();
   const botConnected = connection.state === "connected";
 

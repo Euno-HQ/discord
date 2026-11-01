@@ -9,7 +9,7 @@ import { handleGuildCreate, handleGuildDelete } from "./onboardGuildHandlers";
 
 export const onboardGuildPipeline: Effect.Effect<void, never, RuntimeContext> =
   Effect.gen(function* () {
-    const { stream } = yield* DiscordEventBus;
+    const { critical: stream } = yield* DiscordEventBus;
 
     yield* stream.pipe(
       Stream.filter(

@@ -30,7 +30,7 @@ const isStandardMessage = (e: GuildMemberMessage) =>
 
 export const automodPipeline: Effect.Effect<void, never, RuntimeContext> =
   Effect.gen(function* () {
-    const { stream } = yield* DiscordEventBus;
+    const { bulk: stream } = yield* DiscordEventBus;
     const spamService = yield* SpamDetectionService;
 
     yield* stream.pipe(

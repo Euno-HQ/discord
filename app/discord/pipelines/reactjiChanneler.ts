@@ -12,7 +12,7 @@ export const reactjiChannelerPipeline: Effect.Effect<
   never,
   RuntimeContext
 > = Effect.gen(function* () {
-  const { stream } = yield* DiscordEventBus;
+  const { bulk: stream } = yield* DiscordEventBus;
 
   yield* stream.pipe(
     Stream.filter((e) => e.type === "MessageReactionAdd"),

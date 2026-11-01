@@ -22,7 +22,7 @@ export const modActionLoggerPipeline: Effect.Effect<
   never,
   RuntimeContext
 > = Effect.gen(function* () {
-  const { stream } = yield* DiscordEventBus;
+  const { critical: stream } = yield* DiscordEventBus;
 
   yield* stream.pipe(
     Stream.filter(

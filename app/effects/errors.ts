@@ -157,6 +157,13 @@ export class TransientError extends Data.TaggedError("TransientError")<{
   cause: Error;
 }> {}
 
+/** A discord.js Client lifecycle call (login, destroy, guild fetch) rejected. */
+export class DiscordClientError extends Data.TaggedError("DiscordClientError")<{
+  operation: "login" | "destroy" | "fetchGuilds";
+  attempt?: number;
+  cause: unknown;
+}> {}
+
 /** Non-retriable 403: the bot lacks a Discord permission. */
 export class ForbiddenError extends Data.TaggedError("ForbiddenError")<{
   source: "discord";
