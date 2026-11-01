@@ -48,6 +48,14 @@ jobs:
       - name: Type check
         run: npm run typecheck --if-present
 
+      # tsc doesn't load language-service plugins, so the Effect diagnostics
+      # only gate CI through these.
+      - name: Effect diagnostics
+        run: npm run check:effect
+
+      - name: Effect debt ratchet
+        run: npm run effect:debt
+
   vitest:
     name: Vitest
     runs-on: ubuntu-latest
