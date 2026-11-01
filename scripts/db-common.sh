@@ -1,6 +1,9 @@
 #!/bin/bash
 # Shared constants and utilities for database maintenance scripts.
 # Source this file: source "$(dirname "$0")/db-common.sh"
+# These constants are consumed by the scripts that source this file, which
+# the linter can't see when checking this file on its own.
+# shellcheck disable=SC2034
 
 STATEFULSET_NAME="mod-bot-set"
 POD_NAME="mod-bot-set-0"
