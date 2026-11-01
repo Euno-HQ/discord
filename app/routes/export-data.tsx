@@ -104,7 +104,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
         if (messageStats.length > 0) {
           exportData.message_statistics = messageStats.map((stat) => ({
-            sent_at: new Date(stat.sent_at * 1000).toISOString(),
+            sent_at: new Date(stat.sent_at).toISOString(),
             author_id: stat.author_id,
             channel_id: stat.channel_id,
             channel_category: stat.channel_category,
