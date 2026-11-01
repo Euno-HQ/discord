@@ -1,6 +1,7 @@
 import { ActivityType, Client, GatewayIntentBits, Partials } from "discord.js";
 import { Context, Layer } from "effect";
 
+import { botRest } from "#~/discord/botRest.server";
 import { MESSAGE_CONTENT_INTENT } from "#~/discord/intents";
 import { botInviteUrl } from "#~/helpers/botPermissions";
 import { discordToken } from "#~/helpers/env.server";
@@ -9,8 +10,8 @@ import Sentry from "#~/helpers/sentry.server";
 
 // Construct the discord.js Client. Factored out so the Layer owns construction
 // rather than a bare module-level singleton.
-const makeClient = (): Client =>
-  new Client({
+const makeClient = (): Client => {
+  const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildEmojisAndStickers,
@@ -25,6 +26,10 @@ const makeClient = (): Client =>
     ],
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
   });
+  // Share one bot-token REST (and its rate-limit buckets) with web + jobs.
+  client.rest = botRest;
+  return client;
+};
 
 /**
  * The bot's discord.js Client, exposed as an Effect service.
@@ -33,9 +38,9 @@ const makeClient = (): Client =>
  * bot-side effect can `yield* DiscordClient` to reach it. The single instance
  * is created once when the Layer is built and held for the process lifetime.
  *
- * NOTE: this is deliberately NOT the path web/shared code uses to talk to
- * Discord — that's the REST-based `ssrDiscordSdk` in `app/discord/api.ts`,
- * which stays separate pending the #317 boundary decision.
+ * Web/shared code talks to Discord through `ssrDiscordSdk` (`app/discord/api.ts`)
+ * rather than this client, but both use the same REST instance (`client.rest`
+ * is `botRest`), so rate limits are tracked once.
  */
 export class DiscordClient extends Context.Service<DiscordClient, Client>()(
   "DiscordClient",

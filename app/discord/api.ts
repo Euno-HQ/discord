@@ -2,14 +2,15 @@ import { REST } from "discord.js";
 import { redirect } from "react-router";
 
 import { runEffect } from "#~/AppRuntime";
-import { discordToken } from "#~/helpers/env.server";
+import { botRest } from "#~/discord/botRest.server";
 import { log } from "#~/helpers/observability";
 import {
   refreshAndPersistDiscordSession,
   retrieveDiscordToken,
 } from "#~/models/session.server.js";
 
-export const ssrDiscordSdk = new REST({ version: "10" }).setToken(discordToken);
+/** Bot-token REST, shared with the gateway client (see botRest.server.ts). */
+export const ssrDiscordSdk = botRest;
 
 // Single-flight dedupe for Discord OAuth token refresh (#393).
 //

@@ -18,6 +18,8 @@ const discordClient = vi.hoisted(() => ({
 vi.mock("#~/helpers/env.server", () => ({
   discordToken: "test-bot-token",
 }));
+// A real REST arms sweeper intervals, which runAllTimersAsync would chase forever.
+vi.mock("#~/discord/botRest.server", () => ({ botRest: {} }));
 vi.mock("#~/helpers/botPermissions", () => ({ botInviteUrl: () => "invite" }));
 vi.mock("#~/helpers/observability", () => ({
   // eslint-disable-next-line @typescript-eslint/no-empty-function
