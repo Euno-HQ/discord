@@ -35,7 +35,7 @@ export const fetchFeatureFlags = (
     return Effect.tryPromise({
       try: () => posthog.getAllFlags(guildId, { groups: { guild: guildId } }),
       catch: (cause) => new PostHogError({ operation: "getAllFlags", cause }),
-    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    }).pipe(Effect.catch(() => Effect.succeed(null)));
   });
 
 export const fetchStripeDetails = (
@@ -53,9 +53,9 @@ export const fetchStripeDetails = (
     return { paymentMethods, invoices };
   });
 
-export type PaymentMethods = Effect.Effect.Success<
+export type PaymentMethods = Effect.Success<
   ReturnType<typeof StripeService.listPaymentMethods>
 >;
-export type Invoices = Effect.Effect.Success<
+export type Invoices = Effect.Success<
   ReturnType<typeof StripeService.listInvoices>
 >;

@@ -8,7 +8,7 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { DatabaseService, type SqlError } from "#~/Database";
+import { db, run, type DatabaseService, type SqlError } from "#~/Database";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import {
   interactionDeferUpdate,
@@ -140,7 +140,6 @@ export const initSetupForm = (
 
     // Try to populate from existing guild settings
     const defaults = defaultSetup();
-    const db = yield* DatabaseService;
     const guild = yield* fetchGuild(guildId);
     if (guild?.settings) {
       const settings = JSON.parse(guild.settings) as Record<string, string>;
@@ -152,10 +151,12 @@ export const initSetupForm = (
       if (settings.restricted) defaults.restrictedRoleId = settings.restricted;
 
       // Check for existing honeypot channel
-      const honeypotRows = yield* db
-        .selectFrom("honeypot_config")
-        .select("channel_id")
-        .where("guild_id", "=", guildId);
+      const honeypotRows = yield* run(
+        db
+          .selectFrom("honeypot_config")
+          .select("channel_id")
+          .where("guild_id", "=", guildId),
+      );
       const honeypot = honeypotRows[0];
       if (honeypot) {
         defaults.honeypotChannel = honeypot.channel_id;
@@ -165,10 +166,12 @@ export const initSetupForm = (
 
       // tickets_config has no guild_id, so match by channel ownership
       if (guildChannelIds) {
-        const ticketRowsResult = yield* db
-          .selectFrom("tickets_config")
-          .select("channel_id")
-          .where("channel_id", "is not", null);
+        const ticketRowsResult = yield* run(
+          db
+            .selectFrom("tickets_config")
+            .select("channel_id")
+            .where("channel_id", "is not", null),
+        );
         const ticketRows = ticketRowsResult[0];
         if (
           ticketRows?.channel_id &&
@@ -652,7 +655,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           renderScreen(guildId, state, screen),
         );
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect("error", "Commands", "setup-sel handler failed", {
               error,
@@ -701,7 +704,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           renderScreen(guildId, state, screen),
         );
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect(
               "error",
@@ -754,7 +757,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           buildSetupScreen2Message(guildId, state),
         );
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect("error", "Commands", "setup-next handler failed", {
               error,
@@ -792,7 +795,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           buildSetupScreen1Message(guildId, state),
         );
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect(
               "error",
@@ -856,7 +859,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           buildSetupConfirmMessage(guildId, state, permCheck),
         );
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect(
               "error",
@@ -881,7 +884,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
                   },
                 ],
               }),
-            ).pipe(Effect.catchAll(() => Effect.void));
+            ).pipe(Effect.catch(() => Effect.void));
           }),
         ),
         Effect.withSpan("setupContinueHandler"),
@@ -915,7 +918,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           buildSetupScreen2Message(guildId, state),
         );
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect("error", "Commands", "setup-back handler failed", {
               error,
@@ -1024,7 +1027,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
           }),
         );
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect("error", "Commands", "setup-exec handler failed", {
               guildId: interaction.guildId,
@@ -1049,7 +1052,7 @@ export const SetupComponentCommands: MessageComponentCommand[] = [
                   },
                 ],
               }),
-            ).pipe(Effect.catchAll(() => Effect.void));
+            ).pipe(Effect.catch(() => Effect.void));
           }),
         ),
         Effect.withSpan("setupExecHandler", {

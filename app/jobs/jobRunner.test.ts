@@ -1,4 +1,5 @@
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime, type Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import {
   afterAll,
   beforeAll,
@@ -9,13 +10,7 @@ import {
   vi,
 } from "vitest";
 
-import * as Reactivity from "@effect/experimental/Reactivity";
-import { SqlClient } from "@effect/sql";
-import * as Sqlite from "@effect/sql-kysely/Sqlite";
-import { SqliteClient } from "@effect/sql-sqlite-node";
-
-import { DatabaseService } from "#~/Database";
-import type { DB } from "#~/db";
+import { db, makeDatabaseLayer, run } from "#~/Database";
 
 import {
   advancePhaseEffect,
@@ -45,20 +40,13 @@ vi.mock("./bulkRoleAssignment", () => ({
 // In-memory SQLite test layer (shared via ManagedRuntime)
 // ---------------------------------------------------------------------------
 
-const TestSqliteLive = Layer.scoped(
-  SqlClient.SqlClient,
-  SqliteClient.make({ filename: ":memory:" }),
-).pipe(Layer.provide(Reactivity.layer));
+const TestDbLive = makeDatabaseLayer(":memory:");
 
-const TestKyselyLive = Layer.effect(DatabaseService, Sqlite.make<DB>()).pipe(
-  Layer.provide(TestSqliteLive),
-);
-
-const TestLayer = Layer.mergeAll(TestSqliteLive, TestKyselyLive);
+const TestLayer = TestDbLive;
 
 const testRuntime = ManagedRuntime.make(TestLayer);
 
-type TestR = Layer.Layer.Success<typeof TestLayer>;
+type TestR = Layer.Success<typeof TestLayer>;
 
 const runTest = <A, E>(effect: Effect.Effect<A, E, TestR>) =>
   testRuntime.runPromise(effect);
@@ -135,19 +123,16 @@ const insertJob = (overrides: Partial<Job> = {}) => {
   };
 
   return Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db.insertInto("background_jobs").values(job);
+    yield* run(db.insertInto("background_jobs").values(job));
     return job;
   });
 };
 
 const fetchJob = (jobId: string) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    const [row] = yield* db
-      .selectFrom("background_jobs")
-      .selectAll()
-      .where("id", "=", jobId);
+    const [row] = yield* run(
+      db.selectFrom("background_jobs").selectAll().where("id", "=", jobId),
+    );
     return row as Job | undefined;
   });
 

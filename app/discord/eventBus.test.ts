@@ -15,7 +15,7 @@ vi.mock("#~/helpers/observability", () => ({
 }));
 vi.mock("#~/discord/client.server", () => ({
   client: {},
-  DiscordClient: Context.GenericTag("DiscordClient"),
+  DiscordClient: Context.Service("DiscordClient"),
   DiscordClientLayer: Layer.empty,
 }));
 

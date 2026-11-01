@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { Context, Effect, Layer } from "effect";
 import type { Selectable } from "kysely";
 
-import { DatabaseService, type DB, type SqlError } from "#~/Database";
+import { DatabaseService, db, type DB, type SqlError } from "#~/Database";
 import { NotFoundError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 
@@ -27,15 +27,14 @@ export interface IUserService {
   ) => Effect.Effect<void, SqlError>;
 }
 
-export class UserService extends Context.Tag("UserService")<
-  UserService,
-  IUserService
->() {}
+export class UserService extends Context.Service<UserService, IUserService>()(
+  "UserService",
+) {}
 
 export const UserServiceLive = Layer.effect(
   UserService,
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
+    const { run } = yield* DatabaseService;
 
     return {
       getUserById: (id) =>
@@ -43,10 +42,9 @@ export const UserServiceLive = Layer.effect(
           yield* logEffect("debug", "UserService", "Fetching user by ID", {
             userId: id,
           });
-          const [user] = yield* db
-            .selectFrom("users")
-            .selectAll()
-            .where("id", "=", id);
+          const [user] = yield* run(
+            db.selectFrom("users").selectAll().where("id", "=", id),
+          );
           yield* logEffect(
             "debug",
             "UserService",
@@ -68,10 +66,12 @@ export const UserServiceLive = Layer.effect(
             "Fetching user by external ID",
             { externalId },
           );
-          const [user] = yield* db
-            .selectFrom("users")
-            .selectAll()
-            .where("externalId", "=", externalId);
+          const [user] = yield* run(
+            db
+              .selectFrom("users")
+              .selectAll()
+              .where("externalId", "=", externalId),
+          );
           return user;
         }).pipe(
           Effect.withSpan("UserService.getUserByExternalId", {
@@ -81,10 +81,9 @@ export const UserServiceLive = Layer.effect(
 
       getUserByEmail: (email) =>
         Effect.gen(function* () {
-          const [user] = yield* db
-            .selectFrom("users")
-            .selectAll()
-            .where("email", "=", email);
+          const [user] = yield* run(
+            db.selectFrom("users").selectAll().where("email", "=", email),
+          );
           return user;
         }).pipe(Effect.withSpan("UserService.getUserByEmail")),
 
@@ -95,17 +94,19 @@ export const UserServiceLive = Layer.effect(
             externalId,
             authProvider: "discord",
           });
-          const [row] = yield* db
-            .insertInto("users")
-            .values([
-              {
-                id: randomUUID(),
-                email,
-                externalId,
-                authProvider: "discord",
-              },
-            ])
-            .returningAll();
+          const [row] = yield* run(
+            db
+              .insertInto("users")
+              .values([
+                {
+                  id: randomUUID(),
+                  email,
+                  externalId,
+                  authProvider: "discord",
+                },
+              ])
+              .returningAll(),
+          );
           if (!row) {
             return yield* Effect.fail(
               new NotFoundError({ resource: "user", id: externalId }),
@@ -126,7 +127,7 @@ export const UserServiceLive = Layer.effect(
 
       deleteUserByEmail: (email) =>
         Effect.gen(function* () {
-          yield* db.deleteFrom("users").where("email", "=", email);
+          yield* run(db.deleteFrom("users").where("email", "=", email));
         }).pipe(Effect.withSpan("UserService.deleteUserByEmail")),
     };
   }),

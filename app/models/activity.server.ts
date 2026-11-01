@@ -2,9 +2,10 @@ import { Data, Effect } from "effect";
 import { sql } from "kysely";
 
 import {
-  DatabaseService,
+  db,
+  run,
+  type DatabaseService,
   type DB,
-  type EffectKysely,
   type SqlError,
 } from "#~/Database";
 import { logEffect } from "#~/effects/observability";
@@ -40,11 +41,10 @@ export type ActivityError = SqlError | AnalyticsFetchError;
 
 /**
  * Creates a base query for message_stats filtered by guild, date range, and optionally user.
- * Takes db as an explicit parameter so this builder can be used from both
- * Effect-native callers (service methods) and legacy async callers (cohortAnalysis.ts).
+ * Pure builder (no IO): used from both Effect-native callers (service methods)
+ * and legacy async callers (cohortAnalysis.ts); execute it with `run`.
  */
 export function createMessageStatsQuery(
-  db: EffectKysely,
   guildId: MessageStats["guild_id"],
   start: string,
   end: string,
@@ -93,8 +93,6 @@ export const getUserMessageAnalyticsEffect = (
   end: string,
 ): Effect.Effect<UserMessageAnalytics, ActivityError, DatabaseService> =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     yield* logEffect("debug", "Activity", "getUserMessageAnalytics started", {
       guildId,
       userId,
@@ -103,7 +101,7 @@ export const getUserMessageAnalyticsEffect = (
     });
 
     // Build daily stats query
-    const dailyQuery = createMessageStatsQuery(db, guildId, start, end, userId)
+    const dailyQuery = createMessageStatsQuery(guildId, start, end, userId)
       .select(({ fn, eb, lit }) => [
         fn.countAll<number>().as("messages"),
         fn.sum<number>("word_count").as("word_count"),
@@ -123,13 +121,7 @@ export const getUserMessageAnalyticsEffect = (
       .groupBy("date");
 
     // Build category stats query
-    const categoryQuery = createMessageStatsQuery(
-      db,
-      guildId,
-      start,
-      end,
-      userId,
-    )
+    const categoryQuery = createMessageStatsQuery(guildId, start, end, userId)
       .select(({ fn }) => [
         fn.count<number>("channel_category").as("messages"),
         "channel_category",
@@ -143,13 +135,7 @@ export const getUserMessageAnalyticsEffect = (
       .groupBy("channel_category");
 
     // Build channel stats query
-    const channelQuery = createMessageStatsQuery(
-      db,
-      guildId,
-      start,
-      end,
-      userId,
-    )
+    const channelQuery = createMessageStatsQuery(guildId, start, end, userId)
       // @ts-expect-error - Kysely selector typing is complex
       .select(({ fn }) => [
         fn.count<number>("channel_id").as("messages"),
@@ -171,9 +157,12 @@ export const getUserMessageAnalyticsEffect = (
       .groupBy("channel_id");
 
     const [dailyResults, categoryBreakdown, channelBreakdown] =
-      yield* Effect.all([dailyQuery, categoryQuery, channelQuery], {
-        concurrency: "unbounded",
-      });
+      yield* Effect.all(
+        [run(dailyQuery), run(categoryQuery), run(channelQuery)],
+        {
+          concurrency: "unbounded",
+        },
+      );
 
     const userInfo = yield* Effect.tryPromise({
       try: () => getOrFetchUser(userId),
@@ -274,8 +263,6 @@ export const getTopParticipantsEffect = (
   intervalEnd: string,
 ): Effect.Effect<TopParticipant[], ActivityError, DatabaseService> =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     yield* logEffect("debug", "Activity", "getTopParticipants started", {
       guildId,
       intervalStart,
@@ -288,9 +275,8 @@ export const getTopParticipantsEffect = (
       wordThreshold: 2200,
     };
 
-    // Build top members query directly (avoid CTE which conflicts with EffectKysely proxy)
+    // Build top members query directly (no CTE)
     const topMembersQuery = createMessageStatsQuery(
-      db,
       guildId,
       intervalStart,
       intervalEnd,
@@ -319,14 +305,13 @@ export const getTopParticipantsEffect = (
       )
       .limit(config.count);
 
-    const topMembers = yield* topMembersQuery;
+    const topMembers = yield* run(topMembersQuery);
 
     if (topMembers.length === 0) {
       return [];
     }
 
     const dailyParticipationQuery = createMessageStatsQuery(
-      db,
       guildId,
       intervalStart,
       intervalEnd,
@@ -356,7 +341,7 @@ export const getTopParticipantsEffect = (
         topMembers.map((m) => m.author_id),
       );
 
-    const rawDailyParticipation = yield* dailyParticipationQuery;
+    const rawDailyParticipation = yield* run(dailyParticipationQuery);
 
     // Group by author and fill date gaps inline
     const groupedData = rawDailyParticipation.reduce((acc, record) => {

@@ -25,7 +25,10 @@ export function AssetPlaceholder({
         {label}
       </span>
       {kind === "recording" && (
-        <span aria-hidden="true" className="text-3xl leading-none text-stone-300">
+        <span
+          aria-hidden="true"
+          className="text-3xl leading-none text-stone-300"
+        >
           ▶
         </span>
       )}

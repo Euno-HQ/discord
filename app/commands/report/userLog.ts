@@ -106,12 +106,12 @@ export function logUserMessage({
       ).pipe(
         Effect.flatMap((priorLogMessage) =>
           messageReply(priorLogMessage, reportContents).pipe(
-            Effect.catchAll(() =>
+            Effect.catch(() =>
               sendMessage(priorLogMessage.channel, reportContents),
             ),
           ),
         ),
-        Effect.catchAll(() => sendMessage(thread, logBody)),
+        Effect.catch(() => sendMessage(thread, logBody)),
       )) as Message<true>;
 
       yield* logEffect(
@@ -205,14 +205,14 @@ export function logUserMessage({
         singleLine.length > 80 ? `${singleLine.slice(0, 80)}…` : singleLine;
 
       const stats = yield* getMessageStats(message).pipe(
-        Effect.catchAll(() => Effect.succeed(undefined)),
+        Effect.catch(() => Effect.succeed(undefined)),
       );
 
       yield* sendMessage(parentChannel, {
         allowedMentions: {},
         content: `> ${escapeDisruptiveContent(truncatedMsg)}\n-# [${!stats ? "stats failed to load" : `${stats.char_count} chars in ${stats.word_count} words. ${stats.link_stats.length} links, ${stats.code_stats.reduce((count, { lines }) => count + lines, 0)} lines of code. ${message.attachments.size} attachments, ${message.reactions.cache.size} reactions`}](${messageLink(logMessage.channelId, logMessage.id)})`,
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logEffect("error", "logUserMessage", "failed to forward to modLog", {
             error,
           }),

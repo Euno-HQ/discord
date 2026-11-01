@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 
 import type { RuntimeContext } from "#~/AppRuntime";
-import { DatabaseService } from "#~/Database";
+import { db, run } from "#~/Database";
 import type { MessageReactionAddEvent } from "#~/discord/events";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { logEffect } from "#~/effects/observability";
@@ -42,12 +42,13 @@ export const handleReactionAdd = (
     }
 
     // Look up config for this guild + emoji combination
-    const db = yield* DatabaseService;
-    const configs = yield* db
-      .selectFrom("reactji_channeler_config")
-      .selectAll()
-      .where("guild_id", "=", guildId)
-      .where("emoji", "=", emoji);
+    const configs = yield* run(
+      db
+        .selectFrom("reactji_channeler_config")
+        .selectAll()
+        .where("guild_id", "=", guildId)
+        .where("emoji", "=", emoji),
+    );
 
     const config = configs[0];
 
@@ -128,7 +129,7 @@ export const handleReactionAdd = (
       },
     );
   }).pipe(
-    Effect.catchAll((err) =>
+    Effect.catch((err) =>
       logEffect("warn", "ReactjiChanneler", "Pipeline handler failed", {
         messageId: e.reaction.message.id,
         error: err,

@@ -1,32 +1,21 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import * as Reactivity from "@effect/experimental/Reactivity";
-import { SqlClient } from "@effect/sql";
-import * as Sqlite from "@effect/sql-kysely/Sqlite";
-import { SqliteClient } from "@effect/sql-sqlite-node";
-
-import { DatabaseService, type DB } from "#~/Database";
+import { makeDatabaseLayer } from "#~/Database";
 import { UserService, UserServiceLive } from "#~/models/user.server";
 
 // In-memory SQLite test layer (mirrors app/jobs/jobRunner.test.ts)
-const TestSqliteLive = Layer.scoped(
-  SqlClient.SqlClient,
-  SqliteClient.make({ filename: ":memory:" }),
-).pipe(Layer.provide(Reactivity.layer));
-
-const TestKyselyLive = Layer.effect(DatabaseService, Sqlite.make<DB>()).pipe(
-  Layer.provide(TestSqliteLive),
-);
+const TestDbLive = makeDatabaseLayer(":memory:");
 
 // Provide the test DB to UserServiceLive, and also expose SqlClient/DatabaseService
 // for schema setup. provideMerge keeps a single memoized in-memory connection.
-const TestBase = Layer.mergeAll(TestSqliteLive, TestKyselyLive);
+const TestBase = TestDbLive;
 const TestLayer = Layer.provideMerge(UserServiceLive, TestBase);
 
 const testRuntime = ManagedRuntime.make(TestLayer);
 
-type TestR = Layer.Layer.Success<typeof TestLayer>;
+type TestR = Layer.Success<typeof TestLayer>;
 
 const runTest = <A, E>(effect: Effect.Effect<A, E, TestR>) =>
   testRuntime.runPromise(effect);

@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 
-import { DatabaseService } from "#~/Database";
+import { db, run } from "#~/Database";
 import { logEffect } from "#~/effects/observability";
 
 export type ModActionType =
@@ -23,20 +23,21 @@ export const recordModAction = (data: {
   duration?: string;
 }) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
     const id = crypto.randomUUID() as string;
 
-    yield* db.insertInto("mod_actions").values({
-      id,
-      user_id: data.userId,
-      guild_id: data.guildId,
-      action_type: data.actionType,
-      executor_id: data.executorId ?? null,
-      executor_username: data.executorUsername ?? null,
-      reason: data.reason ?? null,
-      duration: data.duration ?? null,
-      created_at: new Date().toISOString(),
-    });
+    yield* run(
+      db.insertInto("mod_actions").values({
+        id,
+        user_id: data.userId,
+        guild_id: data.guildId,
+        action_type: data.actionType,
+        executor_id: data.executorId ?? null,
+        executor_username: data.executorUsername ?? null,
+        reason: data.reason ?? null,
+        duration: data.duration ?? null,
+        created_at: new Date().toISOString(),
+      }),
+    );
 
     yield* logEffect("info", "ModActions", "Recorded mod action", {
       userId: data.userId,
@@ -60,14 +61,14 @@ export const recordModAction = (data: {
  */
 export const getRecentModActions = (userId: string, guildId: string) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
-    return yield* db
-      .selectFrom("mod_actions")
-      .select(["action_type", "created_at", "executor_username", "reason"])
-      .where("user_id", "=", userId)
-      .where("guild_id", "=", guildId)
-      .orderBy("created_at", "asc");
+    return yield* run(
+      db
+        .selectFrom("mod_actions")
+        .select(["action_type", "created_at", "executor_username", "reason"])
+        .where("user_id", "=", userId)
+        .where("guild_id", "=", guildId)
+        .orderBy("created_at", "asc"),
+    );
   }).pipe(
     Effect.withSpan("getRecentModActions", {
       attributes: { userId, guildId },
@@ -79,15 +80,15 @@ export const getRecentModActions = (userId: string, guildId: string) =>
  */
 export const getModActionCounts = (userId: string, guildId: string) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
-    const rows = yield* db
-      .selectFrom("mod_actions")
-      .select(["action_type"])
-      .select((eb) => eb.fn.count("id").as("count"))
-      .where("user_id", "=", userId)
-      .where("guild_id", "=", guildId)
-      .groupBy("action_type");
+    const rows = yield* run(
+      db
+        .selectFrom("mod_actions")
+        .select(["action_type"])
+        .select((eb) => eb.fn.count("id").as("count"))
+        .where("user_id", "=", userId)
+        .where("guild_id", "=", guildId)
+        .groupBy("action_type"),
+    );
 
     const counts: Partial<Record<ModActionType, number>> = {};
     for (const row of rows) {

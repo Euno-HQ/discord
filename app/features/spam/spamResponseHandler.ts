@@ -85,7 +85,7 @@ export const executeResponse = (
     if (verdict.tier === "medium") {
       // Apply restricted role
       yield* applyRestriction(member).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logEffect("warn", "SpamResponse", "Failed to apply restriction", {
             error,
           }),
@@ -97,7 +97,7 @@ export const executeResponse = (
     if (verdict.tier === "high") {
       // Timeout user in the originating guild
       yield* timeout(member, "Automated spam detection").pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logEffect("warn", "SpamResponse", "Failed to timeout user", {
             error,
           }),
@@ -130,7 +130,7 @@ export const executeResponse = (
         // Clean up all reported messages for the kicked user — including any
         // back-filled prior duplicates — so nothing is left behind on Discord.
         yield* deleteAllReportedForUser(userId, guildId).pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             logEffect(
               "warn",
               "SpamResponse",
@@ -146,7 +146,7 @@ export const executeResponse = (
             allowedMentions: {},
           }),
         ).pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             logEffect(
               "warn",
               "SpamResponse",
@@ -206,7 +206,7 @@ const checkCrossGuildSpam = (userId: string) =>
             await targetMember.timeout(OVERNIGHT, reason);
           }
         }).pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             logEffect(
               "warn",
               "SpamResponse",
@@ -233,7 +233,7 @@ const checkCrossGuildSpam = (userId: string) =>
             "Your account has been temporarily restricted while you secure it.",
         ),
       ).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logEffect(
             "warn",
             "SpamResponse",
@@ -257,7 +257,7 @@ const logSpamReport = (message: Message, verdict: SpamVerdict) =>
       staff: client.user ?? false,
       extra,
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           yield* logEffect(
             "error",

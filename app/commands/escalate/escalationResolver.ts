@@ -101,7 +101,7 @@ export const processEscalationEffect = (
       logEffect("info", "EscalationResolver", "Auto-resolving escalation", {
         resolution,
       }),
-    ]).pipe(Effect.withConcurrency("unbounded"));
+    ]);
 
     const [reportedMember, voteMessage] = yield* Effect.all([
       fetchMemberOrNull(guild, escalation.reported_user_id),
@@ -158,7 +158,7 @@ export const processEscalationEffect = (
           components: [resolvedContainer],
         }),
         replyAndForwardSafe(voteMessage, content, modLog),
-      ]).pipe(Effect.withConcurrency("unbounded"));
+      ]);
 
       return { resolution: resolutions.track, userGone: true };
     }
@@ -196,7 +196,7 @@ export const processEscalationEffect = (
         "Successfully auto-resolved escalation",
         { resolution },
       ),
-    ]).pipe(Effect.withConcurrency("unbounded"));
+    ]);
 
     return { resolution, userGone: false };
   }).pipe(
@@ -230,7 +230,7 @@ export const checkPendingEscalationsEffect = (client: Client) =>
     // TODO: In the future, we should have a smarter fetch that manages that
     const results = yield* Effect.forEach(due, (escalation) =>
       processEscalationEffect(client, escalation).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logEffect(
             "error",
             "EscalationResolver",

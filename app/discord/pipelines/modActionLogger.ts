@@ -58,7 +58,7 @@ export const modActionLoggerPipeline: Effect.Effect<
         }
       })();
       return handler.pipe(
-        Effect.catchAll((err) =>
+        Effect.catch((err) =>
           logEffect("warn", "ModActionLogger", "Pipeline handler failed", {
             eventType: e.type,
             error: err,

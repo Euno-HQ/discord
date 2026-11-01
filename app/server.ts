@@ -93,7 +93,7 @@ app.post("/webhooks/discord", bodyParser.json(), async (req, res, next) => {
 // functions change when command files are edited.
 declare global {
   var __discordOneTimeSetupDone: boolean | undefined;
-  var __pipelineFibers: Fiber.RuntimeFiber<void, never>[] | undefined;
+  var __pipelineFibers: Fiber.Fiber<void, never>[] | undefined;
 }
 
 const startup = Effect.gen(function* () {
@@ -141,8 +141,8 @@ const startup = Effect.gen(function* () {
     // __pipelineFibers: that array is interrupted and replaced on every reload,
     // and nothing here would re-fork them. These two need no gateway, so they
     // run even in web-only degraded mode.
-    yield* messageCacheExpirationSchedule.pipe(Effect.forkDaemon);
-    yield* runJobRunner.pipe(Effect.forkDaemon);
+    yield* messageCacheExpirationSchedule.pipe(Effect.forkDetach);
+    yield* runJobRunner.pipe(Effect.forkDetach);
 
     // Everything below needs a live gateway. When Discord has rejected us the
     // client exists but is not logged in, so these calls would throw and take
@@ -152,7 +152,7 @@ const startup = Effect.gen(function* () {
       yield* tryDiscord("init", () => deployCommands(discordClient));
 
       // Escalation resolver scheduler (must be after client is ready)
-      yield* escalationResolverSchedule(discordClient).pipe(Effect.forkDaemon);
+      yield* escalationResolverSchedule(discordClient).pipe(Effect.forkDetach);
 
       yield* logEffect("info", "Gateway", "Gateway initialization completed", {
         guildCount: discordClient.guilds.cache.size,
@@ -170,7 +170,7 @@ const startup = Effect.gen(function* () {
     }
 
     yield* logEffect("debug", "Server", "scheduling integrity check");
-    yield* runIntegrityCheck.pipe(Effect.forkDaemon);
+    yield* runIntegrityCheck.pipe(Effect.forkDetach);
 
     // Graceful shutdown handler to checkpoint WAL and dispose the runtime
     // (tears down PostHog finalizer, feature flag interval, and SQLite connection)
@@ -226,7 +226,7 @@ const startup = Effect.gen(function* () {
   // The event bus queue buffers events during the brief swap.
   //
   // forkDaemon (NOT fork): these fibers must outlive `startup`, the fiber
-  // running this code. Plain Effect.fork makes them children of `startup`, so
+  // running this code. Plain Effect.forkChild makes them children of `startup`, so
   // they're interrupted the instant it completes — silently killing every
   // pipeline before it drains a single event. HMR cleanup is handled by the
   // explicit Fiber.interrupt above, not by parent-scope teardown.
@@ -237,12 +237,12 @@ const startup = Effect.gen(function* () {
     yield* logEffect("info", "Server", "Interrupted old pipeline fibers");
   }
   globalThis.__pipelineFibers = [
-    yield* deletionLoggerPipeline.pipe(Effect.forkDaemon),
-    yield* automodPipeline.pipe(Effect.forkDaemon),
-    yield* modActionLoggerPipeline.pipe(Effect.forkDaemon),
-    yield* activityTrackerPipeline.pipe(Effect.forkDaemon),
-    yield* onboardGuildPipeline.pipe(Effect.forkDaemon),
-    yield* reactjiChannelerPipeline.pipe(Effect.forkDaemon),
+    yield* deletionLoggerPipeline.pipe(Effect.forkDetach),
+    yield* automodPipeline.pipe(Effect.forkDetach),
+    yield* modActionLoggerPipeline.pipe(Effect.forkDetach),
+    yield* activityTrackerPipeline.pipe(Effect.forkDetach),
+    yield* onboardGuildPipeline.pipe(Effect.forkDetach),
+    yield* reactjiChannelerPipeline.pipe(Effect.forkDetach),
   ];
   yield* logEffect("info", "Server", "Pipeline fibers forked");
 });

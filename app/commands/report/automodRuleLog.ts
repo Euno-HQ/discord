@@ -229,7 +229,7 @@ export const logAutomodRuleCreate = (rule: AutoModerationRule) =>
     Effect.withSpan("logAutomodRuleCreate", {
       attributes: { ruleId: rule.id, guildId: rule.guild.id },
     }),
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       logEffect("error", "AutomodRuleLog", "Failed to log rule create", {
         error,
         ruleId: rule.id,
@@ -262,7 +262,7 @@ export const logAutomodRuleDelete = (rule: AutoModerationRule) =>
     Effect.withSpan("logAutomodRuleDelete", {
       attributes: { ruleId: rule.id, guildId: rule.guild.id },
     }),
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       logEffect("error", "AutomodRuleLog", "Failed to log rule delete", {
         error,
         ruleId: rule.id,
@@ -300,7 +300,7 @@ export const logAutomodRuleUpdate = (
     Effect.withSpan("logAutomodRuleUpdate", {
       attributes: { ruleId: newRule.id, guildId: newRule.guild.id },
     }),
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       logEffect("error", "AutomodRuleLog", "Failed to log rule update", {
         error,
         ruleId: newRule.id,

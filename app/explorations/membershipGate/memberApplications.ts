@@ -19,7 +19,7 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { DatabaseService } from "#~/Database.ts";
+import { db, run } from "#~/Database";
 import { ssrDiscordSdk as rest } from "#~/discord/api";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import {
@@ -50,30 +50,33 @@ export const resolveApplicationsForDeparture = (
   userId: string,
 ) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    const [pending] = yield* db
-      .selectFrom("applications")
-      .select("id")
-      .where("guild_id", "=", guildId)
-      .where("user_id", "=", userId)
-      .where("status", "=", "pending");
+    const [pending] = yield* run(
+      db
+        .selectFrom("applications")
+        .select("id")
+        .where("guild_id", "=", guildId)
+        .where("user_id", "=", userId)
+        .where("status", "=", "pending"),
+    );
 
     if (!pending) return;
 
-    yield* db
-      .updateTable("applications")
-      .set({
-        status: "denied",
-        resolved_at: new Date().toISOString(),
-      })
-      .where("id", "=", pending.id);
+    yield* run(
+      db
+        .updateTable("applications")
+        .set({
+          status: "denied",
+          resolved_at: new Date().toISOString(),
+        })
+        .where("id", "=", pending.id),
+    );
 
     yield* resolveLogMessage(
       guildId,
       userId,
       `<@${userId}> left the server — application auto-denied`,
     );
-  }).pipe(Effect.catchAll(() => Effect.void));
+  }).pipe(Effect.catch(() => Effect.void));
 
 /** Update the mod-log summary message with resolution details. */
 const resolveLogMessage = (
@@ -82,17 +85,18 @@ const resolveLogMessage = (
   content: string,
 ) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
     const { [SETTINGS.modLog]: modLog } = yield* fetchSettings(guildId, [
       SETTINGS.modLog,
     ]);
 
-    const [app] = yield* db
-      .selectFrom("applications")
-      .select("log_message_id")
-      .where("guild_id", "=", guildId)
-      .where("user_id", "=", applicantUserId)
-      .orderBy("created_at", "desc");
+    const [app] = yield* run(
+      db
+        .selectFrom("applications")
+        .select("log_message_id")
+        .where("guild_id", "=", guildId)
+        .where("user_id", "=", applicantUserId)
+        .orderBy("created_at", "desc"),
+    );
 
     if (!app?.log_message_id) return;
 
@@ -104,7 +108,7 @@ const resolveLogMessage = (
         },
       }),
     );
-  }).pipe(Effect.catchAll(() => Effect.void));
+  }).pipe(Effect.catch(() => Effect.void));
 
 export const Command = [
   {
@@ -128,13 +132,14 @@ export const Command = [
         }
 
         // Block duplicate applications before showing the modal
-        const db = yield* DatabaseService;
-        const existingApp = yield* db
-          .selectFrom("applications")
-          .selectAll()
-          .where("guild_id", "=", interaction.guildId!)
-          .where("user_id", "=", interaction.user.id)
-          .where("status", "=", "pending");
+        const existingApp = yield* run(
+          db
+            .selectFrom("applications")
+            .selectAll()
+            .where("guild_id", "=", interaction.guildId!)
+            .where("user_id", "=", interaction.user.id)
+            .where("status", "=", "pending"),
+        );
 
         if (existingApp[0]) {
           yield* interactionReply(interaction, {
@@ -182,7 +187,7 @@ export const Command = [
           interaction.showModal(modal),
         );
       }).pipe(
-        Effect.catchAll(() => Effect.void),
+        Effect.catch(() => Effect.void),
         Effect.withSpan("applyToJoinModal", {
           attributes: {
             guildId: interaction.guildId,
@@ -216,11 +221,12 @@ export const Command = [
         const referral = fields.getTextInputValue("referral");
         const goals = fields.getTextInputValue("goals");
 
-        const db = yield* DatabaseService;
-        const configRows = yield* db
-          .selectFrom("application_config")
-          .selectAll()
-          .where("guild_id", "=", interaction.guild.id);
+        const configRows = yield* run(
+          db
+            .selectFrom("application_config")
+            .selectAll()
+            .where("guild_id", "=", interaction.guild.id),
+        );
         const config = configRows[0];
 
         if (!config) {
@@ -261,14 +267,16 @@ export const Command = [
         );
 
         // Record the application in the database
-        yield* db.insertInto("applications").values({
-          id: crypto.randomUUID(),
-          guild_id: interaction.guild.id,
-          user_id: user.id,
-          thread_id: thread.id,
-          status: "pending",
-          created_at: new Date().toISOString(),
-        });
+        yield* run(
+          db.insertInto("applications").values({
+            id: crypto.randomUUID(),
+            guild_id: interaction.guild.id,
+            user_id: user.id,
+            thread_id: thread.id,
+            status: "pending",
+            created_at: new Date().toISOString(),
+          }),
+        );
 
         const applicationComponents = [
           {
@@ -379,15 +387,17 @@ export const Command = [
         )) as { id: string };
 
         // Store the log message ID so we can update it on resolution
-        yield* db
-          .updateTable("applications")
-          .set({
-            log_message_id: logMsg.id,
-            review_message_id: reviewMsg.id,
-          })
-          .where("guild_id", "=", interaction.guild.id)
-          .where("user_id", "=", user.id)
-          .where("status", "=", "pending");
+        yield* run(
+          db
+            .updateTable("applications")
+            .set({
+              log_message_id: logMsg.id,
+              review_message_id: reviewMsg.id,
+            })
+            .where("guild_id", "=", interaction.guild.id)
+            .where("user_id", "=", user.id)
+            .where("status", "=", "pending"),
+        );
 
         yield* interactionReply(interaction, {
           content:
@@ -395,7 +405,7 @@ export const Command = [
           flags: MessageFlags.Ephemeral,
         });
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect(
               "error",
@@ -408,7 +418,7 @@ export const Command = [
             yield* interactionReply(interaction, {
               content: reply.content,
               flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
-            }).pipe(Effect.catchAll(() => Effect.void));
+            }).pipe(Effect.catch(() => Effect.void));
           }),
         ),
         Effect.withSpan("modalApplyToJoin", {
@@ -453,11 +463,12 @@ export const Command = [
           return;
         }
 
-        const db = yield* DatabaseService;
-        const configRows = yield* db
-          .selectFrom("application_config")
-          .selectAll()
-          .where("guild_id", "=", guildId);
+        const configRows = yield* run(
+          db
+            .selectFrom("application_config")
+            .selectAll()
+            .where("guild_id", "=", guildId),
+        );
         const config = configRows[0];
 
         if (!config) {
@@ -469,12 +480,14 @@ export const Command = [
         }
 
         // Verify a pending application exists before taking action
-        const [appRow] = yield* db
-          .selectFrom("applications")
-          .selectAll()
-          .where("guild_id", "=", guildId)
-          .where("user_id", "=", applicantUserId)
-          .where("status", "=", "pending");
+        const [appRow] = yield* run(
+          db
+            .selectFrom("applications")
+            .selectAll()
+            .where("guild_id", "=", guildId)
+            .where("user_id", "=", applicantUserId)
+            .where("status", "=", "pending"),
+        );
 
         if (!appRow) {
           yield* interactionReply(interaction, {
@@ -485,14 +498,16 @@ export const Command = [
           return;
         }
 
-        yield* db
-          .updateTable("applications")
-          .set({
-            status: "approved",
-            reviewed_by: approverId,
-            resolved_at: new Date().toISOString(),
-          })
-          .where("id", "=", appRow.id);
+        yield* run(
+          db
+            .updateTable("applications")
+            .set({
+              status: "approved",
+              reviewed_by: approverId,
+              resolved_at: new Date().toISOString(),
+            })
+            .where("id", "=", appRow.id),
+        );
 
         yield* tryDiscord("memberApp.addMemberRole", () =>
           rest.put(
@@ -519,7 +534,7 @@ export const Command = [
               },
             }),
           );
-        }).pipe(Effect.catchAll(() => Effect.void));
+        }).pipe(Effect.catch(() => Effect.void));
 
         const appMsgLink = `https://discord.com/channels/${guildId}/${interaction.channelId}/${interaction.message?.id}`;
         yield* resolveLogMessage(
@@ -528,7 +543,7 @@ export const Command = [
           `<@${applicantUserId}>'s [application](${appMsgLink}) approved by <@${approverId}>`,
         );
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect(
               "error",
@@ -541,7 +556,7 @@ export const Command = [
             yield* interactionReply(interaction, {
               content: reply.content,
               flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
-            }).pipe(Effect.catchAll(() => Effect.void));
+            }).pipe(Effect.catch(() => Effect.void));
           }),
         ),
         Effect.withSpan("appApprove", {
@@ -586,15 +601,15 @@ export const Command = [
           return;
         }
 
-        const db = yield* DatabaseService;
-
         // Verify a pending application exists before taking action
-        const [denyAppRow] = yield* db
-          .selectFrom("applications")
-          .selectAll()
-          .where("guild_id", "=", guildId)
-          .where("user_id", "=", applicantUserId)
-          .where("status", "=", "pending");
+        const [denyAppRow] = yield* run(
+          db
+            .selectFrom("applications")
+            .selectAll()
+            .where("guild_id", "=", guildId)
+            .where("user_id", "=", applicantUserId)
+            .where("status", "=", "pending"),
+        );
 
         if (!denyAppRow) {
           yield* interactionReply(interaction, {
@@ -620,7 +635,7 @@ export const Command = [
             }),
           );
           return true;
-        }).pipe(Effect.catchAll(() => Effect.succeed(false)));
+        }).pipe(Effect.catch(() => Effect.succeed(false)));
 
         if (!dmSent && denyAppRow.thread_id) {
           yield* tryDiscord("memberApp.postDenyThreadFallback", () =>
@@ -629,17 +644,19 @@ export const Command = [
                 content: `<@${applicantUserId}>, your application has been denied.`,
               },
             }),
-          ).pipe(Effect.catchAll(() => Effect.void));
+          ).pipe(Effect.catch(() => Effect.void));
         }
 
-        yield* db
-          .updateTable("applications")
-          .set({
-            status: "denied",
-            reviewed_by: denierId,
-            resolved_at: new Date().toISOString(),
-          })
-          .where("id", "=", denyAppRow.id);
+        yield* run(
+          db
+            .updateTable("applications")
+            .set({
+              status: "denied",
+              reviewed_by: denierId,
+              resolved_at: new Date().toISOString(),
+            })
+            .where("id", "=", denyAppRow.id),
+        );
 
         // Kick the applicant
         yield* tryDiscord("memberApp.kickApplicant", () =>
@@ -660,7 +677,7 @@ export const Command = [
           `<@${applicantUserId}>'s [application](${appMsgLink}) denied by <@${denierId}> (kicked)`,
         );
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect(
               "error",
@@ -673,7 +690,7 @@ export const Command = [
             yield* interactionReply(interaction, {
               content: reply.content,
               flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
-            }).pipe(Effect.catchAll(() => Effect.void));
+            }).pipe(Effect.catch(() => Effect.void));
           }),
         ),
         Effect.withSpan("appDeny", {
@@ -713,31 +730,36 @@ export const Command = [
 
         const guildId = interaction.guild.id;
 
-        const db = yield* DatabaseService;
-        yield* db
-          .updateTable("applications")
-          .set({
-            status: "retracted",
-            reviewed_by: applicantUserId,
-            resolved_at: new Date().toISOString(),
-          })
-          .where("guild_id", "=", guildId)
-          .where("user_id", "=", applicantUserId)
-          .where("status", "=", "pending");
+        yield* run(
+          db
+            .updateTable("applications")
+            .set({
+              status: "retracted",
+              reviewed_by: applicantUserId,
+              resolved_at: new Date().toISOString(),
+            })
+            .where("guild_id", "=", guildId)
+            .where("user_id", "=", applicantUserId)
+            .where("status", "=", "pending"),
+        );
 
         // Disable approve/deny buttons on the mod thread review message
-        const [retractAppRow] = yield* db
-          .selectFrom("applications")
-          .select(["review_message_id"])
-          .where("guild_id", "=", guildId)
-          .where("user_id", "=", applicantUserId)
-          .orderBy("created_at", "desc");
+        const [retractAppRow] = yield* run(
+          db
+            .selectFrom("applications")
+            .select(["review_message_id"])
+            .where("guild_id", "=", guildId)
+            .where("user_id", "=", applicantUserId)
+            .orderBy("created_at", "desc"),
+        );
 
-        const [modThreadRow] = yield* db
-          .selectFrom("user_threads")
-          .select("thread_id")
-          .where("guild_id", "=", guildId)
-          .where("user_id", "=", applicantUserId);
+        const [modThreadRow] = yield* run(
+          db
+            .selectFrom("user_threads")
+            .select("thread_id")
+            .where("guild_id", "=", guildId)
+            .where("user_id", "=", applicantUserId),
+        );
 
         if (retractAppRow?.review_message_id && modThreadRow?.thread_id) {
           // Fetch the existing message to preserve application content
@@ -750,7 +772,7 @@ export const Command = [
                   retractAppRow.review_message_id!,
                 ),
               ),
-          ).pipe(Effect.catchAll(() => Effect.succeed(null)))) as {
+          ).pipe(Effect.catch(() => Effect.succeed(null)))) as {
             components?: { components?: unknown[] }[];
           } | null;
 
@@ -814,7 +836,7 @@ export const Command = [
                   },
                 },
               ),
-            ).pipe(Effect.catchAll(() => Effect.void));
+            ).pipe(Effect.catch(() => Effect.void));
           }
         }
 
@@ -835,7 +857,7 @@ export const Command = [
           }),
         );
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect(
               "error",
@@ -848,7 +870,7 @@ export const Command = [
             yield* interactionReply(interaction, {
               content: reply.content,
               flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
-            }).pipe(Effect.catchAll(() => Effect.void));
+            }).pipe(Effect.catch(() => Effect.void));
           }),
         ),
         Effect.withSpan("appRetract", {
@@ -891,11 +913,12 @@ export const Command = [
         }
 
         // Load application_config to get role_id
-        const db = yield* DatabaseService;
-        const [config] = yield* db
-          .selectFrom("application_config")
-          .selectAll()
-          .where("guild_id", "=", guildId);
+        const [config] = yield* run(
+          db
+            .selectFrom("application_config")
+            .selectAll()
+            .where("guild_id", "=", guildId),
+        );
 
         if (!config) {
           yield* interactionReply(interaction, {
@@ -987,7 +1010,7 @@ export const Command = [
           ],
         });
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect(
               "error",
@@ -1002,7 +1025,7 @@ export const Command = [
               content:
                 "Gate activation failed. The button is still active — you can try again.",
               flags: MessageFlags.Ephemeral,
-            }).pipe(Effect.catchAll(() => Effect.void));
+            }).pipe(Effect.catch(() => Effect.void));
           }),
         ),
         Effect.withSpan("activateGate", {

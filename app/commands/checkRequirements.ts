@@ -8,7 +8,7 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { DatabaseService } from "#~/Database.ts";
+import { db, run } from "#~/Database";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import {
   fetchChannel,
@@ -372,11 +372,12 @@ export const Command = {
       }
 
       // --- Honeypot channels ---
-      const db = yield* DatabaseService;
-      const honeypotRows = yield* db
-        .selectFrom("honeypot_config")
-        .selectAll()
-        .where("guild_id", "=", guildId);
+      const honeypotRows = yield* run(
+        db
+          .selectFrom("honeypot_config")
+          .selectAll()
+          .where("guild_id", "=", guildId),
+      );
 
       {
         const validChannelIds: string[] = [];
@@ -409,7 +410,9 @@ export const Command = {
       // --- Ticket configuration ---
       // tickets_config has no guild_id, so check all rows and see which channels
       // belong to this guild
-      const ticketRows = yield* db.selectFrom("tickets_config").selectAll();
+      const ticketRows = yield* run(
+        db.selectFrom("tickets_config").selectAll(),
+      );
 
       let ticketFound = false;
       const ticketDetails: string[] = [];
@@ -520,7 +523,7 @@ export const Command = {
 
       commandStats.commandExecuted(interaction, "check-requirements", true);
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           yield* logEffect(
             "error",
@@ -542,7 +545,7 @@ export const Command = {
           const reply = toUserResponse(error);
           yield* interactionEditReply(interaction, {
             content: reply.content,
-          }).pipe(Effect.catchAll(() => Effect.void));
+          }).pipe(Effect.catch(() => Effect.void));
         }),
       ),
       Effect.withSpan("checkRequirementsCommand", {

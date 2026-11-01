@@ -6,7 +6,7 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { DatabaseService } from "#~/Database.ts";
+import { db, run } from "#~/Database";
 import { interactionReply } from "#~/effects/discordSdk.ts";
 import { logEffect } from "#~/effects/observability.ts";
 import type { SlashCommand } from "#~/helpers/discord";
@@ -79,24 +79,25 @@ export const Command = {
       const emoji = resolution.value;
 
       // Upsert: update if exists, insert if not
-      const db = yield* DatabaseService;
-      yield* db
-        .insertInto("reactji_channeler_config")
-        .values({
-          id: randomUUID(),
-          guild_id: guildId,
-          channel_id: channelId,
-          emoji,
-          configured_by_id: configuredById,
-          threshold,
-        })
-        .onConflict((oc) =>
-          oc.columns(["guild_id", "emoji"]).doUpdateSet({
+      yield* run(
+        db
+          .insertInto("reactji_channeler_config")
+          .values({
+            id: randomUUID(),
+            guild_id: guildId,
             channel_id: channelId,
+            emoji,
             configured_by_id: configuredById,
             threshold,
-          }),
-        );
+          })
+          .onConflict((oc) =>
+            oc.columns(["guild_id", "emoji"]).doUpdateSet({
+              channel_id: channelId,
+              configured_by_id: configuredById,
+              threshold,
+            }),
+          ),
+      );
 
       featureStats.reactjiChannelSetup(
         guildId,
@@ -111,7 +112,7 @@ export const Command = {
         content: `Configured by <@${configuredById}>: messages reacted with ${emoji} will be forwarded to this channel${thresholdText}.`,
       });
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           yield* logEffect(
             "error",
@@ -124,7 +125,7 @@ export const Command = {
             content:
               "Something went wrong while configuring the reactji channeler.",
             flags: [MessageFlags.Ephemeral],
-          }).pipe(Effect.catchAll(() => Effect.void));
+          }).pipe(Effect.catch(() => Effect.void));
         }),
       ),
       Effect.withSpan("setupReactjiChannelCommand", {

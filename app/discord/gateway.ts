@@ -193,7 +193,7 @@ export const initDiscordBot: Effect.Effect<Client, never, DiscordClient> =
     // Wait for the client to be ready — but give up the moment login reports a
     // terminal failure, so a bot that cannot authenticate doesn't strand the
     // startup fiber and block everything sequenced after it.
-    const waitForReady = Effect.async<Client>((resume) => {
+    const waitForReady = Effect.callback<Client>((resume) => {
       let settled = false;
       const settle = () => {
         if (settled) return;

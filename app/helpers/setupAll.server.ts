@@ -11,7 +11,7 @@ import {
 } from "discord-api-types/v10";
 import { Effect } from "effect";
 
-import { DatabaseService, type SqlError } from "#~/Database";
+import { db, run, type DatabaseService, type SqlError } from "#~/Database";
 import { ssrDiscordSdk } from "#~/discord/api";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { type DiscordError } from "#~/effects/errors";
@@ -112,17 +112,15 @@ export const setupAll = (
       ticketChannel,
     } = options;
 
-    const db = yield* DatabaseService;
-
     const created: string[] = [];
 
     // Register guild (idempotent)
     yield* registerGuild(guildId);
 
     // --- Load existing config to skip unchanged values ---
-    const existingTicketRows = yield* db
-      .selectFrom("tickets_config")
-      .select("channel_id");
+    const existingTicketRows = yield* run(
+      db.selectFrom("tickets_config").select("channel_id"),
+    );
     const existingTicket = existingTicketRows[0];
 
     // --- Logs category (created if mod-log or deletion-log needs creation) ---
@@ -197,13 +195,15 @@ export const setupAll = (
     }
 
     if (honeypotChannelId !== undefined) {
-      yield* db
-        .insertInto("honeypot_config")
-        .values({
-          guild_id: guildId,
-          channel_id: honeypotChannelId,
-        })
-        .onConflict((c) => c.doNothing());
+      yield* run(
+        db
+          .insertInto("honeypot_config")
+          .values({
+            guild_id: guildId,
+            channel_id: honeypotChannelId,
+          })
+          .onConflict((c) => c.doNothing()),
+      );
     }
 
     // --- Ticket channel (optional) ---
@@ -259,11 +259,13 @@ export const setupAll = (
         ],
       });
 
-      yield* db.insertInto("tickets_config").values({
-        message_id: ticketMessage.id,
-        channel_id: ticketChannelId,
-        role_id: moderatorRoleId,
-      });
+      yield* run(
+        db.insertInto("tickets_config").values({
+          message_id: ticketMessage.id,
+          channel_id: ticketChannelId,
+          role_id: moderatorRoleId,
+        }),
+      );
     }
 
     // --- Initialize free subscription ---

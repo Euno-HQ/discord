@@ -6,7 +6,7 @@
 import type { GuildMember, Message } from "discord.js";
 import { Context, Effect, Layer, Schedule } from "effect";
 
-import { DatabaseService } from "#~/Database.ts";
+import { DatabaseService, db } from "#~/Database";
 import { DiscordClient } from "#~/discord/client.server.ts";
 import { MESSAGE_CONTENT_INTENT } from "#~/discord/intents";
 import { FeatureFlagService } from "#~/effects/featureFlags";
@@ -49,10 +49,10 @@ export interface ISpamDetectionService {
   ) => Effect.Effect<void, never>;
 }
 
-export class SpamDetectionService extends Context.Tag("SpamDetectionService")<
+export class SpamDetectionService extends Context.Service<
   SpamDetectionService,
   ISpamDetectionService
->() {}
+>()("SpamDetectionService") {}
 
 // ── Honeypot cache ──
 
@@ -70,7 +70,9 @@ const TRACKER_MAX_AGE = 30 * 60 * 1000; // 30 minutes
 export const SpamDetectionServiceLive = Layer.effect(
   SpamDetectionService,
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
+    const database = yield* DatabaseService;
+    const { run } = database;
+
     const featureFlags = yield* FeatureFlagService;
     const client = yield* DiscordClient;
 
@@ -89,7 +91,7 @@ export const SpamDetectionServiceLive = Layer.effect(
     // Periodic cleanup — a daemon fiber forked off the runtime that builds this
     // layer, so it lives for the whole process (matching the old setInterval).
     // cleanupTracker is a pure mutation, wrapped in Effect.sync.
-    yield* Effect.forkDaemon(
+    yield* Effect.forkDetach(
       Effect.sync(() => cleanupTracker(tracker, TRACKER_MAX_AGE)).pipe(
         // delay the first run one interval, matching setInterval semantics
         Effect.delay(`${TRACKER_CLEANUP_INTERVAL} millis`),
@@ -119,23 +121,24 @@ export const SpamDetectionServiceLive = Layer.effect(
         }
 
         // Refresh cache from DB
-        const configs = yield* db
-          .selectFrom("honeypot_config")
-          .selectAll()
-          .where("guild_id", "=", guildId)
-          .pipe(
-            Effect.catchAll((error) =>
-              Effect.gen(function* () {
-                yield* logEffect(
-                  "warn",
-                  "SpamDetection",
-                  "Failed to fetch honeypot config",
-                  { error },
-                );
-                return [] as { guild_id: string; channel_id: string }[];
-              }),
-            ),
-          );
+        const configs = yield* run(
+          db
+            .selectFrom("honeypot_config")
+            .selectAll()
+            .where("guild_id", "=", guildId),
+        ).pipe(
+          Effect.catch((error) =>
+            Effect.gen(function* () {
+              yield* logEffect(
+                "warn",
+                "SpamDetection",
+                "Failed to fetch honeypot config",
+                { error },
+              );
+              return [] as { guild_id: string; channel_id: string }[];
+            }),
+          ),
+        );
 
         const channels = new Set(configs.map((c) => c.channel_id));
         honeypotCache.set(guildId, { channels, cachedAt: Date.now() });
@@ -185,7 +188,7 @@ export const SpamDetectionServiceLive = Layer.effect(
       }).pipe(
         // fetchSettings requires DatabaseService; provide the captured handle
         // here so this helper's requirement channel stays `never`.
-        Effect.provide(Layer.succeed(DatabaseService, db)),
+        Effect.provide(Layer.succeed(DatabaseService, database)),
         Effect.withSpan("SpamDetection.isModeratorOrAdmin"),
       );
 
@@ -303,11 +306,11 @@ export const SpamDetectionServiceLive = Layer.effect(
         executeResponse(verdict, message, member).pipe(
           Effect.provide(
             Layer.mergeAll(
-              Layer.succeed(DatabaseService, db),
+              Layer.succeed(DatabaseService, database),
               Layer.succeed(DiscordClient, client),
             ),
           ),
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             logEffect("error", "SpamDetection", "Response execution failed", {
               error,
             }),

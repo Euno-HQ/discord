@@ -7,12 +7,12 @@ import { logEffect } from "#~/effects/observability.ts";
 import { posthogApiKey, posthogHost } from "#~/helpers/env.server";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
-export class PostHogService extends Context.Tag("PostHogService")<
+export class PostHogService extends Context.Service<
   PostHogService,
   PostHog | null
->() {}
+>()("PostHogService") {}
 
-export const PostHogServiceLive = Layer.scoped(
+export const PostHogServiceLive = Layer.effect(
   PostHogService,
   Effect.acquireRelease(
     Effect.gen(function* () {
@@ -43,7 +43,7 @@ export const PostHogServiceLive = Layer.scoped(
             catch: (cause) =>
               new PostHogError({ operation: "shutdown", cause }),
           }).pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               logEffect(
                 "warn",
                 "PostHogService",
@@ -70,7 +70,7 @@ export const syncGuildGroup = (guildId: string, guild?: Guild) =>
     if (!posthog) return;
 
     const sub = yield* SubscriptionService.getGuildSubscription(guildId).pipe(
-      Effect.catchAll(() => Effect.succeed(null)),
+      Effect.catch(() => Effect.succeed(null)),
     );
 
     // Best-effort projection: a PostHog failure must never reject the caller.
@@ -92,7 +92,7 @@ export const syncGuildGroup = (guildId: string, guild?: Guild) =>
         },
       }),
     ).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         logEffect("warn", "PostHogService", "Failed to sync guild group", {
           guildId,
           error,

@@ -1,10 +1,3 @@
-/* @effect-diagnostics runEffectInsideEffect:skip-file */
-// ^ The `client.on(...)` callbacks below are discord.js's callback boundary, not
-// Effect nesting: discord.js invokes them from its own event loop, so there is no
-// ambient fiber to `yield*` into and `Effect.runFork` is the correct entry point.
-// The rule stays at error everywhere else, where a nested run IS the anti-pattern
-// (see notes/EFFECT.md "Don't nest Effect.runPromise").
-
 import {
   Events,
   type Guild,
@@ -104,12 +97,12 @@ export interface IDiscordEventBus {
   readonly stream: Stream.Stream<DiscordEvent>;
 }
 
-export class DiscordEventBus extends Context.Tag("DiscordEventBus")<
+export class DiscordEventBus extends Context.Service<
   DiscordEventBus,
   IDiscordEventBus
->() {}
+>()("DiscordEventBus") {}
 
-export const DiscordEventBusLive = Layer.scoped(
+export const DiscordEventBusLive = Layer.effect(
   DiscordEventBus,
   Effect.gen(function* () {
     const client = yield* DiscordClient;
@@ -117,12 +110,13 @@ export const DiscordEventBusLive = Layer.scoped(
 
     // --- Register event sources ---
     // These run once at Layer construction. The callbacks close over the queue
-    // and push events with Effect.runFork (fire-and-forget, non-blocking).
+    // and push events with Queue.offerUnsafe (synchronous; the sliding queue
+    // never blocks — it drops the oldest event when full).
 
     client.on(Events.MessageCreate, (message) => {
       const event = enrichMessageCreate(message);
       if (event) {
-        Effect.runFork(Queue.offer(queue, event));
+        Queue.offerUnsafe(queue, event);
         return;
       }
       // Diagnostic: a human, in-guild message whose member didn't resolve is
@@ -150,7 +144,7 @@ export const DiscordEventBusLive = Layer.scoped(
 
     client.on(Events.MessageDelete, (message) => {
       const event = enrichMessageDelete(message, client.guilds.cache);
-      if (event) Effect.runFork(Queue.offer(queue, event));
+      if (event) Queue.offerUnsafe(queue, event);
     });
 
     client.on(Events.MessageUpdate, (oldMessage, newMessage) => {
@@ -159,7 +153,7 @@ export const DiscordEventBusLive = Layer.scoped(
         newMessage,
         client.guilds.cache,
       );
-      if (event) Effect.runFork(Queue.offer(queue, event));
+      if (event) Queue.offerUnsafe(queue, event);
     });
 
     client.on(Events.MessageBulkDelete, (messages, channel) => {
@@ -168,82 +162,75 @@ export const DiscordEventBusLive = Layer.scoped(
         channel,
         client.guilds.cache,
       );
-      if (event) Effect.runFork(Queue.offer(queue, event));
+      if (event) Queue.offerUnsafe(queue, event);
     });
 
     client.on(Events.MessageReactionAdd, (reaction, user) => {
-      Effect.runFork(
-        Queue.offer(queue, { type: "MessageReactionAdd", reaction, user }),
-      );
+      Queue.offerUnsafe(queue, { type: "MessageReactionAdd", reaction, user });
     });
 
     client.on(Events.MessageReactionRemove, (reaction, user) => {
-      Effect.runFork(
-        Queue.offer(queue, { type: "MessageReactionRemove", reaction, user }),
-      );
+      Queue.offerUnsafe(queue, {
+        type: "MessageReactionRemove",
+        reaction,
+        user,
+      });
     });
 
     client.on(Events.GuildBanAdd, (ban) => {
-      Effect.runFork(Queue.offer(queue, { type: "GuildBanAdd", ban }));
+      Queue.offerUnsafe(queue, { type: "GuildBanAdd", ban });
     });
 
     client.on(Events.GuildBanRemove, (ban) => {
-      Effect.runFork(Queue.offer(queue, { type: "GuildBanRemove", ban }));
+      Queue.offerUnsafe(queue, { type: "GuildBanRemove", ban });
     });
 
     client.on(Events.GuildAuditLogEntryCreate, (entry, guild) => {
-      Effect.runFork(
-        Queue.offer(queue, { type: "GuildAuditLogEntryCreate", entry, guild }),
-      );
+      Queue.offerUnsafe(queue, {
+        type: "GuildAuditLogEntryCreate",
+        entry,
+        guild,
+      });
     });
 
     client.on(Events.AutoModerationActionExecution, (execution) => {
-      Effect.runFork(
-        Queue.offer(queue, {
-          type: "AutoModerationActionExecution",
-          execution,
-        }),
-      );
+      Queue.offerUnsafe(queue, {
+        type: "AutoModerationActionExecution",
+        execution,
+      });
     });
 
     client.on(Events.AutoModerationRuleCreate, (rule) => {
-      Effect.runFork(
-        Queue.offer(queue, { type: "AutoModerationRuleCreate", rule }),
-      );
+      Queue.offerUnsafe(queue, { type: "AutoModerationRuleCreate", rule });
     });
 
     client.on(Events.AutoModerationRuleDelete, (rule) => {
-      Effect.runFork(
-        Queue.offer(queue, { type: "AutoModerationRuleDelete", rule }),
-      );
+      Queue.offerUnsafe(queue, { type: "AutoModerationRuleDelete", rule });
     });
 
     client.on(Events.AutoModerationRuleUpdate, (oldRule, newRule) => {
-      Effect.runFork(
-        Queue.offer(queue, {
-          type: "AutoModerationRuleUpdate",
-          oldRule,
-          newRule,
-        }),
-      );
+      Queue.offerUnsafe(queue, {
+        type: "AutoModerationRuleUpdate",
+        oldRule,
+        newRule,
+      });
     });
 
     client.on(Events.GuildCreate, (guild) => {
-      Effect.runFork(Queue.offer(queue, { type: "GuildCreate", guild }));
+      Queue.offerUnsafe(queue, { type: "GuildCreate", guild });
     });
 
     client.on(Events.GuildDelete, (guild) => {
-      Effect.runFork(Queue.offer(queue, { type: "GuildDelete", guild }));
+      Queue.offerUnsafe(queue, { type: "GuildDelete", guild });
     });
 
     yield* logEffect("info", "DiscordEventBus", "Event source registered");
 
     // Create broadcast stream — each subscriber gets independent backpressure.
-    // The Scope from Layer.scoped keeps the broadcast alive for the runtime lifetime.
-    const stream = yield* Stream.broadcastDynamic(
-      Stream.fromQueue(queue),
-      1024,
-    );
+    // The Layer's Scope keeps the broadcast alive for the runtime lifetime.
+    const stream = yield* Stream.broadcast(Stream.fromQueue(queue), {
+      capacity: 1024,
+    });
 
     return { stream };
   }),

@@ -1,7 +1,8 @@
 // DEPRECATED EXPLORATION (membership gate). Not imported by any live code and
 // not registered anywhere. Preserved for future optionality; see ./README.md.
 import { PermissionFlagsBits } from "discord-api-types/v10";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime, type Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import {
   afterAll,
   beforeAll,
@@ -13,13 +14,8 @@ import {
 } from "vitest";
 
 import { DiscordAPIError } from "@discordjs/rest";
-import * as Reactivity from "@effect/experimental/Reactivity";
-import { SqlClient } from "@effect/sql";
-import * as Sqlite from "@effect/sql-kysely/Sqlite";
-import { SqliteClient } from "@effect/sql-sqlite-node";
 
-import { DatabaseService } from "#~/Database";
-import type { DB } from "#~/db";
+import { makeDatabaseLayer } from "#~/Database";
 import type { Job } from "#~/jobs/jobRunner";
 
 import {
@@ -86,20 +82,13 @@ vi.mock("#~/jobs/jobRunner", () => ({
 // In-memory SQLite test layer (for executeJobEffect which uses DatabaseService)
 // ---------------------------------------------------------------------------
 
-const TestSqliteLive = Layer.scoped(
-  SqlClient.SqlClient,
-  SqliteClient.make({ filename: ":memory:" }),
-).pipe(Layer.provide(Reactivity.layer));
+const TestDbLive = makeDatabaseLayer(":memory:");
 
-const TestKyselyLive = Layer.effect(DatabaseService, Sqlite.make<DB>()).pipe(
-  Layer.provide(TestSqliteLive),
-);
-
-const TestLayer = Layer.mergeAll(TestSqliteLive, TestKyselyLive);
+const TestLayer = TestDbLive;
 
 const testRuntime = ManagedRuntime.make(TestLayer);
 
-type TestR = Layer.Layer.Success<typeof TestLayer>;
+type TestR = Layer.Success<typeof TestLayer>;
 
 const runTest = <A, E>(effect: Effect.Effect<A, E, TestR>) =>
   testRuntime.runPromise(effect);

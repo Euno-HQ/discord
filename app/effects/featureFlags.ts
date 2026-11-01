@@ -1,10 +1,10 @@
-import { Context, Effect, Layer, Schema, type ParseResult } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 
 import { FeatureDisabledError, PostHogError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import { PostHogService, PostHogServiceLive } from "#~/effects/posthog";
 
-export const BooleanFlag = Schema.Literal(
+export const BooleanFlag = Schema.Literals([
   "mod-log",
   "anon-report",
   "escalate",
@@ -15,7 +15,7 @@ export const BooleanFlag = Schema.Literal(
   // Only referenced by app/explorations/membershipGate (deprecated).
   "member-applications",
   "data-export",
-);
+]);
 export type BooleanFlag = typeof BooleanFlag.Type;
 
 export interface IFeatureFlagService {
@@ -29,16 +29,16 @@ export interface IFeatureFlagService {
   readonly getPostHogValue: <A, I>(
     flag: string,
     guildId: string,
-    schema: Schema.Schema<A, I>,
-  ) => Effect.Effect<A, ParseResult.ParseError>;
+    schema: Schema.Codec<A, I>,
+  ) => Effect.Effect<A, Schema.SchemaError>;
 }
 
-export class FeatureFlagService extends Context.Tag("FeatureFlagService")<
+export class FeatureFlagService extends Context.Service<
   FeatureFlagService,
   IFeatureFlagService
->() {}
+>()("FeatureFlagService") {}
 
-export const FeatureFlagServiceLive = Layer.scoped(
+export const FeatureFlagServiceLive = Layer.effect(
   FeatureFlagService,
   Effect.gen(function* () {
     const posthog = yield* PostHogService;
@@ -58,7 +58,7 @@ export const FeatureFlagServiceLive = Layer.scoped(
           Effect.map((result) => result ?? false),
           // A PostHog outage otherwise silently disables a paid feature for every
           // guild with zero signal — warn so it's visible, then fail closed.
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             logEffect(
               "warn",
               "FeatureFlagService",
@@ -86,7 +86,7 @@ export const FeatureFlagServiceLive = Layer.scoped(
               catch: (cause) =>
                 new PostHogError({ operation: "getFeatureFlag", cause }),
             }).pipe(
-              Effect.catchAll((error) =>
+              Effect.catch((error) =>
                 logEffect(
                   "debug",
                   "FeatureFlagService",
@@ -97,7 +97,7 @@ export const FeatureFlagServiceLive = Layer.scoped(
             );
             raw = result ?? undefined;
           }
-          return yield* Schema.decodeUnknown(schema)(raw);
+          return yield* Schema.decodeUnknownEffect(schema)(raw);
         }).pipe(
           Effect.withSpan("FeatureFlagService.getPostHogValueDecoded", {
             attributes: { flag, guildId },
@@ -116,8 +116,10 @@ export const withFeatureFlag = <A, E, R, A2, E2, R2>(
   onEnabled: Effect.Effect<A, E, R>,
   onDisabled: Effect.Effect<A2, E2, R2>,
 ): Effect.Effect<A | A2, E | E2, R | R2> =>
-  Effect.flatMap(check, (enabled) =>
-    Effect.if(enabled, { onTrue: () => onEnabled, onFalse: () => onDisabled }),
+  Effect.flatMap(
+    check,
+    (enabled): Effect.Effect<A | A2, E | E2, R | R2> =>
+      enabled ? onEnabled : onDisabled,
   );
 
 /**

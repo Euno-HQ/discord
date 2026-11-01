@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 
-import { DatabaseService, type SqlError } from "#~/Database";
+import { db, run, type DatabaseService, type SqlError } from "#~/Database";
 import { SupervisorService, type ActiveJobMeta } from "#~/effects/supervisor";
 import type { Job } from "#~/jobs/jobRunner";
 
@@ -18,16 +18,17 @@ export function fetchAdminJobs(): Effect.Effect<
   DatabaseService | SupervisorService
 > {
   return Effect.gen(function* () {
-    const db = yield* DatabaseService;
     const supervisor = yield* SupervisorService;
 
     // Query DB and Supervisor in parallel
     const [jobs, activeMetas] = yield* Effect.all([
       Effect.gen(function* () {
-        return yield* db
-          .selectFrom("background_jobs")
-          .selectAll()
-          .orderBy("created_at", "desc");
+        return yield* run(
+          db
+            .selectFrom("background_jobs")
+            .selectAll()
+            .orderBy("created_at", "desc"),
+        );
       }),
       supervisor.getActiveJobMeta(),
     ]);

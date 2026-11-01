@@ -48,7 +48,7 @@ export const deletionLoggerPipeline: Effect.Effect<
               content: e.message.content,
             })
             .pipe(
-              Effect.catchAll((err) =>
+              Effect.catch((err) =>
                 logEffect("warn", "DeletionLogger", "Failed to cache message", {
                   messageId: e.message.id,
                   error: err,
@@ -59,7 +59,7 @@ export const deletionLoggerPipeline: Effect.Effect<
           return cache
             .touchMessage(e.newMessage.id, e.newMessage.content ?? null)
             .pipe(
-              Effect.catchAll((err) =>
+              Effect.catch((err) =>
                 logEffect(
                   "warn",
                   "DeletionLogger",

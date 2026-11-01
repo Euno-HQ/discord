@@ -1,10 +1,10 @@
-import { Cause, FiberId, Logger } from "effect";
+import { Cause, Logger, References } from "effect";
 
 import { errorReplacer } from "#~/helpers/formatError";
 
 /**
  * JSON logger that preserves Error causes in annotation values. Effect's
- * built-in `Logger.json` pre-collapses each annotation value through
+ * built-in `Logger.formatJson` pre-collapses each annotation value through
  * `Inspectable.toJSON`, which turns a native Error into `{}` before
  * serialization — losing message/stack/cause.
  *
@@ -15,44 +15,40 @@ import { errorReplacer } from "#~/helpers/formatError";
  *
  * The fiber-level `cause` field (from a failed effect surfacing in
  * `options.cause`) is rendered as a human-readable string via
- * `Cause.pretty(cause, { renderErrorCause: true })`, matching `Logger.json`'s
+ * `Cause.pretty(cause)`, matching `Logger.formatJson`'s
  * behavior — it is NOT run through `errorReplacer`.
  *
- * Output shape matches `Logger.json` (message/logLevel/timestamp/cause/
+ * Output shape matches the v3 `Logger.json` (message/logLevel/timestamp/cause/
  * annotations/spans/fiberId) so log consumers are unaffected.
  */
-export const JsonLoggerWithCause = Logger.make((options) => {
-  const { annotations, cause, date, fiberId, logLevel, message, spans } =
-    options;
+export const JsonLoggerWithCause = Logger.make(
+  ({ cause, date, fiber, logLevel, message }) => {
+    const annotationsObj: Record<string, unknown> = {
+      ...fiber.getRef(References.CurrentLogAnnotations),
+    };
 
-  const annotationsObj: Record<string, unknown> = {};
-  for (const [key, value] of annotations) {
-    annotationsObj[key] = value;
-  }
+    const now = date.getTime();
+    const spansObj: Record<string, number> = {};
+    for (const [label, startTime] of fiber.getRef(References.CurrentLogSpans)) {
+      spansObj[label] = now - startTime;
+    }
 
-  const now = date.getTime();
-  const spansObj: Record<string, number> = {};
-  for (const span of spans) {
-    spansObj[span.label] = now - span.startTime;
-  }
+    const record = {
+      // v4 always passes the variadic message array; unwrap the single-message
+      // case so the field stays a scalar like it was in v3.
+      message:
+        Array.isArray(message) && message.length === 1 ? message[0] : message,
+      logLevel: logLevel.toUpperCase(),
+      timestamp: date.toISOString(),
+      cause: cause.reasons.length === 0 ? undefined : Cause.pretty(cause),
+      annotations: annotationsObj,
+      spans: spansObj,
+      fiberId: `#${fiber.id}`,
+    };
 
-  const record = {
-    message,
-    logLevel: logLevel.label,
-    timestamp: date.toISOString(),
-    cause: Cause.isEmpty(cause)
-      ? undefined
-      : Cause.pretty(cause, { renderErrorCause: true }),
-    annotations: annotationsObj,
-    spans: spansObj,
-    fiberId: FiberId.threadName(fiberId),
-  };
-
-  globalThis.console.log(JSON.stringify(record, errorReplacer));
-});
+    globalThis.console.log(JSON.stringify(record, errorReplacer));
+  },
+);
 
 /** Layer that replaces the default logger with the error-aware JSON logger. */
-export const JsonLoggerLayer = Logger.replace(
-  Logger.defaultLogger,
-  JsonLoggerWithCause,
-);
+export const JsonLoggerLayer = Logger.layer([JsonLoggerWithCause]);

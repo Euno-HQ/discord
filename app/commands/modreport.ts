@@ -296,7 +296,7 @@ export const Command = {
 
       commandStats.commandExecuted(interaction, "modreport", true);
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           yield* logEffect("error", "Commands", "Modreport command failed", {
             guildId: interaction.guildId,
@@ -313,7 +313,7 @@ export const Command = {
           const reply = toUserResponse(error);
           yield* interactionEditReply(interaction, {
             content: reply.content,
-          }).pipe(Effect.catchAll(() => Effect.void));
+          }).pipe(Effect.catch(() => Effect.void));
         }),
       ),
       Effect.withSpan("modreportCommand", {

@@ -37,10 +37,9 @@ const makeClient = (): Client =>
  * Discord — that's the REST-based `ssrDiscordSdk` in `app/discord/api.ts`,
  * which stays separate pending the #317 boundary decision.
  */
-export class DiscordClient extends Context.Tag("DiscordClient")<
-  DiscordClient,
-  Client
->() {}
+export class DiscordClient extends Context.Service<DiscordClient, Client>()(
+  "DiscordClient",
+) {}
 
 export const DiscordClientLayer = Layer.sync(DiscordClient, makeClient);
 

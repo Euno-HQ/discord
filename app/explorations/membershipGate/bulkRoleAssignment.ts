@@ -9,7 +9,7 @@ import {
 import { ComponentType, MessageFlags } from "discord.js";
 import { Effect } from "effect";
 
-import { DatabaseService } from "#~/Database";
+import { db, run } from "#~/Database";
 import { ssrDiscordSdk } from "#~/discord/api";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { withRetry } from "#~/effects/errorHandling";
@@ -275,8 +275,6 @@ export const executeJobEffect = (job: Job) =>
 
 const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     // Determine final cursor: scan on first run, reuse on resume
     let finalCursor: BulkRoleAssignmentFinalCursor;
     if (job.final_cursor) {
@@ -294,10 +292,12 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
 
       // Persist the final cursor so a restart doesn't re-scan
       const now = new Date().toISOString();
-      yield* db
-        .updateTable("background_jobs")
-        .set({ final_cursor: JSON.stringify(finalCursor), updated_at: now })
-        .where("id", "=", job.id);
+      yield* run(
+        db
+          .updateTable("background_jobs")
+          .set({ final_cursor: JSON.stringify(finalCursor), updated_at: now })
+          .where("id", "=", job.id),
+      );
 
       yield* logEffect("info", "BulkRoleAssignment", "Final cursor set", {
         jobId: job.id,
@@ -325,7 +325,7 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
                 `Estimated time: ${timeEstimate}. Progress updates will be posted every 30 minutes.`,
             },
           }),
-        ).pipe(Effect.catchAll(() => Effect.void));
+        ).pipe(Effect.catch(() => Effect.void));
       }
     }
 
@@ -389,7 +389,7 @@ const executePhase1Effect = (job: Job, payload: BulkRoleAssignmentPayload) =>
                 `Estimated time remaining: ${eta}`,
             },
           }),
-        ).pipe(Effect.catchAll(() => Effect.void));
+        ).pipe(Effect.catch(() => Effect.void));
       }
 
       if (result.errors > 0) {

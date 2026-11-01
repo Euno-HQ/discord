@@ -2,7 +2,7 @@ import type { Message, User } from "discord.js";
 import { Effect } from "effect";
 import type { Selectable } from "kysely";
 
-import { DatabaseService } from "#~/Database";
+import { db, run } from "#~/Database";
 import type { DB } from "#~/db";
 import { DiscordClient } from "#~/discord/client.server";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
@@ -42,7 +42,6 @@ export const recordReport = (data: {
   extra?: string;
 }) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
     const reportId = crypto.randomUUID() as string;
 
     yield* logEffect("info", "ReportedMessage", "Recording report", {
@@ -56,29 +55,34 @@ export const recordReport = (data: {
     // the same (message, reason) pair in the same guild would otherwise raise
     // SQLITE_CONSTRAINT_UNIQUE. DO NOTHING preserves the first-written log
     // pointer (so mods can still navigate to the original thread post).
-    const result = yield* db
-      .insertInto("reported_messages")
-      .values({
-        id: reportId,
-        reported_message_id: data.reportedMessageId,
-        reported_channel_id: data.reportedChannelId,
-        reported_user_id: data.reportedUserId,
-        guild_id: data.guildId,
-        log_message_id: data.logMessageId,
-        log_channel_id: data.logChannelId,
-        reason: data.reason,
-        staff_id: data.staffId,
-        staff_username: data.staffUsername,
-        extra: data.extra,
-        created_at: new Date().toISOString(),
-      })
-      .onConflict((oc) =>
-        oc.columns(["reported_message_id", "reason", "guild_id"]).doNothing(),
-      );
+    const result = yield* run(
+      db
+        .insertInto("reported_messages")
+        .values({
+          id: reportId,
+          reported_message_id: data.reportedMessageId,
+          reported_channel_id: data.reportedChannelId,
+          reported_user_id: data.reportedUserId,
+          guild_id: data.guildId,
+          log_message_id: data.logMessageId,
+          log_channel_id: data.logChannelId,
+          reason: data.reason,
+          staff_id: data.staffId,
+          staff_username: data.staffUsername,
+          extra: data.extra,
+          created_at: new Date().toISOString(),
+        })
+        .onConflict((oc) =>
+          oc.columns(["reported_message_id", "reason", "guild_id"]).doNothing(),
+        )
+        .returning("id"),
+    );
 
-    // SQLite returns a single InsertResult; numInsertedOrUpdatedRows is 0n on
-    // conflict-skip and 1n on actual insert.
-    const wasInserted = Number(result[0]?.numInsertedOrUpdatedRows ?? 0n) > 0;
+    // RETURNING yields the row on an actual insert and nothing on a
+    // conflict-skip. (Previously this read `numInsertedOrUpdatedRows` off the
+    // result, but effect/sql returns no rows for a non-RETURNING write, so
+    // `wasInserted` was always false.)
+    const wasInserted = result.length > 0;
 
     yield* logEffect(
       "info",
@@ -103,11 +107,9 @@ export const recordReport = (data: {
  */
 export const getReportById = (reportId: string) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-    const [report] = yield* kysely
-      .selectFrom("reported_messages")
-      .selectAll()
-      .where("id", "=", reportId);
+    const [report] = yield* run(
+      db.selectFrom("reported_messages").selectAll().where("id", "=", reportId),
+    );
     return report;
   }).pipe(Effect.withSpan("getReportById", { attributes: { reportId } }));
 
@@ -116,13 +118,13 @@ export const getReportById = (reportId: string) =>
  */
 export const getReportsForUser = (userId: string, guildId: string) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-
-    const reports = yield* kysely
-      .selectFrom("reported_messages")
-      .selectAll()
-      .where("reported_user_id", "=", userId)
-      .where("guild_id", "=", guildId);
+    const reports = yield* run(
+      db
+        .selectFrom("reported_messages")
+        .selectAll()
+        .where("reported_user_id", "=", userId)
+        .where("guild_id", "=", guildId),
+    );
 
     return reports;
   }).pipe(
@@ -138,9 +140,7 @@ export const getReportsForMessage = (
   includeDeleted = false,
 ) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-
-    let query = kysely
+    let query = db
       .selectFrom("reported_messages")
       .selectAll()
       .where("reported_message_id", "=", messageId)
@@ -150,7 +150,7 @@ export const getReportsForMessage = (
       query = query.where("deleted_at", "is", null);
     }
 
-    const reports = yield* query.orderBy("created_at", "desc");
+    const reports = yield* run(query.orderBy("created_at", "desc"));
 
     yield* logEffect(
       "debug",
@@ -171,29 +171,33 @@ export const getReportsForMessage = (
  */
 export const getUserReportStats = (userId: string, guildId: string) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-
     const [[totalReports], [uniqueMessages], [uniqueChannels]] =
       yield* Effect.all([
-        kysely
-          .selectFrom("reported_messages")
-          .select((eb) => eb.fn.count("id").as("count"))
-          .where("reported_user_id", "=", userId)
-          .where("guild_id", "=", guildId),
-        kysely
-          .selectFrom("reported_messages")
-          .select(({ fn }) =>
-            fn.count("reported_message_id").distinct().as("count"),
-          )
-          .where("reported_user_id", "=", userId)
-          .where("guild_id", "=", guildId),
-        kysely
-          .selectFrom("reported_messages")
-          .select(({ fn }) =>
-            fn.count("reported_channel_id").distinct().as("count"),
-          )
-          .where("reported_user_id", "=", userId)
-          .where("guild_id", "=", guildId),
+        run(
+          db
+            .selectFrom("reported_messages")
+            .select((eb) => eb.fn.count("id").as("count"))
+            .where("reported_user_id", "=", userId)
+            .where("guild_id", "=", guildId),
+        ),
+        run(
+          db
+            .selectFrom("reported_messages")
+            .select(({ fn }) =>
+              fn.count("reported_message_id").distinct().as("count"),
+            )
+            .where("reported_user_id", "=", userId)
+            .where("guild_id", "=", guildId),
+        ),
+        run(
+          db
+            .selectFrom("reported_messages")
+            .select(({ fn }) =>
+              fn.count("reported_channel_id").distinct().as("count"),
+            )
+            .where("reported_user_id", "=", userId)
+            .where("guild_id", "=", guildId),
+        ),
       ]);
 
     return {
@@ -211,13 +215,13 @@ export const getUserReportStats = (userId: string, guildId: string) =>
  */
 export const getSpamReportGuildCount = (userId: string) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-
-    const [result] = yield* kysely
-      .selectFrom("reported_messages")
-      .select(({ fn }) => fn.count("guild_id").distinct().as("count"))
-      .where("reported_user_id", "=", userId)
-      .where("reason", "=", ReportReasons.spam);
+    const [result] = yield* run(
+      db
+        .selectFrom("reported_messages")
+        .select(({ fn }) => fn.count("guild_id").distinct().as("count"))
+        .where("reported_user_id", "=", userId)
+        .where("reason", "=", ReportReasons.spam),
+    );
 
     return Number(result?.count ?? 0);
   }).pipe(
@@ -229,14 +233,14 @@ export const getSpamReportGuildCount = (userId: string) =>
  */
 export const getSpamReportCount = (userId: string, guildId: string) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-
-    const [result] = yield* kysely
-      .selectFrom("reported_messages")
-      .select((eb) => eb.fn.count("id").as("count"))
-      .where("reported_user_id", "=", userId)
-      .where("guild_id", "=", guildId)
-      .where("reason", "=", ReportReasons.spam);
+    const [result] = yield* run(
+      db
+        .selectFrom("reported_messages")
+        .select((eb) => eb.fn.count("id").as("count"))
+        .where("reported_user_id", "=", userId)
+        .where("guild_id", "=", guildId)
+        .where("reason", "=", ReportReasons.spam),
+    );
 
     return Number(result?.count ?? 0);
   }).pipe(
@@ -250,8 +254,6 @@ export const getSpamReportCount = (userId: string, guildId: string) =>
  */
 export const getUserReportSummary = (userId: string, guildId: string) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-
     const [
       stats,
       reasonBreakdown,
@@ -262,53 +264,65 @@ export const getUserReportSummary = (userId: string, guildId: string) =>
       [staffRow],
     ] = yield* Effect.all([
       getUserReportStats(userId, guildId),
-      kysely
-        .selectFrom("reported_messages")
-        .select(["reason"])
-        .select((eb) => eb.fn.count("id").as("count"))
-        .where("reported_user_id", "=", userId)
-        .where("guild_id", "=", guildId)
-        .groupBy("reason")
-        .orderBy("count", "desc"),
+      run(
+        db
+          .selectFrom("reported_messages")
+          .select(["reason"])
+          .select((eb) => eb.fn.count("id").as("count"))
+          .where("reported_user_id", "=", userId)
+          .where("guild_id", "=", guildId)
+          .groupBy("reason")
+          .orderBy("count", "desc"),
+      ),
       // Get first report (earliest created_at)
-      kysely
-        .selectFrom("reported_messages")
-        .select("created_at")
-        .where("reported_user_id", "=", userId)
-        .where("guild_id", "=", guildId)
-        .orderBy("created_at", "asc")
-        .limit(1),
+      run(
+        db
+          .selectFrom("reported_messages")
+          .select("created_at")
+          .where("reported_user_id", "=", userId)
+          .where("guild_id", "=", guildId)
+          .orderBy("created_at", "asc")
+          .limit(1),
+      ),
       // Get last report (latest created_at)
-      kysely
-        .selectFrom("reported_messages")
-        .select("created_at")
-        .where("reported_user_id", "=", userId)
-        .where("guild_id", "=", guildId)
-        .orderBy("created_at", "desc")
-        .limit(1),
-      kysely
-        .selectFrom("reported_messages")
-        .select((eb) => eb.fn.count("id").as("count"))
-        .where("reported_user_id", "=", userId)
-        .where("guild_id", "=", guildId)
-        .where("reason", "=", ReportReasons.anonReport),
-      kysely
-        .selectFrom("reported_messages")
-        .select((eb) => [
-          eb.fn.count("id").as("count"),
-          eb.ref("created_at").as("day"),
-        ])
-        .where("reported_user_id", "=", userId)
-        .where("guild_id", "=", guildId)
-        .groupBy(({ fn }) => fn("date", ["created_at"]))
-        .orderBy("count", "desc")
-        .limit(1),
-      kysely
-        .selectFrom("reported_messages")
-        .select(({ fn }) => fn.count("staff_id").distinct().as("count"))
-        .where("reported_user_id", "=", userId)
-        .where("guild_id", "=", guildId)
-        .where("staff_id", "is not", null),
+      run(
+        db
+          .selectFrom("reported_messages")
+          .select("created_at")
+          .where("reported_user_id", "=", userId)
+          .where("guild_id", "=", guildId)
+          .orderBy("created_at", "desc")
+          .limit(1),
+      ),
+      run(
+        db
+          .selectFrom("reported_messages")
+          .select((eb) => eb.fn.count("id").as("count"))
+          .where("reported_user_id", "=", userId)
+          .where("guild_id", "=", guildId)
+          .where("reason", "=", ReportReasons.anonReport),
+      ),
+      run(
+        db
+          .selectFrom("reported_messages")
+          .select((eb) => [
+            eb.fn.count("id").as("count"),
+            eb.ref("created_at").as("day"),
+          ])
+          .where("reported_user_id", "=", userId)
+          .where("guild_id", "=", guildId)
+          .groupBy(({ fn }) => fn("date", ["created_at"]))
+          .orderBy("count", "desc")
+          .limit(1),
+      ),
+      run(
+        db
+          .selectFrom("reported_messages")
+          .select(({ fn }) => fn.count("staff_id").distinct().as("count"))
+          .where("reported_user_id", "=", userId)
+          .where("guild_id", "=", guildId)
+          .where("staff_id", "is not", null),
+      ),
     ]);
 
     return {
@@ -340,24 +354,27 @@ export const getMonthlyReportCounts = (
   months = 6,
 ) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
     const cutoff = new Date(
       Date.now() - months * 30 * 24 * 60 * 60 * 1000,
     ).toISOString();
 
-    return yield* kysely
-      .selectFrom("reported_messages")
-      .select((eb) => [
-        eb.fn("strftime", [eb.val("%Y-%m"), eb.ref("created_at")]).as("month"),
-        eb.fn.count("id").as("count"),
-      ])
-      .where("reported_user_id", "=", userId)
-      .where("guild_id", "=", guildId)
-      .where("created_at", ">=", cutoff)
-      .groupBy(({ fn, val, ref }) =>
-        fn("strftime", [val("%Y-%m"), ref("created_at")]),
-      )
-      .orderBy("month", "asc");
+    return yield* run(
+      db
+        .selectFrom("reported_messages")
+        .select((eb) => [
+          eb
+            .fn("strftime", [eb.val("%Y-%m"), eb.ref("created_at")])
+            .as("month"),
+          eb.fn.count("id").as("count"),
+        ])
+        .where("reported_user_id", "=", userId)
+        .where("guild_id", "=", guildId)
+        .where("created_at", ">=", cutoff)
+        .groupBy(({ fn, val, ref }) =>
+          fn("strftime", [val("%Y-%m"), ref("created_at")]),
+        )
+        .orderBy("month", "asc"),
+    );
   }).pipe(
     Effect.withSpan("getMonthlyReportCounts", {
       attributes: { userId, guildId, months },
@@ -373,23 +390,26 @@ export const getRecentReportCount = (
   days = 30,
 ) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
     const cutoff = new Date(
       Date.now() - days * 24 * 60 * 60 * 1000,
     ).toISOString();
 
     const [[totalRow], [recentRow]] = yield* Effect.all([
-      kysely
-        .selectFrom("reported_messages")
-        .select((eb) => eb.fn.count("id").as("count"))
-        .where("reported_user_id", "=", userId)
-        .where("guild_id", "=", guildId),
-      kysely
-        .selectFrom("reported_messages")
-        .select((eb) => eb.fn.count("id").as("count"))
-        .where("reported_user_id", "=", userId)
-        .where("guild_id", "=", guildId)
-        .where("created_at", ">=", cutoff),
+      run(
+        db
+          .selectFrom("reported_messages")
+          .select((eb) => eb.fn.count("id").as("count"))
+          .where("reported_user_id", "=", userId)
+          .where("guild_id", "=", guildId),
+      ),
+      run(
+        db
+          .selectFrom("reported_messages")
+          .select((eb) => eb.fn.count("id").as("count"))
+          .where("reported_user_id", "=", userId)
+          .where("guild_id", "=", guildId)
+          .where("created_at", ">=", cutoff),
+      ),
     ]);
 
     return {
@@ -412,17 +432,17 @@ export const getChannelBreakdown = (
   limit = 5,
 ) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-
-    return yield* kysely
-      .selectFrom("reported_messages")
-      .select(["reported_channel_id"])
-      .select((eb) => eb.fn.count("id").as("count"))
-      .where("reported_user_id", "=", userId)
-      .where("guild_id", "=", guildId)
-      .groupBy("reported_channel_id")
-      .orderBy("count", "desc")
-      .limit(limit);
+    return yield* run(
+      db
+        .selectFrom("reported_messages")
+        .select(["reported_channel_id"])
+        .select((eb) => eb.fn.count("id").as("count"))
+        .where("reported_user_id", "=", userId)
+        .where("guild_id", "=", guildId)
+        .groupBy("reported_channel_id")
+        .orderBy("count", "desc")
+        .limit(limit),
+    );
   }).pipe(
     Effect.withSpan("getChannelBreakdown", {
       attributes: { userId, guildId, limit },
@@ -434,18 +454,18 @@ export const getChannelBreakdown = (
  */
 export const getStaffBreakdown = (userId: string, guildId: string, limit = 5) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-
-    return yield* kysely
-      .selectFrom("reported_messages")
-      .select(["staff_id", "staff_username"])
-      .select((eb) => eb.fn.count("id").as("count"))
-      .where("reported_user_id", "=", userId)
-      .where("guild_id", "=", guildId)
-      .where("staff_id", "is not", null)
-      .groupBy(["staff_id", "staff_username"])
-      .orderBy("count", "desc")
-      .limit(limit);
+    return yield* run(
+      db
+        .selectFrom("reported_messages")
+        .select(["staff_id", "staff_username"])
+        .select((eb) => eb.fn.count("id").as("count"))
+        .where("reported_user_id", "=", userId)
+        .where("guild_id", "=", guildId)
+        .where("staff_id", "is not", null)
+        .groupBy(["staff_id", "staff_username"])
+        .orderBy("count", "desc")
+        .limit(limit),
+    );
   }).pipe(
     Effect.withSpan("getStaffBreakdown", {
       attributes: { userId, guildId, limit },
@@ -457,9 +477,7 @@ export const getStaffBreakdown = (userId: string, guildId: string, limit = 5) =>
  */
 export const deleteReport = (reportId: string) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-
-    yield* kysely.deleteFrom("reported_messages").where("id", "=", reportId);
+    yield* run(db.deleteFrom("reported_messages").where("id", "=", reportId));
   }).pipe(Effect.withSpan("deleteReport", { attributes: { reportId } }));
 
 /**
@@ -467,14 +485,14 @@ export const deleteReport = (reportId: string) =>
  */
 export const markMessageAsDeleted = (messageId: string, guildId: string) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-
-    const result = yield* kysely
-      .updateTable("reported_messages")
-      .set("deleted_at", new Date().toISOString())
-      .where("reported_message_id", "=", messageId)
-      .where("guild_id", "=", guildId)
-      .where("deleted_at", "is", null);
+    const result = yield* run(
+      db
+        .updateTable("reported_messages")
+        .set("deleted_at", new Date().toISOString())
+        .where("reported_message_id", "=", messageId)
+        .where("guild_id", "=", guildId)
+        .where("deleted_at", "is", null),
+    );
 
     return { updatedCount: result.length };
   }).pipe(
@@ -488,15 +506,15 @@ export const markMessageAsDeleted = (messageId: string, guildId: string) =>
  */
 export const getUniqueNonDeletedMessages = (userId: string, guildId: string) =>
   Effect.gen(function* () {
-    const kysely = yield* DatabaseService;
-
-    return yield* kysely
-      .selectFrom("reported_messages")
-      .select(["reported_message_id", "reported_channel_id"])
-      .distinct()
-      .where("reported_user_id", "=", userId)
-      .where("guild_id", "=", guildId)
-      .where("deleted_at", "is", null);
+    return yield* run(
+      db
+        .selectFrom("reported_messages")
+        .select(["reported_message_id", "reported_channel_id"])
+        .distinct()
+        .where("reported_user_id", "=", userId)
+        .where("guild_id", "=", guildId)
+        .where("deleted_at", "is", null),
+    );
   }).pipe(
     Effect.withSpan("getUniqueNonDeletedMessages", {
       attributes: { userId, guildId },
@@ -558,7 +576,7 @@ const deleteSingleMessage = (
 
     return { success: true as const, messageId };
   }).pipe(
-    Effect.catchAll((error) => {
+    Effect.catch((error) => {
       return Effect.gen(function* () {
         yield* logEffect(
           "warn",

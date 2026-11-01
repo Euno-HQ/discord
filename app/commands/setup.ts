@@ -52,7 +52,7 @@ export const Command = {
 
       commandStats.commandExecuted(interaction, "setup", true);
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           yield* logEffect("error", "Commands", "Setup command failed", {
             guildId: interaction.guildId,
@@ -66,7 +66,7 @@ export const Command = {
           yield* interactionReply(interaction, {
             content: reply.content,
             flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
-          }).pipe(Effect.catchAll(() => Effect.void));
+          }).pipe(Effect.catch(() => Effect.void));
         }),
       ),
       Effect.withSpan("setupCommand", {

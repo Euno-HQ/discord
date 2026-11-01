@@ -25,12 +25,12 @@ const sendWelcome = (guild: Guild) =>
   tryDiscord("sendWelcomeSystemChannel", () =>
     guild.systemChannel!.send(WELCOME_MESSAGE),
   ).pipe(
-    Effect.catchAll(() =>
+    Effect.catch(() =>
       tryDiscord("sendWelcomePublicUpdatesChannel", () =>
         guild.publicUpdatesChannel!.send(WELCOME_MESSAGE),
       ),
     ),
-    Effect.catchAll(() =>
+    Effect.catch(() =>
       Effect.gen(function* () {
         const channels = yield* tryDiscord("fetchGuildChannelsForWelcome", () =>
           guild.channels.fetch(),
@@ -49,7 +49,7 @@ const sendWelcome = (guild: Guild) =>
         >(
           (acc, ch) =>
             acc.pipe(
-              Effect.catchAll(() =>
+              Effect.catch(() =>
                 tryDiscord("sendWelcomeFallbackChannel", () =>
                   ch.send(WELCOME_MESSAGE),
                 ),
@@ -66,7 +66,7 @@ const sendWelcome = (guild: Guild) =>
         yield* attempts;
       }),
     ),
-    Effect.catchAll(() => Effect.void), // give up silently
+    Effect.catch(() => Effect.void), // give up silently
   );
 
 export const handleGuildCreate = (

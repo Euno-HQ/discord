@@ -72,7 +72,7 @@ export const Command = {
         content: "This member has been banned",
       });
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           yield* logEffect("error", "Commands", "Force ban failed", {
             guildId: interaction.guildId,
@@ -92,7 +92,7 @@ export const Command = {
           yield* interactionReply(interaction, {
             content: reply.content,
             flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
-          }).pipe(Effect.catchAll(() => Effect.void));
+          }).pipe(Effect.catch(() => Effect.void));
         }),
       ),
       Effect.withSpan("forceBanCommand", {

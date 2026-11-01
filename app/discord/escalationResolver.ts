@@ -13,7 +13,7 @@ const ONE_MINUTE = 60 * 1000;
  * Escalation resolver scheduler.
  * Runs every 15 minutes to check for escalations that should be auto-resolved.
  *
- * A long-lived Effect — fork it with `Effect.forkDaemon` / `runtime.runFork`
+ * A long-lived Effect — fork it with `Effect.forkDetach` / `runtime.runFork`
  * once the client is ready (see `server.ts`). Per-run failures are caught and
  * logged so the repeating schedule is never torn down.
  */
@@ -25,7 +25,7 @@ export const escalationResolverSchedule = (
     ONE_MINUTE * 15,
     checkPendingEscalationsEffect(client).pipe(
       Effect.provide(Layer.mergeAll(EscalationServiceLive)),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         logEffect(
           "error",
           "EscalationResolver",

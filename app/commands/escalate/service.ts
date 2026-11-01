@@ -2,7 +2,7 @@ import type { Guild } from "discord.js";
 import { Context, Effect, Layer } from "effect";
 import type { Selectable } from "kysely";
 
-import { DatabaseService, type SqlError } from "#~/Database";
+import { DatabaseService, db, type SqlError } from "#~/Database";
 import type { DB } from "#~/db";
 import { fetchMember } from "#~/effects/discordSdk.ts";
 import {
@@ -76,15 +76,16 @@ export interface IEscalationService {
   ) => Effect.Effect<void, ResolutionExecutionError>;
 }
 
-export class EscalationService extends Context.Tag("EscalationService")<
+export class EscalationService extends Context.Service<
   EscalationService,
   IEscalationService
->() {}
+>()("EscalationService") {}
 
 export const EscalationServiceLive = Layer.effect(
   EscalationService,
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
+    const database = yield* DatabaseService;
+    const { run } = database;
 
     return {
       createEscalation: (data) =>
@@ -105,17 +106,16 @@ export const EscalationServiceLive = Layer.effect(
             scheduled_for: scheduledFor,
           };
 
-          yield* db.insertInto("escalations").values(escalation);
+          yield* run(db.insertInto("escalations").values(escalation));
 
           yield* logEffect("info", "EscalationService", "Created escalation", {
             guildId: data.guildId,
           });
 
           // Fetch the created record to get all DB-generated fields
-          const [created] = yield* db
-            .selectFrom("escalations")
-            .selectAll()
-            .where("id", "=", data.id);
+          const [created] = yield* run(
+            db.selectFrom("escalations").selectAll().where("id", "=", data.id),
+          );
 
           return created;
         }).pipe(
@@ -129,10 +129,9 @@ export const EscalationServiceLive = Layer.effect(
 
       getEscalation: (id) =>
         Effect.gen(function* () {
-          const [escalation] = yield* db
-            .selectFrom("escalations")
-            .selectAll()
-            .where("id", "=", id);
+          const [escalation] = yield* run(
+            db.selectFrom("escalations").selectAll().where("id", "=", id),
+          );
 
           if (!escalation) {
             return yield* Effect.fail(
@@ -150,19 +149,23 @@ export const EscalationServiceLive = Layer.effect(
       recordVote: (data) =>
         Effect.gen(function* () {
           // Check for existing vote to implement toggle behavior
-          const existingVotes = yield* db
-            .selectFrom("escalation_records")
-            .selectAll()
-            .where("escalation_id", "=", data.escalationId)
-            .where("voter_id", "=", data.voterId);
+          const existingVotes = yield* run(
+            db
+              .selectFrom("escalation_records")
+              .selectAll()
+              .where("escalation_id", "=", data.escalationId)
+              .where("voter_id", "=", data.voterId),
+          );
 
           // If same vote exists, delete it (toggle off)
           if (existingVotes.some((v) => v.vote === data.vote)) {
-            yield* db
-              .deleteFrom("escalation_records")
-              .where("escalation_id", "=", data.escalationId)
-              .where("voter_id", "=", data.voterId)
-              .where("vote", "=", data.vote);
+            yield* run(
+              db
+                .deleteFrom("escalation_records")
+                .where("escalation_id", "=", data.escalationId)
+                .where("voter_id", "=", data.voterId)
+                .where("vote", "=", data.vote),
+            );
 
             yield* logEffect(
               "info",
@@ -175,12 +178,14 @@ export const EscalationServiceLive = Layer.effect(
           }
 
           // Otherwise, insert new vote
-          yield* db.insertInto("escalation_records").values({
-            id: crypto.randomUUID(),
-            escalation_id: data.escalationId,
-            voter_id: data.voterId,
-            vote: data.vote,
-          });
+          yield* run(
+            db.insertInto("escalation_records").values({
+              id: crypto.randomUUID(),
+              escalation_id: data.escalationId,
+              voter_id: data.voterId,
+              vote: data.vote,
+            }),
+          );
 
           yield* logEffect("info", "EscalationService", "Recorded new vote", {
             escalationId: data.escalationId,
@@ -200,10 +205,12 @@ export const EscalationServiceLive = Layer.effect(
 
       getVotesForEscalation: (escalationId) =>
         Effect.gen(function* () {
-          const votes = yield* db
-            .selectFrom("escalation_records")
-            .selectAll()
-            .where("escalation_id", "=", escalationId);
+          const votes = yield* run(
+            db
+              .selectFrom("escalation_records")
+              .selectAll()
+              .where("escalation_id", "=", escalationId),
+          );
 
           return votes;
         }).pipe(
@@ -215,10 +222,9 @@ export const EscalationServiceLive = Layer.effect(
       resolveEscalation: (id, resolution) =>
         Effect.gen(function* () {
           // First check if escalation exists and is not already resolved
-          const [escalation] = yield* db
-            .selectFrom("escalations")
-            .selectAll()
-            .where("id", "=", id);
+          const [escalation] = yield* run(
+            db.selectFrom("escalations").selectAll().where("id", "=", id),
+          );
 
           if (!escalation) {
             return yield* Effect.fail(
@@ -235,13 +241,15 @@ export const EscalationServiceLive = Layer.effect(
             );
           }
 
-          yield* db
-            .updateTable("escalations")
-            .set({
-              resolved_at: new Date().toISOString(),
-              resolution,
-            })
-            .where("id", "=", id);
+          yield* run(
+            db
+              .updateTable("escalations")
+              .set({
+                resolved_at: new Date().toISOString(),
+                resolution,
+              })
+              .where("id", "=", id),
+          );
 
           yield* logEffect("info", "EscalationService", "Resolved escalation");
         }).pipe(
@@ -252,10 +260,12 @@ export const EscalationServiceLive = Layer.effect(
 
       updateEscalationStrategy: (id, strategy) =>
         Effect.gen(function* () {
-          yield* db
-            .updateTable("escalations")
-            .set({ voting_strategy: strategy })
-            .where("id", "=", id);
+          yield* run(
+            db
+              .updateTable("escalations")
+              .set({ voting_strategy: strategy })
+              .where("id", "=", id),
+          );
 
           yield* logEffect(
             "info",
@@ -270,10 +280,12 @@ export const EscalationServiceLive = Layer.effect(
 
       updateScheduledFor: (id, timestamp) =>
         Effect.gen(function* () {
-          yield* db
-            .updateTable("escalations")
-            .set({ scheduled_for: timestamp })
-            .where("id", "=", id);
+          yield* run(
+            db
+              .updateTable("escalations")
+              .set({ scheduled_for: timestamp })
+              .where("id", "=", id),
+          );
 
           yield* logEffect(
             "debug",
@@ -288,11 +300,13 @@ export const EscalationServiceLive = Layer.effect(
 
       getDueEscalations: () =>
         Effect.gen(function* () {
-          const escalations = yield* db
-            .selectFrom("escalations")
-            .selectAll()
-            .where("resolved_at", "is", null)
-            .where("scheduled_for", "<=", new Date().toISOString());
+          const escalations = yield* run(
+            db
+              .selectFrom("escalations")
+              .selectAll()
+              .where("resolved_at", "is", null)
+              .where("scheduled_for", "<=", new Date().toISOString()),
+          );
 
           yield* logEffect(
             "debug",
@@ -373,7 +387,7 @@ export const EscalationServiceLive = Layer.effect(
           // `db` captured in this Layer's closure so executeResolution keeps a
           // `never` Requirements channel per IEscalationService.
           yield* action.pipe(
-            Effect.provideService(DatabaseService, db),
+            Effect.provideService(DatabaseService, database),
             Effect.mapError(
               (caught) =>
                 new ResolutionExecutionError({

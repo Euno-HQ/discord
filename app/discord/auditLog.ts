@@ -92,7 +92,7 @@ export const fetchAuditLogEntryOrNull = (
         { guildId: guild.id, userId, error },
       ).pipe(Effect.as(undefined)),
     ),
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       logEffect(
         "debug",
         component,

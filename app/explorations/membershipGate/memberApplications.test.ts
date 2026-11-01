@@ -1,15 +1,10 @@
 // DEPRECATED EXPLORATION (membership gate). Not imported by any live code and
 // not registered anywhere. Preserved for future optionality; see ./README.md.
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import * as Reactivity from "@effect/experimental/Reactivity";
-import { SqlClient } from "@effect/sql";
-import * as Sqlite from "@effect/sql-kysely/Sqlite";
-import { SqliteClient } from "@effect/sql-sqlite-node";
-
-import { DatabaseService } from "#~/Database.ts";
-import type { DB } from "#~/db";
+import { db, makeDatabaseLayer, run, type DatabaseService } from "#~/Database";
 
 // Mock the Discord REST client so resolveLogMessage doesn't make HTTP calls
 vi.mock("#~/discord/api", () => ({
@@ -48,20 +43,11 @@ vi.mock("#~/AppRuntime", () => ({
 
 let runtime: ManagedRuntime.ManagedRuntime<
   DatabaseService | SqlClient.SqlClient,
-  never
+  unknown
 >;
 
 beforeEach(async () => {
-  const SqliteLive = Layer.scoped(
-    SqlClient.SqlClient,
-    SqliteClient.make({ filename: ":memory:" }),
-  ).pipe(Layer.provide(Reactivity.layer));
-
-  const KyselyLive = Layer.effect(DatabaseService, Sqlite.make<DB>()).pipe(
-    Layer.provide(SqliteLive),
-  );
-
-  const testLayer = Layer.mergeAll(SqliteLive, KyselyLive);
+  const testLayer = makeDatabaseLayer(":memory:");
   runtime = ManagedRuntime.make(testLayer);
 
   // Create the applications table
@@ -116,8 +102,7 @@ const insertApplication = (
 
   return runtime.runPromise(
     Effect.gen(function* () {
-      const db = yield* DatabaseService;
-      yield* db.insertInto("applications").values(row);
+      yield* run(db.insertInto("applications").values(row));
     }),
   );
 };
@@ -125,8 +110,7 @@ const insertApplication = (
 const queryAll = () =>
   runtime.runPromise(
     Effect.gen(function* () {
-      const db = yield* DatabaseService;
-      return yield* db.selectFrom("applications").selectAll();
+      return yield* run(db.selectFrom("applications").selectAll());
     }),
   );
 
@@ -189,11 +173,12 @@ describe("resolveApplicationsForDeparture", () => {
     // Set resolved_at so we can verify it doesn't change
     await runtime.runPromise(
       Effect.gen(function* () {
-        const db = yield* DatabaseService;
-        yield* db
-          .updateTable("applications")
-          .set({ resolved_at: priorResolvedAt })
-          .where("user_id", "=", "user-1");
+        yield* run(
+          db
+            .updateTable("applications")
+            .set({ resolved_at: priorResolvedAt })
+            .where("user_id", "=", "user-1"),
+        );
       }),
     );
 

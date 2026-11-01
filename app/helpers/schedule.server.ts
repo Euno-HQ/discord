@@ -28,12 +28,12 @@ export const getFirstRun = (interval: number, now = new Date()) => {
  * first-run time of Sunday at midnight.
  *
  * Returns a long-lived `Effect` that never completes on its own — fork it with
- * `Effect.forkDaemon` (or `runtime.runFork`) so it outlives the spawning fiber,
+ * `Effect.forkDetach` (or `runtime.runFork`) so it outlives the spawning fiber,
  * the same way the event pipelines are started in `server.ts`. The aligned
  * first-run offset is preserved by sleeping for `getFirstRun(interval)` before
  * the first execution, then repeating every `interval` thereafter.
  *
- * The task itself is run inside `Effect.catchAll` so a single failing run never
+ * The task itself is run inside `Effect.catch` so a single failing run never
  * tears the repeating schedule down — matching the fire-and-forget semantics of
  * the previous `setInterval`-based implementation.
  *
@@ -58,7 +58,7 @@ export const scheduleTaskEffect = <E, R>(
     yield* Effect.sleep(`${firstRun} millis`);
 
     yield* task.pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         logEffect("warn", "ScheduleTask", `${serviceName} run failed`, {
           serviceName,
           error,

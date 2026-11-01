@@ -1,7 +1,13 @@
 import { Effect } from "effect";
 import type { Selectable } from "kysely";
 
-import { DatabaseService, type DB, type SqlError } from "#~/Database";
+import {
+  db,
+  run,
+  type DatabaseService,
+  type DB,
+  type SqlError,
+} from "#~/Database";
 import { NotFoundError } from "#~/effects/errors.ts";
 import { logEffect } from "#~/effects/observability";
 
@@ -46,14 +52,11 @@ export const fetchGuild = (
   DatabaseService
 > =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     yield* logEffect("debug", "Guild", "Fetching guild", { guildId });
 
-    const rows = yield* db
-      .selectFrom("guilds")
-      .selectAll()
-      .where("id", "=", guildId);
+    const rows = yield* run(
+      db.selectFrom("guilds").selectAll().where("id", "=", guildId),
+    );
     const guild = rows[0];
 
     yield* logEffect(
@@ -74,17 +77,17 @@ export const registerGuild = (
   guildId: string,
 ): Effect.Effect<void, SqlError, DatabaseService> =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     yield* logEffect("info", "Guild", "Registering guild", { guildId });
 
-    yield* db
-      .insertInto("guilds")
-      .values({
-        id: guildId,
-        settings: JSON.stringify({}),
-      })
-      .onConflict((oc) => oc.column("id").doNothing());
+    yield* run(
+      db
+        .insertInto("guilds")
+        .values({
+          id: guildId,
+          settings: JSON.stringify({}),
+        })
+        .onConflict((oc) => oc.column("id").doNothing()),
+    );
 
     yield* logEffect("info", "Guild", "Guild registered successfully", {
       guildId,
@@ -96,19 +99,19 @@ export const setSettings = (
   settings: SettingsRecord,
 ): Effect.Effect<void, SqlError, DatabaseService> =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     // PRESERVE VERBATIM (#335 NULL-coalesce fix): merge new settings into the
     // existing JSON, treating a NULL settings column as an empty object.
-    yield* db
-      .updateTable("guilds")
-      .set("settings", (eb) =>
-        eb.fn("json_patch", [
-          eb.fn("coalesce", ["settings", eb.val("{}")]),
-          eb.val(JSON.stringify(settings)),
-        ]),
-      )
-      .where("id", "=", guildId);
+    yield* run(
+      db
+        .updateTable("guilds")
+        .set("settings", (eb) =>
+          eb.fn("json_patch", [
+            eb.fn("coalesce", ["settings", eb.val("{}")]),
+            eb.val(JSON.stringify(settings)),
+          ]),
+        )
+        .where("id", "=", guildId),
+    );
   }).pipe(Effect.withSpan("Guild.setSettings", { attributes: { guildId } }));
 
 export const fetchSettings = <T extends keyof typeof SETTINGS>(
@@ -120,16 +123,17 @@ export const fetchSettings = <T extends keyof typeof SETTINGS>(
   DatabaseService
 > =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    const rows = yield* db
-      .selectFrom("guilds")
-      // @ts-expect-error This is broken because of a migration from knex and
-      // old/bad use of jsonb for storing settings. The type is guaranteed here
-      // not by the codegen
-      .select<DB, "guilds", SettingsRecord>((eb) =>
-        keys.map((k) => eb.ref("settings", "->>").key(k).as(k)),
-      )
-      .where("id", "=", guildId);
+    const rows = yield* run(
+      db
+        .selectFrom("guilds")
+        // @ts-expect-error This is broken because of a migration from knex and
+        // old/bad use of jsonb for storing settings. The type is guaranteed here
+        // not by the codegen
+        .select<DB, "guilds", SettingsRecord>((eb) =>
+          keys.map((k) => eb.ref("settings", "->>").key(k).as(k)),
+        )
+        .where("id", "=", guildId),
+    );
     const result = Object.entries(rows[0] ?? {}) as [T, string][];
     if (result.length === 0) {
       return yield* Effect.fail(

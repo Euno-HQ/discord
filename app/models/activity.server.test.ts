@@ -1,4 +1,12 @@
-import { Effect, Exit, Layer, ManagedRuntime } from "effect";
+import {
+  Cause,
+  Effect,
+  Exit,
+  ManagedRuntime,
+  Option,
+  type Layer,
+} from "effect";
+import { SqlClient } from "effect/sql";
 import {
   afterAll,
   beforeAll,
@@ -9,12 +17,7 @@ import {
   vi,
 } from "vitest";
 
-import * as Reactivity from "@effect/experimental/Reactivity";
-import { SqlClient } from "@effect/sql";
-import * as Sqlite from "@effect/sql-kysely/Sqlite";
-import { SqliteClient } from "@effect/sql-sqlite-node";
-
-import { DatabaseService, type DB } from "#~/Database";
+import { makeDatabaseLayer } from "#~/Database";
 import {
   AnalyticsFetchError,
   getTopParticipantsEffect,
@@ -31,21 +34,14 @@ vi.mock("#~/helpers/userInfoCache", () => ({
 }));
 
 // In-memory SQLite test layer (mirrors app/models/user.server.test.ts)
-const TestSqliteLive = Layer.scoped(
-  SqlClient.SqlClient,
-  SqliteClient.make({ filename: ":memory:" }),
-).pipe(Layer.provide(Reactivity.layer));
-
-const TestKyselyLive = Layer.effect(DatabaseService, Sqlite.make<DB>()).pipe(
-  Layer.provide(TestSqliteLive),
-);
+const TestDbLive = makeDatabaseLayer(":memory:");
 
 // provideMerge keeps a single memoized in-memory connection.
-const TestBase = Layer.mergeAll(TestSqliteLive, TestKyselyLive);
+const TestBase = TestDbLive;
 
 const testRuntime = ManagedRuntime.make(TestBase);
 
-type TestR = Layer.Layer.Success<typeof TestBase>;
+type TestR = Layer.Success<typeof TestBase>;
 
 const runTest = <A, E>(effect: Effect.Effect<A, E, TestR>) =>
   testRuntime.runPromise(effect);
@@ -281,11 +277,8 @@ describe("getUserMessageAnalyticsEffect", () => {
 
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
-      const cause = exit.cause;
-      // The failure cause has _tag "Fail" with an .error property
-      expect((cause as { _tag: string })._tag).toBe("Fail");
-      // Walk to the error
-      const err = (cause as { _tag: string; error: unknown }).error;
+      // The failure cause carries a single Fail reason with the typed error
+      const err = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
       expect(err).toBeInstanceOf(AnalyticsFetchError);
       expect((err as AnalyticsFetchError).operation).toBe("getOrFetchUser");
     }

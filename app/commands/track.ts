@@ -76,14 +76,14 @@ export const Command = [
             : [],
         });
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.all([
             logEffect("error", "Track", "Error tracking message", {
               error,
             }),
             interactionEditReply(interaction, {
               content: "Failed to track message",
-            }).pipe(Effect.catchAll(() => Effect.void)),
+            }).pipe(Effect.catch(() => Effect.void)),
           ]),
         ),
       ),
@@ -131,14 +131,14 @@ export const Command = [
         yield* messageReply(logMessage, {
           allowedMentions: { users: [] },
           content: `deleted by ${interaction.user.username}`,
-        }).pipe(Effect.catchAll(() => Effect.void));
+        }).pipe(Effect.catch(() => Effect.void));
 
         yield* interactionUpdate(interaction, {
           content: `Tracked <#${report.log_channel_id}>`,
           components: [],
         });
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect(
               "error",
@@ -149,7 +149,7 @@ export const Command = [
             yield* interactionUpdate(interaction, {
               content: "Failed to delete message",
               components: [],
-            }).pipe(Effect.catchAll(() => Effect.void));
+            }).pipe(Effect.catch(() => Effect.void));
           }),
         ),
       ),

@@ -78,7 +78,7 @@ describe("escalateExhausted", () => {
     );
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
-      const maybeFailure = Cause.failureOption(exit.cause);
+      const maybeFailure = Cause.findErrorOption(exit.cause);
       expect(maybeFailure._tag).toBe("Some");
       if (maybeFailure._tag === "Some") {
         expect(maybeFailure.value._tag).toBe("ServiceUnavailableError");
@@ -92,7 +92,7 @@ describe("escalateExhausted", () => {
     );
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
-      const maybeFailure = Cause.failureOption(exit.cause);
+      const maybeFailure = Cause.findErrorOption(exit.cause);
       expect(maybeFailure._tag).toBe("Some");
       if (maybeFailure._tag === "Some") {
         expect(maybeFailure.value._tag).toBe("ForbiddenError");

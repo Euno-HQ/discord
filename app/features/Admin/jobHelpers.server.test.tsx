@@ -1,11 +1,5 @@
-import {
-  Deferred,
-  Effect,
-  Fiber,
-  FiberRef,
-  Layer,
-  ManagedRuntime,
-} from "effect";
+import { Deferred, Effect, Fiber, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import type { ComponentProps } from "react";
 import { renderToString } from "react-dom/server";
 import {
@@ -18,17 +12,8 @@ import {
   vi,
 } from "vitest";
 
-import * as Reactivity from "@effect/experimental/Reactivity";
-import { SqlClient } from "@effect/sql";
-import * as Sqlite from "@effect/sql-kysely/Sqlite";
-import { SqliteClient } from "@effect/sql-sqlite-node";
-
-import { DatabaseService, type DB } from "#~/Database";
-import {
-  jobMetaRef,
-  SupervisorServiceLive,
-  type ActiveJobMeta,
-} from "#~/effects/supervisor";
+import { db, makeDatabaseLayer, run } from "#~/Database";
+import { SupervisorServiceLive, trackJob } from "#~/effects/supervisor";
 import type { Job } from "#~/jobs/jobRunner";
 import AdminJobs from "#~/routes/__auth/admin.jobs";
 
@@ -49,26 +34,16 @@ vi.mock("#~/features/Admin/helpers.server", () => ({
 // In-memory SQLite + real SupervisorServiceLive (mirrors jobRunner.test.ts)
 // ---------------------------------------------------------------------------
 
-const TestSqliteLive = Layer.scoped(
-  SqlClient.SqlClient,
-  SqliteClient.make({ filename: ":memory:" }),
-).pipe(Layer.provide(Reactivity.layer));
-
-const TestKyselyLive = Layer.effect(DatabaseService, Sqlite.make<DB>()).pipe(
-  Layer.provide(TestSqliteLive),
-);
-
 // Use the REAL SupervisorServiceLive so getActiveJobMeta inspects genuine
-// tracked fibers rather than a stub.
+// tracked jobs rather than a stub.
 const TestLayer = Layer.mergeAll(
-  TestSqliteLive,
-  TestKyselyLive,
+  makeDatabaseLayer(":memory:"),
   SupervisorServiceLive,
 );
 
 const testRuntime = ManagedRuntime.make(TestLayer);
 
-type TestR = Layer.Layer.Success<typeof TestLayer>;
+type TestR = Layer.Success<typeof TestLayer>;
 
 const runTest = <A, E>(effect: Effect.Effect<A, E, TestR>) =>
   testRuntime.runPromise(effect);
@@ -137,16 +112,15 @@ const insertJob = (overrides: Partial<Job> = {}) => {
   };
 
   return Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db.insertInto("background_jobs").values(job);
+    yield* run(db.insertInto("background_jobs").values(job));
     return job;
   });
 };
 
 /**
- * Forks a child fiber that tags itself via `jobMetaRef` for the given job and
- * then blocks forever, so the real Supervisor reports it as active. Returns the
- * fiber (caller must interrupt it) once the metadata is guaranteed installed.
+ * Forks a child fiber that registers itself via `trackJob` for the given job
+ * and then blocks forever, so SupervisorService reports it as active. Returns
+ * the fiber (caller must interrupt it) once the metadata is guaranteed installed.
  */
 const forkActiveJobFiber = (job: Job) =>
   Effect.gen(function* () {
@@ -154,16 +128,13 @@ const forkActiveJobFiber = (job: Job) =>
     const block = yield* Deferred.make<void>();
 
     const fiber = yield* Effect.gen(function* () {
-      yield* FiberRef.set(jobMetaRef, {
-        jobId: job.id,
-        jobType: job.job_type,
-        guildId: job.guild_id,
-        startedAt: new Date().toISOString(),
-      } satisfies ActiveJobMeta);
       yield* Deferred.succeed(installed, undefined);
-      // Block forever so the fiber stays alive and visible to the Supervisor.
+      // Block forever so the job stays registered as active.
       yield* Deferred.await(block);
-    }).pipe(Effect.forkScoped);
+    }).pipe(
+      trackJob({ jobId: job.id, jobType: job.job_type, guildId: job.guild_id }),
+      Effect.forkScoped,
+    );
 
     yield* Deferred.await(installed);
     return fiber;

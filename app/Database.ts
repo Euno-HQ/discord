@@ -1,10 +1,20 @@
 import { Context, Effect, Layer, Schedule } from "effect";
+import { identity } from "effect/Function";
+import { SqlClient } from "effect/sql";
+import { ResultLengthMismatch, SqlError } from "effect/sql/SqlError";
+import {
+  DummyDriver,
+  Kysely,
+  SqliteAdapter,
+  SqliteIntrospector,
+  SqliteQueryCompiler,
+  type Compilable,
+  type DeleteResult,
+  type InsertResult,
+  type UpdateResult,
+} from "kysely";
 
-import * as Reactivity from "@effect/experimental/Reactivity";
-import { SqlClient } from "@effect/sql";
-import * as Sqlite from "@effect/sql-kysely/Sqlite";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { ResultLengthMismatch, SqlError } from "@effect/sql/SqlError";
 
 import type { DB } from "./db";
 import { DatabaseCorruptionError, WebhookAlertError } from "./effects/errors";
@@ -17,31 +27,80 @@ import { log } from "./helpers/observability";
 export { SqlError, ResultLengthMismatch };
 export type { DB };
 
-// Type alias for the effectified Kysely instance
-export type EffectKysely = Sqlite.EffectKysely<DB>;
+/**
+ * Compile-only Kysely query builder. It has no connection (DummyDriver): build
+ * a query with it, then execute it with `run`. Never call `.execute()` on it.
+ */
+export const db = new Kysely<DB>({
+  dialect: {
+    createAdapter: () => new SqliteAdapter(),
+    createDriver: () => new DummyDriver(),
+    createIntrospector: (k) => new SqliteIntrospector(k),
+    createQueryCompiler: () => new SqliteQueryCompiler(),
+  },
+});
 
-// Service tag for the EffectKysely instance
-export class DatabaseService extends Context.Tag("DatabaseService")<
+/** Rows a compiled query yields. Writes without `returning` yield no rows. */
+export type Rows<O> = O extends InsertResult | UpdateResult | DeleteResult
+  ? never[]
+  : O[];
+
+interface Database {
+  readonly run: <O>(query: Compilable<O>) => Effect.Effect<Rows<O>, SqlError>;
+}
+
+/** Executes compiled Kysely queries through the effect/sql client. */
+export class DatabaseService extends Context.Service<
   DatabaseService,
-  EffectKysely
->() {}
+  Database
+>()("DatabaseService") {}
 
-// Base SQLite client layer
-// Note: WAL mode is enabled by default by @effect/sql-sqlite-node
-const SqliteLive = Layer.scoped(
-  SqlClient.SqlClient,
-  SqliteClient.make({
-    filename: databaseUrl,
-  }).pipe(Effect.tap((sql) => sql.unsafe("PRAGMA busy_timeout = 5000"))),
-).pipe(Layer.provide(Reactivity.layer));
+/**
+ * Execute a Kysely query (built with `db`) through effect/sql, so SqlError,
+ * spans, and transactions all come from the SqlClient.
+ *
+ * @example
+ * const [row] = yield* run(db.selectFrom("guilds").selectAll().where("id", "=", id));
+ */
+export const run = <O>(
+  query: Compilable<O>,
+): Effect.Effect<Rows<O>, SqlError, DatabaseService> =>
+  Effect.gen(function* () {
+    const database = yield* DatabaseService;
+    return yield* database.run(query);
+  });
 
-// Kysely service layer - provides the effectified Kysely instance
-const KyselyLive = Layer.effect(DatabaseService, Sqlite.make<DB>()).pipe(
-  Layer.provide(SqliteLive),
-);
+const makeDatabase = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return identity<Database>({
+    run: <O>(query: Compilable<O>) => {
+      const compiled = query.compile();
+      // Keep the better-sqlite3-era contract the v3 driver had: an `undefined`
+      // parameter binds as NULL (node:sqlite throws on it), and rows are plain
+      // objects (node:sqlite returns null-prototype rows).
+      const params = compiled.parameters.map((p) =>
+        p === undefined ? null : p,
+      );
+      return sql
+        .unsafe<object>(compiled.sql, params)
+        .pipe(Effect.map((rows) => rows.map((r) => ({ ...r })) as Rows<O>));
+    },
+  });
+});
 
-// Combined database layer providing SqlClient, SqliteClient, and KyselyService
-export const DatabaseLayer = Layer.mergeAll(SqliteLive, KyselyLive);
+/**
+ * SqlClient + DatabaseService for a SQLite file. WAL mode and a 5s busy
+ * timeout are @effect/sql-sqlite-node defaults. Tests use `":memory:"`.
+ */
+export const makeDatabaseLayer = (filename: string) => {
+  const client = SqliteClient.layer({ filename });
+  return Layer.merge(
+    client,
+    Layer.effect(DatabaseService, makeDatabase).pipe(Layer.provide(client)),
+  );
+};
+
+export const DatabaseLayer = makeDatabaseLayer(databaseUrl);
 
 log("info", "Database", `Database configured at ${databaseUrl}`);
 
@@ -120,6 +179,6 @@ export const runIntegrityCheck = Effect.gen(function* () {
       ),
     ]),
   ),
-  Effect.catchAll(() => Effect.succeed(null)),
+  Effect.catch(() => Effect.succeed(null)),
   Effect.withSpan("runIntegrityCheck"),
 );

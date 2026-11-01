@@ -3,10 +3,7 @@ import { analyzeBehavior } from "./behaviorAnalyzer";
 const ONE_DAY = 24 * 60 * 60 * 1000;
 const ONE_HOUR = 60 * 60 * 1000;
 
-function makeArgs(overrides: {
-  accountAgeMs?: number;
-  joinedAgoMs?: number;
-}) {
+function makeArgs(overrides: { accountAgeMs?: number; joinedAgoMs?: number }) {
   const now = Date.now();
   const accountAge = overrides.accountAgeMs ?? 365 * ONE_DAY;
   const joinedAgo = overrides.joinedAgoMs ?? 365 * ONE_DAY;
@@ -80,14 +77,20 @@ test("joined 1-7 days scores 1", () => {
 test("joined > 7 days produces no tenure signal", () => {
   const { message, member } = makeArgs({ joinedAgoMs: 30 * ONE_DAY });
   const signals = analyzeBehavior(message, member);
-  expect(signals.find((s) => s.name.startsWith("server_tenure"))).toBeUndefined();
+  expect(
+    signals.find((s) => s.name.startsWith("server_tenure")),
+  ).toBeUndefined();
 });
 
 test("null joinedTimestamp produces no tenure signal", () => {
   const { message } = makeArgs({});
-  const member = { joinedTimestamp: null } as unknown as Parameters<typeof analyzeBehavior>[1];
+  const member = { joinedTimestamp: null } as unknown as Parameters<
+    typeof analyzeBehavior
+  >[1];
   const signals = analyzeBehavior(message, member);
-  expect(signals.find((s) => s.name.startsWith("server_tenure"))).toBeUndefined();
+  expect(
+    signals.find((s) => s.name.startsWith("server_tenure")),
+  ).toBeUndefined();
 });
 
 // ── Combined ──

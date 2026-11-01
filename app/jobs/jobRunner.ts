@@ -1,14 +1,14 @@
 import { Routes } from "discord-api-types/v10";
-import { Deferred, Effect, Fiber, FiberRef } from "effect";
+import { Deferred, Effect } from "effect";
 import type { Selectable } from "kysely";
 
-import { DatabaseService, type SqlError } from "#~/Database";
+import { db, run, type DatabaseService, type SqlError } from "#~/Database";
 import type { DB } from "#~/db";
 import { ssrDiscordSdk } from "#~/discord/api";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { type DiscordError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
-import { jobMetaRef, type ActiveJobMeta } from "#~/effects/supervisor";
+import { trackJob } from "#~/effects/supervisor";
 import { formatError } from "#~/helpers/formatError";
 
 export type Job = Selectable<DB["background_jobs"]>;
@@ -25,40 +25,44 @@ export type Job = Selectable<DB["background_jobs"]>;
  * Returns undefined when no jobs are available.
  */
 export const claimNextJobEffect = Effect.gen(function* () {
-  const db = yield* DatabaseService;
-
   // First, look for a job that's already processing (interrupted, needs resume)
-  const [processingJob] = yield* db
-    .selectFrom("background_jobs")
-    .selectAll()
-    .where("status", "=", "processing")
-    .orderBy("created_at", "asc")
-    .limit(1);
+  const [processingJob] = yield* run(
+    db
+      .selectFrom("background_jobs")
+      .selectAll()
+      .where("status", "=", "processing")
+      .orderBy("created_at", "asc")
+      .limit(1),
+  );
 
   if (processingJob) {
     return processingJob as Job;
   }
 
   // No in-progress jobs — pick the oldest pending job
-  const [pendingJob] = yield* db
-    .selectFrom("background_jobs")
-    .selectAll()
-    .where("status", "=", "pending")
-    .orderBy("created_at", "asc")
-    .limit(1);
+  const [pendingJob] = yield* run(
+    db
+      .selectFrom("background_jobs")
+      .selectAll()
+      .where("status", "=", "pending")
+      .orderBy("created_at", "asc")
+      .limit(1),
+  );
 
   if (!pendingJob) {
     return undefined;
   }
 
   // Mark it processing
-  yield* db
-    .updateTable("background_jobs")
-    .set({
-      status: "processing",
-      updated_at: new Date().toISOString(),
-    })
-    .where("id", "=", pendingJob.id);
+  yield* run(
+    db
+      .updateTable("background_jobs")
+      .set({
+        status: "processing",
+        updated_at: new Date().toISOString(),
+      })
+      .where("id", "=", pendingJob.id),
+  );
 
   return { ...pendingJob, status: "processing" } as Job;
 }).pipe(Effect.withSpan("claimNextJob"));
@@ -73,15 +77,16 @@ export const checkpointJobEffect = (
   progressCount: number,
 ) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db
-      .updateTable("background_jobs")
-      .set({
-        cursor: JSON.stringify(cursor),
-        progress_count: progressCount,
-        updated_at: new Date().toISOString(),
-      })
-      .where("id", "=", jobId);
+    yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({
+          cursor: JSON.stringify(cursor),
+          progress_count: progressCount,
+          updated_at: new Date().toISOString(),
+        })
+        .where("id", "=", jobId),
+    );
   }).pipe(Effect.withSpan("checkpointJob", { attributes: { jobId } }));
 
 /**
@@ -94,15 +99,16 @@ export const recordJobErrorEffect = (
   lastError: string,
 ) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db
-      .updateTable("background_jobs")
-      .set({
-        error_count: errorCount,
-        last_error: lastError,
-        updated_at: new Date().toISOString(),
-      })
-      .where("id", "=", jobId);
+    yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({
+          error_count: errorCount,
+          last_error: lastError,
+          updated_at: new Date().toISOString(),
+        })
+        .where("id", "=", jobId),
+    );
   }).pipe(Effect.withSpan("recordJobError", { attributes: { jobId } }));
 
 /**
@@ -111,15 +117,16 @@ export const recordJobErrorEffect = (
  */
 export const advancePhaseEffect = (jobId: string, nextPhase: number) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db
-      .updateTable("background_jobs")
-      .set({
-        phase: nextPhase,
-        cursor: null,
-        updated_at: new Date().toISOString(),
-      })
-      .where("id", "=", jobId);
+    yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({
+          phase: nextPhase,
+          cursor: null,
+          updated_at: new Date().toISOString(),
+        })
+        .where("id", "=", jobId),
+    );
   }).pipe(
     Effect.withSpan("advancePhase", { attributes: { jobId, nextPhase } }),
   );
@@ -129,16 +136,17 @@ export const advancePhaseEffect = (jobId: string, nextPhase: number) =>
  */
 export const completeJobEffect = (jobId: string) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
     const now = new Date().toISOString();
-    yield* db
-      .updateTable("background_jobs")
-      .set({
-        status: "completed",
-        completed_at: now,
-        updated_at: now,
-      })
-      .where("id", "=", jobId);
+    yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({
+          status: "completed",
+          completed_at: now,
+          updated_at: now,
+        })
+        .where("id", "=", jobId),
+    );
   }).pipe(Effect.withSpan("completeJob", { attributes: { jobId } }));
 
 /**
@@ -146,15 +154,16 @@ export const completeJobEffect = (jobId: string) =>
  */
 export const failJobEffect = (jobId: string, error: string) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db
-      .updateTable("background_jobs")
-      .set({
-        status: "failed",
-        last_error: error,
-        updated_at: new Date().toISOString(),
-      })
-      .where("id", "=", jobId);
+    yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({
+          status: "failed",
+          last_error: error,
+          updated_at: new Date().toISOString(),
+        })
+        .where("id", "=", jobId),
+    );
   }).pipe(Effect.withSpan("failJob", { attributes: { jobId } }));
 
 interface CreateJobOptions {
@@ -172,16 +181,16 @@ interface CreateJobOptions {
  */
 export const createJobEffect = (options: CreateJobOptions) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     // Fail any existing incomplete jobs of the same type for this guild
-    const [existing] = yield* db
-      .selectFrom("background_jobs")
-      .selectAll()
-      .where("guild_id", "=", options.guildId)
-      .where("job_type", "=", options.jobType)
-      .where("status", "in", ["pending", "processing"])
-      .limit(1);
+    const [existing] = yield* run(
+      db
+        .selectFrom("background_jobs")
+        .selectAll()
+        .where("guild_id", "=", options.guildId)
+        .where("job_type", "=", options.jobType)
+        .where("status", "in", ["pending", "processing"])
+        .limit(1),
+    );
 
     if (existing) {
       yield* logEffect(
@@ -220,7 +229,7 @@ export const createJobEffect = (options: CreateJobOptions) =>
       completed_at: null,
     };
 
-    yield* db.insertInto("background_jobs").values(job);
+    yield* run(db.insertInto("background_jobs").values(job));
 
     yield* logEffect("info", "JobRunner", "Created job", {
       jobId: id,
@@ -245,11 +254,9 @@ export const createJobEffect = (options: CreateJobOptions) =>
  */
 export const getJobEffect = (jobId: string) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    const [job] = yield* db
-      .selectFrom("background_jobs")
-      .selectAll()
-      .where("id", "=", jobId);
+    const [job] = yield* run(
+      db.selectFrom("background_jobs").selectAll().where("id", "=", jobId),
+    );
     return job as Job | undefined;
   }).pipe(Effect.withSpan("getJob", { attributes: { jobId } }));
 
@@ -311,7 +318,7 @@ const notifyChannelEffect = (channelId: string, job: Job) =>
         body,
       }),
     ).pipe(
-      Effect.catchAll((err) =>
+      Effect.catch((err) =>
         logEffect("warn", "JobRunner", "Failed to send progress notification", {
           channelId,
           error: err,
@@ -330,18 +337,8 @@ export const pollAndExecuteEffect = Effect.gen(function* () {
     return;
   }
 
-  const jobFiber = yield* Effect.gen(function* () {
-    // Set metadata on the child fiber so Supervisor can identify it
-    yield* FiberRef.set(jobMetaRef, {
-      jobId: job.id,
-      jobType: job.job_type,
-      guildId: job.guild_id,
-      startedAt: new Date().toISOString(),
-    } satisfies ActiveJobMeta);
-
-    yield* handler(job);
-  }).pipe(
-    Effect.catchAll((err) =>
+  yield* handler(job).pipe(
+    Effect.catch((err) =>
       Effect.gen(function* () {
         yield* logEffect(
           "error",
@@ -355,10 +352,9 @@ export const pollAndExecuteEffect = Effect.gen(function* () {
         yield* failJobEffect(job.id, `Unhandled: ${formatError(err)}`);
       }),
     ),
-    Effect.fork, // Fork as child fiber — visible to Supervisor
+    // Visible to SupervisorService.getActiveJobMeta while it runs
+    trackJob({ jobId: job.id, jobType: job.job_type, guildId: job.guild_id }),
   );
-
-  yield* Fiber.join(jobFiber); // Wait for completion — sequential semantics preserved
 
   // Reload job to check final status and notify
   const updated = yield* getJobEffect(job.id);
@@ -367,7 +363,7 @@ export const pollAndExecuteEffect = Effect.gen(function* () {
   }
 }).pipe(
   // Catch errors from claimNextJob (e.g., SqlError) so the loop continues
-  Effect.catchAll((err) =>
+  Effect.catch((err) =>
     logEffect("error", "JobRunner", "Poll cycle failed", {
       error: err,
     }),
