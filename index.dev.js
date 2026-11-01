@@ -16,12 +16,14 @@ const viteDevServer = await vite.createServer({
 
 // Track the current server module to enable hot reloading
 let currentServerApp = null;
+let installGracefulShutdown = null;
 
 // Function to load/reload the server module
 async function loadServerModule() {
   try {
     const source = await viteDevServer.ssrLoadModule("./app/server.ts");
     currentServerApp = source.app;
+    installGracefulShutdown ??= source.installGracefulShutdown;
     console.log("Server module (re)loaded");
   } catch (error) {
     if (error instanceof Error) {
@@ -32,7 +34,7 @@ async function loadServerModule() {
 }
 
 // Initial load
-void loadServerModule();
+const initialLoad = loadServerModule();
 
 // Add Vite middleware first
 app.use(viteDevServer.middlewares);
@@ -88,6 +90,15 @@ process.on("unhandledRejection", (reason) => {
 });
 
 const PORT = process.env.PORT ?? "3000";
-app.listen(PORT, async () => {
+const server = app.listen(PORT, async () => {
   console.log("INI", "Now listening on port", PORT);
+});
+// Installed once from the first load (it guards itself too); the shutdown
+// sequence works off globals, so HMR reloads don't need to reinstall it.
+// Vite (via a plugin-created server) registers its own SIGTERM listener that
+// closes Vite and calls process.exit(143) right away, cutting our ordered
+// teardown off mid-dispose. Drop it: the process exits at the end of ours.
+void initialLoad.then(() => {
+  process.removeAllListeners("SIGTERM");
+  installGracefulShutdown?.(server);
 });

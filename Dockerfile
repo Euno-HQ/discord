@@ -38,4 +38,8 @@ COPY scripts ./scripts
 COPY kysely.config.ts ./
 COPY migrations ./migrations
 
-CMD ["npm", "run", "start"]
+# Run migrations, then exec node so it becomes PID 1 and receives the pod's
+# SIGTERM directly. Through `npm run start` (npm -> sh -> npm -> sh -> node)
+# the signal stops at the shell running the `;` sequence, and graceful
+# shutdown never runs.
+CMD ["sh", "-c", "npm run start:migrate; exec node ./index.prod.js"]
