@@ -1,5 +1,6 @@
-import { Effect, ManagedRuntime, type Layer } from "effect";
+import { Effect, Fiber, ManagedRuntime, type Layer } from "effect";
 import { SqlClient } from "effect/sql";
+import { TestClock } from "effect/testing";
 import {
   afterAll,
   beforeAll,
@@ -16,12 +17,16 @@ import {
   advancePhaseEffect,
   checkpointJobEffect,
   claimNextJobEffect,
+  claimPendingJobEffect,
   completeJobEffect,
   createJobEffect,
+  drainJobsEffect,
   failJobEffect,
   getJobEffect,
   pollAndExecuteEffect,
   recordJobErrorEffect,
+  registerJobHandler,
+  runJobRunner,
   type Job,
 } from "./jobRunner";
 
@@ -146,7 +151,7 @@ describe("claimNextJobEffect", () => {
     expect(result).toBeUndefined();
   });
 
-  it("returns a resumable processing job without mutation", async () => {
+  it("returns a resumable processing job, still processing", async () => {
     const job = await runTest(
       insertJob({
         status: "processing",
@@ -361,5 +366,91 @@ describe("pollAndExecuteEffect", () => {
     const updated = await runTest(fetchJob(job.id));
     expect(updated!.status).toBe("failed");
     expect(updated!.last_error).toBe("Unknown job type: nonexistent_type");
+  });
+});
+
+describe("claimNextJobEffect atomicity", () => {
+  it("concurrent claims never take the same job", async () => {
+    await runTest(Effect.all([insertJob({ id: "a" }), insertJob({ id: "b" })]));
+    const claimed = await runTest(
+      Effect.all(
+        [claimPendingJobEffect, claimPendingJobEffect, claimPendingJobEffect],
+        { concurrency: "unbounded" },
+      ),
+    );
+    const ids = claimed.map((j) => j?.id);
+    expect(ids.filter(Boolean).sort()).toEqual(["a", "b"]);
+    expect(ids).toContain(undefined);
+  });
+});
+
+describe("job runner loop", () => {
+  const ran: string[] = [];
+  registerJobHandler("test_job", (job) => {
+    ran.push(job.id);
+    return completeJobEffect(job.id);
+  });
+  registerJobHandler("forgetful_job", () => Effect.void);
+  beforeEach(() => {
+    ran.length = 0;
+  });
+
+  it("drains every available job, resuming processing ones first", async () => {
+    await runTest(
+      Effect.gen(function* () {
+        yield* insertJob({ id: "p1", job_type: "test_job" });
+        yield* insertJob({ id: "p2", job_type: "test_job" });
+        yield* insertJob({
+          id: "resume",
+          job_type: "test_job",
+          status: "processing",
+          created_at: "2099-01-01T00:00:00Z",
+        });
+        yield* drainJobsEffect(true);
+      }),
+    );
+    expect(ran).toEqual(["resume", "p1", "p2"]);
+  });
+
+  it("fails a job its handler returned without finishing (no hot loop)", async () => {
+    const job = await runTest(insertJob({ job_type: "forgetful_job" }));
+    await runTest(drainJobsEffect(false));
+    const row = await runTest(fetchJob(job.id));
+    expect(row!.status).toBe("failed");
+  });
+
+  it("steady-state drain does not re-claim processing jobs", async () => {
+    await runTest(
+      insertJob({ id: "running", job_type: "test_job", status: "processing" }),
+    );
+    await runTest(drainJobsEffect(false));
+    expect(ran).toEqual([]);
+  });
+
+  it("picks up signalled jobs, and unsignalled ones on the backstop poll", async () => {
+    await runTest(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(runJobRunner);
+        yield* TestClock.adjust("1 second");
+
+        // Signalled: createJobEffect wakes the runner immediately.
+        const created = yield* createJobEffect({
+          guildId: "g-signal",
+          jobType: "test_job",
+          payload: {},
+        });
+        yield* TestClock.adjust("1 second");
+        expect(ran).toEqual([created.id]);
+
+        // Unsignalled insert: only the 60s poll finds it.
+        yield* insertJob({ id: "silent", job_type: "test_job" });
+        yield* TestClock.adjust("30 seconds");
+        expect(ran).toEqual([created.id]);
+        yield* TestClock.adjust("31 seconds");
+        expect(ran).toEqual([created.id, "silent"]);
+
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
   });
 });
