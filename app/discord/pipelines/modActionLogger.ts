@@ -15,7 +15,7 @@ import {
   banRemoveEffect,
 } from "#~/commands/report/modActionLogger";
 import { DiscordEventBus } from "#~/discord/eventBus";
-import { logEffect } from "#~/effects/observability";
+import { isolateHandler } from "#~/effects/supervise";
 
 export const modActionLoggerPipeline: Effect.Effect<
   void,
@@ -57,14 +57,7 @@ export const modActionLoggerPipeline: Effect.Effect<
             return Effect.void;
         }
       })();
-      return handler.pipe(
-        Effect.catch((err) =>
-          logEffect("warn", "ModActionLogger", "Pipeline handler failed", {
-            eventType: e.type,
-            error: err,
-          }),
-        ),
-      );
+      return handler.pipe(isolateHandler("ModActionLogger", e.type));
     }),
 
     Stream.runDrain,

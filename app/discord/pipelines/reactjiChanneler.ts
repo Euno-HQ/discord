@@ -3,6 +3,7 @@ import { Effect, Stream } from "effect";
 
 import type { RuntimeContext } from "#~/AppRuntime";
 import { DiscordEventBus } from "#~/discord/eventBus";
+import { isolateHandler } from "#~/effects/supervise";
 
 import { handleReactionAdd } from "./reactjiChannelerHandler";
 
@@ -18,7 +19,9 @@ export const reactjiChannelerPipeline: Effect.Effect<
 
     Stream.mapEffect((e) => {
       if (e.type !== "MessageReactionAdd") return Effect.void;
-      return handleReactionAdd(e);
+      return handleReactionAdd(e).pipe(
+        isolateHandler("ReactjiChanneler", e.type),
+      );
     }),
 
     Stream.runDrain,

@@ -5,6 +5,7 @@ import type { RuntimeContext } from "#~/AppRuntime";
 import { DiscordEventBus } from "#~/discord/eventBus";
 import type { DiscordEvent } from "#~/discord/events";
 import { FeatureFlagService } from "#~/effects/featureFlags";
+import { isolateHandler } from "#~/effects/supervise";
 
 import {
   handleMessageCreate,
@@ -59,33 +60,29 @@ export const activityTrackerPipeline: Effect.Effect<
   yield* stream.pipe(
     Stream.filter(isActivityTrackerEvent),
 
-    // Feature flag gate — skip events for guilds without analytics enabled.
-    // Also filters out DM reactions (null guildId).
-    Stream.filterEffect((e) => {
-      const guildId = getGuildId(e);
-      if (!guildId) return Effect.succeed(false);
-      return flags.isPostHogEnabled("analytics", guildId);
-    }),
-
-    // Dispatch to handlers. Each handler already isolates and logs its own
-    // failures with per-handler context (messageId, etc.), so their error type is
-    // `never` and a catchAll here would be dead code. If a handler ever stops
-    // catching internally, its error escapes into this stream's type rather than
-    // being silently absorbed — which is the signal we want.
-    Stream.mapEffect((e) => {
-      switch (e.type) {
-        case "GuildMemberMessage":
-          return handleMessageCreate(e);
-        case "GuildMessageUpdate":
-          return handleMessageUpdate(e);
-        case "GuildMessageDelete":
-          return handleMessageDelete(e);
-        case "MessageReactionAdd":
-          return handleReactionAdd(e);
-        case "MessageReactionRemove":
-          return handleReactionRemove(e);
-      }
-    }),
+    // Per event: feature-flag gate (skips guilds without analytics, and DM
+    // reactions with no guild), then dispatch. Handlers log their own typed
+    // failures with per-handler context; `isolateHandler` is the backstop for
+    // defects and hangs, inside the stream so one bad event can't end it.
+    Stream.mapEffect((e) =>
+      Effect.gen(function* () {
+        const guildId = getGuildId(e);
+        if (!guildId) return;
+        if (!(yield* flags.isPostHogEnabled("analytics", guildId))) return;
+        switch (e.type) {
+          case "GuildMemberMessage":
+            return yield* handleMessageCreate(e);
+          case "GuildMessageUpdate":
+            return yield* handleMessageUpdate(e);
+          case "GuildMessageDelete":
+            return yield* handleMessageDelete(e);
+          case "MessageReactionAdd":
+            return yield* handleReactionAdd(e);
+          case "MessageReactionRemove":
+            return yield* handleReactionRemove(e);
+        }
+      }).pipe(isolateHandler("ActivityTracker", e.type)),
+    ),
 
     Stream.runDrain,
   );

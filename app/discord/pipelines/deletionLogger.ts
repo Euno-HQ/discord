@@ -8,6 +8,7 @@ import { isGuildMessageEvent } from "#~/discord/events";
 import { MessageCacheService } from "#~/discord/messageCacheService";
 import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability";
+import { isolateHandler } from "#~/effects/supervise";
 
 import {
   handleBulkDelete,
@@ -28,66 +29,59 @@ export const deletionLoggerPipeline: Effect.Effect<
   yield* stream.pipe(
     Stream.filter(isGuildMessageEvent),
 
-    // Feature flag gate — skip events for guilds without deletion-log enabled.
-    // All GuildMessageEvent variants carry `guild: Guild`, so `e.guild.id` is
-    // always available.
-    Stream.filterEffect((e) =>
-      flags.isPostHogEnabled("deletion-log", e.guild.id),
-    ),
-
-    // Cache messages on the way through
-    Stream.tap((e) => {
-      switch (e.type) {
-        case "GuildMemberMessage":
-          return cache
-            .upsertMessage({
-              messageId: e.message.id,
-              guildId: e.guild.id,
-              channelId: e.message.channelId,
-              userId: e.member.id,
-              content: e.message.content,
-            })
-            .pipe(
-              Effect.catch((err) =>
-                logEffect("warn", "DeletionLogger", "Failed to cache message", {
-                  messageId: e.message.id,
-                  error: err,
-                }),
-              ),
-            );
-        case "GuildMessageUpdate":
-          return cache
-            .touchMessage(e.newMessage.id, e.newMessage.content ?? null)
-            .pipe(
-              Effect.catch((err) =>
-                logEffect(
-                  "warn",
-                  "DeletionLogger",
-                  "Failed to touch cached message",
-                  { messageId: e.newMessage.id, error: err },
+    // Per event: feature-flag gate (deletion-log), cache the message on the
+    // way through, then dispatch. All one isolated unit so a defect or hang in
+    // any step is reported and the stream moves on to the next event.
+    Stream.mapEffect((e) =>
+      Effect.gen(function* () {
+        // All GuildMessageEvent variants carry `guild: Guild`.
+        if (!(yield* flags.isPostHogEnabled("deletion-log", e.guild.id)))
+          return;
+        switch (e.type) {
+          case "GuildMemberMessage":
+            return yield* cache
+              .upsertMessage({
+                messageId: e.message.id,
+                guildId: e.guild.id,
+                channelId: e.message.channelId,
+                userId: e.member.id,
+                content: e.message.content,
+              })
+              .pipe(
+                Effect.catch((err) =>
+                  logEffect(
+                    "warn",
+                    "DeletionLogger",
+                    "Failed to cache message",
+                    {
+                      messageId: e.message.id,
+                      error: err,
+                    },
+                  ),
                 ),
-              ),
-            );
-        default:
-          return Effect.void;
-      }
-    }),
-
-    // Dispatch to handlers. Each handler already catches its own failures
-    // (see deletionLogHandlers.ts), so this never fails — no error isolation
-    // needed here.
-    Stream.mapEffect((e) => {
-      switch (e.type) {
-        case "GuildMemberMessage":
-          return Effect.void;
-        case "GuildMessageDelete":
-          return handleDelete(client, e);
-        case "GuildMessageUpdate":
-          return handleEdit(client, e);
-        case "GuildMessageBulkDelete":
-          return handleBulkDelete(client, e);
-      }
-    }),
+              );
+          case "GuildMessageUpdate":
+            yield* cache
+              .touchMessage(e.newMessage.id, e.newMessage.content ?? null)
+              .pipe(
+                Effect.catch((err) =>
+                  logEffect(
+                    "warn",
+                    "DeletionLogger",
+                    "Failed to touch cached message",
+                    { messageId: e.newMessage.id, error: err },
+                  ),
+                ),
+              );
+            return yield* handleEdit(client, e);
+          // Handlers catch their own typed failures (deletionLogHandlers.ts).
+          case "GuildMessageDelete":
+            return yield* handleDelete(client, e);
+          case "GuildMessageBulkDelete":
+            return yield* handleBulkDelete(client, e);
+        }
+      }).pipe(isolateHandler("DeletionLogger", e.type)),
+    ),
 
     Stream.runDrain,
   );

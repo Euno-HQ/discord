@@ -11,6 +11,7 @@ import { DiscordClient } from "#~/discord/client.server.ts";
 import { MESSAGE_CONTENT_INTENT } from "#~/discord/intents";
 import { FeatureFlagService } from "#~/effects/featureFlags";
 import { logEffect } from "#~/effects/observability.ts";
+import { reportAndContinue } from "#~/effects/supervise";
 import { getMessageContent } from "#~/helpers/discord.ts";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server.ts";
 
@@ -93,6 +94,7 @@ export const SpamDetectionServiceLive = Layer.effect(
     // cleanupTracker is a pure mutation, wrapped in Effect.sync.
     yield* Effect.forkDetach(
       Effect.sync(() => cleanupTracker(tracker, TRACKER_MAX_AGE)).pipe(
+        reportAndContinue("Spam", "Activity tracker cleanup failed"),
         // delay the first run one interval, matching setInterval semantics
         Effect.delay(`${TRACKER_CLEANUP_INTERVAL} millis`),
         Effect.repeat(Schedule.fixed(`${TRACKER_CLEANUP_INTERVAL} millis`)),

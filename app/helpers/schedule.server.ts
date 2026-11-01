@@ -2,6 +2,7 @@ import { format, parseISO, subDays } from "date-fns";
 import { Effect, Schedule } from "effect";
 
 import { logEffect } from "#~/effects/observability.ts";
+import { reportAndContinue } from "#~/effects/supervise";
 
 /**
  * getFirstRun ensures that a newly created interval timer runs at consistent
@@ -33,9 +34,8 @@ export const getFirstRun = (interval: number, now = new Date()) => {
  * first-run offset is preserved by sleeping for `getFirstRun(interval)` before
  * the first execution, then repeating every `interval` thereafter.
  *
- * The task itself is run inside `Effect.catch` so a single failing run never
- * tears the repeating schedule down — matching the fire-and-forget semantics of
- * the previous `setInterval`-based implementation.
+ * Each run is wrapped in `reportAndContinue`: a failure OR defect in one run is
+ * logged with its Cause and reported to Sentry, and the schedule carries on.
  *
  * @param serviceName A label used for the scheduling log line
  * @param interval An interval in milliseconds
@@ -58,12 +58,9 @@ export const scheduleTaskEffect = <E, R>(
     yield* Effect.sleep(`${firstRun} millis`);
 
     yield* task.pipe(
-      Effect.catch((error) =>
-        logEffect("warn", "ScheduleTask", `${serviceName} run failed`, {
-          serviceName,
-          error,
-        }),
-      ),
+      reportAndContinue("ScheduleTask", `${serviceName} run failed`, {
+        serviceName,
+      }),
       Effect.repeat(Schedule.fixed(`${interval} millis`)),
     );
   }).pipe(

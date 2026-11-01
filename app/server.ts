@@ -43,6 +43,7 @@ import { checkpointWal, runIntegrityCheck } from "./Database";
 import { tryDiscord } from "./effects/classifyDiscordError";
 import { logEffect } from "./effects/observability";
 import { initializeGroups } from "./effects/posthog";
+import { superviseForever } from "./effects/supervise";
 import { botStats } from "./helpers/metrics";
 
 export const app = express();
@@ -93,8 +94,16 @@ app.post("/webhooks/discord", bodyParser.json(), async (req, res, next) => {
 // functions change when command files are edited.
 declare global {
   var __discordOneTimeSetupDone: boolean | undefined;
-  var __pipelineFibers: Fiber.Fiber<void, never>[] | undefined;
+  var __pipelineFibers: Fiber.Fiber<unknown, unknown>[] | undefined;
 }
+
+// Fork a long-lived fiber under restart supervision (see effects/supervise.ts):
+// if it ever ends or dies it is logged, reported, and restarted with capped
+// jittered backoff. forkDetach so it outlives `startup` (see below).
+const forkSupervised = <E, R>(
+  name: string,
+  self: Effect.Effect<unknown, E, R>,
+) => superviseForever(name, self).pipe(Effect.forkDetach);
 
 const startup = Effect.gen(function* () {
   yield* logEffect("debug", "Server", "initializing commands");
@@ -141,8 +150,14 @@ const startup = Effect.gen(function* () {
     // __pipelineFibers: that array is interrupted and replaced on every reload,
     // and nothing here would re-fork them. These two need no gateway, so they
     // run even in web-only degraded mode.
-    yield* messageCacheExpirationSchedule.pipe(Effect.forkDetach);
-    yield* runJobRunner.pipe(Effect.forkDetach);
+    yield* forkSupervised(
+      "MessageCacheExpiration",
+      messageCacheExpirationSchedule,
+    );
+    // No per-job timeout: jobs (e.g. bulk role assignment) legitimately run
+    // for many minutes and checkpoint their own progress. A runner death is
+    // restarted, and the restart resumes the in-flight job.
+    yield* forkSupervised("JobRunner", runJobRunner);
 
     // Everything below needs a live gateway. When Discord has rejected us the
     // client exists but is not logged in, so these calls would throw and take
@@ -152,7 +167,10 @@ const startup = Effect.gen(function* () {
       yield* tryDiscord("init", () => deployCommands(discordClient));
 
       // Escalation resolver scheduler (must be after client is ready)
-      yield* escalationResolverSchedule(discordClient).pipe(Effect.forkDetach);
+      yield* forkSupervised(
+        "EscalationResolver",
+        escalationResolverSchedule(discordClient),
+      );
 
       yield* logEffect("info", "Gateway", "Gateway initialization completed", {
         guildCount: discordClient.guilds.cache.size,
@@ -170,7 +188,7 @@ const startup = Effect.gen(function* () {
     }
 
     yield* logEffect("debug", "Server", "scheduling integrity check");
-    yield* runIntegrityCheck.pipe(Effect.forkDetach);
+    yield* forkSupervised("IntegrityCheck", runIntegrityCheck);
 
     // Graceful shutdown handler to checkpoint WAL and dispose the runtime
     // (tears down PostHog finalizer, feature flag interval, and SQLite connection)
@@ -237,12 +255,12 @@ const startup = Effect.gen(function* () {
     yield* logEffect("info", "Server", "Interrupted old pipeline fibers");
   }
   globalThis.__pipelineFibers = [
-    yield* deletionLoggerPipeline.pipe(Effect.forkDetach),
-    yield* automodPipeline.pipe(Effect.forkDetach),
-    yield* modActionLoggerPipeline.pipe(Effect.forkDetach),
-    yield* activityTrackerPipeline.pipe(Effect.forkDetach),
-    yield* onboardGuildPipeline.pipe(Effect.forkDetach),
-    yield* reactjiChannelerPipeline.pipe(Effect.forkDetach),
+    yield* forkSupervised("DeletionLoggerPipeline", deletionLoggerPipeline),
+    yield* forkSupervised("AutomodPipeline", automodPipeline),
+    yield* forkSupervised("ModActionLoggerPipeline", modActionLoggerPipeline),
+    yield* forkSupervised("ActivityTrackerPipeline", activityTrackerPipeline),
+    yield* forkSupervised("OnboardGuildPipeline", onboardGuildPipeline),
+    yield* forkSupervised("ReactjiChannelerPipeline", reactjiChannelerPipeline),
   ];
   yield* logEffect("info", "Server", "Pipeline fibers forked");
 });

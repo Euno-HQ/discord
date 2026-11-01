@@ -3,7 +3,7 @@ import { Effect, Stream } from "effect";
 
 import type { RuntimeContext } from "#~/AppRuntime";
 import { DiscordEventBus } from "#~/discord/eventBus";
-import { logEffect } from "#~/effects/observability";
+import { isolateHandler } from "#~/effects/supervise";
 
 import { handleGuildCreate, handleGuildDelete } from "./onboardGuildHandlers";
 
@@ -27,14 +27,7 @@ export const onboardGuildPipeline: Effect.Effect<void, never, RuntimeContext> =
               return Effect.void;
           }
         })();
-        return handler.pipe(
-          Effect.catch((err) =>
-            logEffect("warn", "OnboardGuild", "Pipeline handler failed", {
-              eventType: e.type,
-              error: err,
-            }),
-          ),
-        );
+        return handler.pipe(isolateHandler("OnboardGuild", e.type));
       }),
 
       Stream.runDrain,
