@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema } from "effect";
+import { Cache, Context, Duration, Effect, Exit, Layer, Schema } from "effect";
 
 import { FeatureDisabledError, PostHogError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
@@ -17,6 +17,10 @@ export const BooleanFlag = Schema.Literals([
   "data-export",
 ]);
 export type BooleanFlag = typeof BooleanFlag.Type;
+
+export const FLAG_CACHE_TTL = Duration.seconds(60);
+// ~guilds × gated flags; LRU-evicted beyond this.
+export const FLAG_CACHE_CAPACITY = 10_000;
 
 export interface IFeatureFlagService {
   /** Check any PostHog flag by name. Never fails — returns false on error. */
@@ -43,8 +47,14 @@ export const FeatureFlagServiceLive = Layer.effect(
   Effect.gen(function* () {
     const posthog = yield* PostHogService;
 
-    return {
-      isPostHogEnabled: (flag, guildId) => {
+    // Every gated event (each message for velocity-spam/analytics, each
+    // deletion) evaluates a flag; cache per (flag, guild) for 60s. The answer
+    // depends only on those two inputs — groups are derived from guildId.
+    // Failed lookups get a zero TTL so an outage blip is never pinned as
+    // `false` for the full TTL; the caller still fails closed below.
+    const flagCache = yield* Cache.makeWith(
+      (key: string) => {
+        const [flag, guildId] = key.split(":", 2) as [BooleanFlag, string];
         if (!posthog) return Effect.succeed(false as boolean);
         return Effect.tryPromise({
           try: () =>
@@ -54,8 +64,19 @@ export const FeatureFlagServiceLive = Layer.effect(
             }),
           catch: (cause) =>
             new PostHogError({ operation: "isFeatureEnabled", cause }),
-        }).pipe(
-          Effect.map((result) => result ?? false),
+        }).pipe(Effect.map((result) => result ?? false));
+      },
+      {
+        capacity: FLAG_CACHE_CAPACITY,
+        timeToLive: (exit) =>
+          Exit.isSuccess(exit) ? FLAG_CACHE_TTL : Duration.zero,
+      },
+    );
+
+    return {
+      isPostHogEnabled: (flag, guildId) => {
+        if (!posthog) return Effect.succeed(false as boolean);
+        return Cache.get(flagCache, `${flag}:${guildId}`).pipe(
           // A PostHog outage otherwise silently disables a paid feature for every
           // guild with zero signal — warn so it's visible, then fail closed.
           Effect.catch((error) =>
