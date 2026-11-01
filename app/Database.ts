@@ -134,7 +134,7 @@ const sendWebhookAlert = (message: string) =>
   );
 
 /** Run SQLite integrity check using the existing database connection */
-export const runIntegrityCheck = Effect.gen(function* () {
+const integrityCheckOnce = Effect.gen(function* () {
   yield* logEffect(
     "info",
     "IntegrityCheck",
@@ -168,7 +168,6 @@ export const runIntegrityCheck = Effect.gen(function* () {
 
   return yield* new DatabaseCorruptionError({ errors });
 }).pipe(
-  Effect.repeat(Schedule.fixed("6 hours")),
   Effect.catchTag("SqlError", (error) =>
     Effect.all([
       logEffect("error", "IntegrityCheck", "Integrity check failed to run", {
@@ -179,6 +178,15 @@ export const runIntegrityCheck = Effect.gen(function* () {
       ),
     ]),
   ),
-  Effect.catch(() => Effect.succeed(null)),
+  // Corruption was already logged and alerted above; keep checking.
+  Effect.catchTag("DatabaseCorruptionError", () => Effect.void),
   Effect.withSpan("runIntegrityCheck"),
+);
+
+/**
+ * Integrity check every 6 hours. Failures are handled per run, inside the
+ * repeat, so one failed check doesn't end the schedule.
+ */
+export const runIntegrityCheck = integrityCheckOnce.pipe(
+  Effect.repeat(Schedule.fixed("6 hours")),
 );
