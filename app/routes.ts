@@ -10,8 +10,6 @@ export default [
     route("app/admin/:guildId", "routes/__auth/admin.$guildId.tsx"),
 
     route("app/:guildId", "routes/__auth/guild.tsx"),
-    route("app/:guildId/sh", "routes/__auth/dashboard.tsx"),
-    route("app/:guildId/sh/:userId", "routes/__auth/sh-user.tsx"),
     layout("components/TabsLayout.tsx", [
       route("app/:guildId/settings", "routes/__auth/settings.tsx"),
       route("app/:guildId/settings/upgrade", "routes/__auth/upgrade.tsx"),

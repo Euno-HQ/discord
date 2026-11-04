@@ -129,21 +129,6 @@ export function DiscordLayout({
         <nav className="flex-1 space-y-1 px-3 py-4">
           {guildId ? (
             <>
-              {guildId === "102860784329052160" && (
-                <>
-                  <Link
-                    to={`/app/${guildId}/sh`}
-                    className={`group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                      isActive(`/app/${guildId}/sh`)
-                        ? "bg-surface-overlay text-stone-100"
-                        : "hover:bg-surface-overlay text-stone-400 hover:text-stone-100"
-                    }`}
-                  >
-                    🌟 Star Hunter
-                  </Link>
-                  <hr className="border-stone-700" />
-                </>
-              )}
               <Link
                 to={`/app/${guildId}`}
                 className={`group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors ${

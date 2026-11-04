@@ -73,7 +73,6 @@
     "kysely": "^0.28.10",
     "kysely-ctl": "^0.20.0",
     "lodash-es": "^4.17.21",
-    "lru-cache": "^11.1.0",
     "markdown-it": "^14.2.0",
     "node-cron": "^3.0.0",
     "node-emoji": "^2.2.0",
@@ -85,9 +84,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.0.0",
     "react-router": "^7.9.6",
-    "recharts": "^2.15.3",
     "simple-oauth2": "^5.1.0",
-    "simple-statistics": "^7.8.8",
     "stripe": "^19.0.0"
   },
   "devDependencies": {

@@ -1,11 +1,11 @@
 {
   "effectPromise": 0,
   "unknownErrorChannel": 0,
-  "bridgesOutsideRoutes": 16,
+  "bridgesOutsideRoutes": 14,
   "asyncInServerZones": 15,
-  "asCasts": 5,
-  "asCastsInTests": 96,
-  "tsExpectError": 12,
+  "asCasts": 3,
+  "asCastsInTests": 95,
+  "tsExpectError": 10,
   "effectDiagnosticSuppressions": 1,
-  "eslintDisables": 25
+  "eslintDisables": 22
 }
