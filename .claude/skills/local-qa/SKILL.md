@@ -50,11 +50,12 @@ them as your reference; the format is in `qa-session`. `local-qa` reads and
 **The worktree `.env` is a symlink to the root `.env`** — tokens (Discord,
 PostHog) are already present. Don't copy or recreate it.
 
-**Trap 1 — the relative DB path.** `.env` has `DATABASE_URL=./mod-bot.sqlite3`
-(relative). Run the bot from a worktree and that resolves to a _fresh empty DB
-in the worktree_ — no configured guild, so escalate / gate / report features
-have nothing to act on. Fix: copy the dev DB into the worktree (it's gitignored;
-this leaves the canonical dev DB untouched):
+**Trap 1 — the DB path.** `DATABASE_URL` must be an absolute path (or
+`:memory:`); startup fails fast on a relative one. To QA from a worktree
+against real guild config, copy the dev DB into the worktree (it's gitignored;
+this leaves the canonical dev DB untouched) and override `DATABASE_URL` on the
+command line (the `.env` is shared, and dotenv never overrides a set var):
+`DATABASE_URL=$PWD/mod-bot.sqlite3 npm run dev:bot`.
 
 ```bash
 cp /Users/vcarl/workspace/mod-bot/mod-bot.sqlite3 ./        # plus the WAL sidecars:

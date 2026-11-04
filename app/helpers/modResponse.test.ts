@@ -30,12 +30,12 @@ test("returns ban over all others", () => {
 });
 
 test("order of input does not matter", () => {
-  expect(
-    getMostSevereResolution([resolutions.ban, resolutions.track]),
-  ).toBe(resolutions.ban);
-  expect(
-    getMostSevereResolution([resolutions.track, resolutions.ban]),
-  ).toBe(resolutions.ban);
+  expect(getMostSevereResolution([resolutions.ban, resolutions.track])).toBe(
+    resolutions.ban,
+  );
+  expect(getMostSevereResolution([resolutions.track, resolutions.ban])).toBe(
+    resolutions.ban,
+  );
 });
 
 test("severity order: track < timeout < restrict < kick < ban", () => {
@@ -48,13 +48,17 @@ test("severity order: track < timeout < restrict < kick < ban", () => {
   expect(
     getMostSevereResolution([resolutions.restrict, resolutions.kick]),
   ).toBe(resolutions.kick);
-  expect(
-    getMostSevereResolution([resolutions.kick, resolutions.ban]),
-  ).toBe(resolutions.ban);
+  expect(getMostSevereResolution([resolutions.kick, resolutions.ban])).toBe(
+    resolutions.ban,
+  );
 });
 
 test("duplicates do not change result", () => {
   expect(
-    getMostSevereResolution([resolutions.kick, resolutions.kick, resolutions.track]),
+    getMostSevereResolution([
+      resolutions.kick,
+      resolutions.kick,
+      resolutions.track,
+    ]),
   ).toBe(resolutions.kick);
 });

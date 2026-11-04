@@ -101,7 +101,7 @@ export const processEscalationEffect = (
       logEffect("info", "EscalationResolver", "Auto-resolving escalation", {
         resolution,
       }),
-    ]).pipe(Effect.withConcurrency("unbounded"));
+    ]);
 
     const [reportedMember, voteMessage] = yield* Effect.all([
       fetchMemberOrNull(guild, escalation.reported_user_id),
@@ -158,7 +158,7 @@ export const processEscalationEffect = (
           components: [resolvedContainer],
         }),
         replyAndForwardSafe(voteMessage, content, modLog),
-      ]).pipe(Effect.withConcurrency("unbounded"));
+      ]);
 
       return { resolution: resolutions.track, userGone: true };
     }
@@ -196,7 +196,7 @@ export const processEscalationEffect = (
         "Successfully auto-resolved escalation",
         { resolution },
       ),
-    ]).pipe(Effect.withConcurrency("unbounded"));
+    ]);
 
     return { resolution, userGone: false };
   }).pipe(
@@ -213,43 +213,44 @@ export const processEscalationEffect = (
  * Check all due escalations and auto-resolve them.
  * Uses scheduled_for column to determine which escalations are ready.
  */
-export const checkPendingEscalationsEffect = (client: Client) =>
-  Effect.gen(function* () {
-    const escalationService = yield* EscalationService;
+export const checkPendingEscalationsEffect = Effect.fn(
+  "checkPendingEscalations",
+)(function* (client: Client) {
+  const escalationService = yield* EscalationService;
 
-    const due = yield* escalationService.getDueEscalations();
-    yield* Effect.annotateCurrentSpan({ processed: due.length });
+  const due = yield* escalationService.getDueEscalations();
+  yield* Effect.annotateCurrentSpan({ processed: due.length });
 
-    if (due.length === 0) {
-      return { processed: 0, succeeded: 0, failed: 0 };
-    }
+  if (due.length === 0) {
+    return { processed: 0, succeeded: 0, failed: 0 };
+  }
 
-    yield* logEffect("debug", "EscalationResolver", "Processing escalations");
+  yield* logEffect("debug", "EscalationResolver", "Processing escalations");
 
-    // Process escalations sequentially to avoid rate limits
-    // TODO: In the future, we should have a smarter fetch that manages that
-    const results = yield* Effect.forEach(due, (escalation) =>
-      processEscalationEffect(client, escalation).pipe(
-        Effect.catchAll((error) =>
-          logEffect(
-            "error",
-            "EscalationResolver",
-            "Error processing escalation",
-            { escalationId: escalation.id, error },
-          ),
+  // Process escalations sequentially to avoid rate limits
+  // TODO: In the future, we should have a smarter fetch that manages that
+  const results = yield* Effect.forEach(due, (escalation) =>
+    processEscalationEffect(client, escalation).pipe(
+      Effect.catch((error) =>
+        logEffect(
+          "error",
+          "EscalationResolver",
+          "Error processing escalation",
+          { escalationId: escalation.id, error },
         ),
       ),
-    );
+    ),
+  );
 
-    const succeeded = results.filter(Boolean).length;
-    const failed = results.length - succeeded;
+  const succeeded = results.filter(Boolean).length;
+  const failed = results.length - succeeded;
 
-    yield* logEffect(
-      "info",
-      "EscalationResolver",
-      "Finished processing escalations",
-      { succeeded, failed },
-    );
+  yield* logEffect(
+    "info",
+    "EscalationResolver",
+    "Finished processing escalations",
+    { succeeded, failed },
+  );
 
-    return { processed: due.length, succeeded, failed };
-  }).pipe(Effect.withSpan("checkPendingEscalations"));
+  return { processed: due.length, succeeded, failed };
+});

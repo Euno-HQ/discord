@@ -1,7 +1,7 @@
 import { ChannelType } from "discord.js";
 import { Effect } from "effect";
 
-import { DatabaseService } from "#~/Database";
+import { db, run } from "#~/Database";
 import type {
   GuildMemberMessage,
   GuildMessageDelete,
@@ -38,21 +38,22 @@ export const handleMessageCreate = (e: GuildMemberMessage) => {
   }
 
   return Effect.gen(function* () {
-    const db = yield* DatabaseService;
     const info = yield* getMessageStats(msg);
     const channelInfo = yield* getOrFetchChannel(msg);
 
-    yield* db.insertInto("message_stats").values({
-      ...info,
-      code_stats: JSON.stringify(info.code_stats),
-      link_stats: JSON.stringify(info.link_stats),
-      message_id: msg.id,
-      author_id: msg.author.id,
-      guild_id: e.guild.id,
-      channel_id: msg.channelId,
-      recipient_id: msg.mentions.repliedUser?.id ?? null,
-      channel_category: channelInfo.category,
-    });
+    yield* run(
+      db.insertInto("message_stats").values({
+        ...info,
+        code_stats: JSON.stringify(info.code_stats),
+        link_stats: JSON.stringify(info.link_stats),
+        message_id: msg.id,
+        author_id: msg.author.id,
+        guild_id: e.guild.id,
+        channel_id: msg.channelId,
+        recipient_id: msg.mentions.repliedUser?.id ?? null,
+        channel_category: channelInfo.category,
+      }),
+    );
 
     yield* logEffect("debug", "ActivityTracker", "Message stats stored", {
       messageId: msg.id,
@@ -68,7 +69,7 @@ export const handleMessageCreate = (e: GuildMemberMessage) => {
     // Track message in business analytics
     threadStats.messageTracked(msg);
   }).pipe(
-    Effect.catchAll((err) =>
+    Effect.catch((err) =>
       logEffect("warn", "ActivityTracker", "Failed to track message", {
         messageId: msg.id,
         error: err,
@@ -82,17 +83,18 @@ export const handleMessageCreate = (e: GuildMemberMessage) => {
 
 export const handleMessageUpdate = (e: GuildMessageUpdate) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
     const info = yield* getMessageStats(e.newMessage);
 
-    yield* db
-      .updateTable("message_stats")
-      .where("message_id", "=", e.newMessage.id)
-      .set({
-        ...info,
-        code_stats: JSON.stringify(info.code_stats),
-        link_stats: JSON.stringify(info.link_stats),
-      });
+    yield* run(
+      db
+        .updateTable("message_stats")
+        .where("message_id", "=", e.newMessage.id)
+        .set({
+          ...info,
+          code_stats: JSON.stringify(info.code_stats),
+          link_stats: JSON.stringify(info.link_stats),
+        }),
+    );
 
     yield* logEffect("debug", "ActivityTracker", "Message stats updated", {
       messageId: e.newMessage.id,
@@ -100,7 +102,7 @@ export const handleMessageUpdate = (e: GuildMessageUpdate) =>
       wordCount: info.word_count,
     });
   }).pipe(
-    Effect.catchAll((err) =>
+    Effect.catch((err) =>
       logEffect("warn", "ActivityTracker", "Failed to update message stats", {
         messageId: e.newMessage.id,
         error: err,
@@ -117,16 +119,15 @@ export const handleMessageDelete = (e: GuildMessageDelete) => {
   }
 
   return Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db
-      .deleteFrom("message_stats")
-      .where("message_id", "=", e.message.id);
+    yield* run(
+      db.deleteFrom("message_stats").where("message_id", "=", e.message.id),
+    );
 
     yield* logEffect("debug", "ActivityTracker", "Message stats deleted", {
       messageId: e.message.id,
     });
   }).pipe(
-    Effect.catchAll((err) =>
+    Effect.catch((err) =>
       logEffect("warn", "ActivityTracker", "Failed to delete message stats", {
         messageId: e.message.id,
         error: err,
@@ -140,15 +141,16 @@ export const handleMessageDelete = (e: GuildMessageDelete) => {
 
 export const handleReactionAdd = (e: MessageReactionAddEvent) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db
-      .updateTable("message_stats")
-      .where("message_id", "=", e.reaction.message.id)
-      .set({ react_count: (eb) => eb(eb.ref("react_count"), "+", 1) });
+    yield* run(
+      db
+        .updateTable("message_stats")
+        .where("message_id", "=", e.reaction.message.id)
+        .set({ react_count: (eb) => eb(eb.ref("react_count"), "+", 1) }),
+    );
 
     yield* logEffect("debug", "ActivityTracker", "Reaction added");
   }).pipe(
-    Effect.catchAll((err) =>
+    Effect.catch((err) =>
       logEffect("warn", "ActivityTracker", "Failed to track reaction add", {
         messageId: e.reaction.message.id,
         error: err,
@@ -164,13 +166,14 @@ export const handleReactionAdd = (e: MessageReactionAddEvent) =>
 
 export const handleReactionRemove = (e: MessageReactionRemoveEvent) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db
-      .updateTable("message_stats")
-      .where("message_id", "=", e.reaction.message.id)
-      .set({
-        react_count: (eb) => eb(eb.ref("react_count"), "-", 1),
-      });
+    yield* run(
+      db
+        .updateTable("message_stats")
+        .where("message_id", "=", e.reaction.message.id)
+        .set({
+          react_count: (eb) => eb(eb.ref("react_count"), "-", 1),
+        }),
+    );
 
     yield* logEffect(
       "debug",
@@ -182,7 +185,7 @@ export const handleReactionRemove = (e: MessageReactionRemoveEvent) =>
       },
     );
   }).pipe(
-    Effect.catchAll((err) =>
+    Effect.catch((err) =>
       logEffect("warn", "ActivityTracker", "Failed to track reaction remove", {
         messageId: e.reaction.message.id,
         error: err,

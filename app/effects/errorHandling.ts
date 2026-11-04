@@ -29,10 +29,10 @@ export const isRetriable = (
   e._tag === "RateLimitError" || e._tag === "TransientError";
 
 /** Capped exponential backoff (base 200ms, ×2, jittered) over 4 attempts. */
-const cappedBackoff = Schedule.exponential("200 millis", 2).pipe(
-  Schedule.jittered,
-  Schedule.compose(Schedule.recurs(3)), // 1 initial + 3 retries = 4 attempts
-);
+const cappedBackoff = Schedule.max([
+  Schedule.exponential("200 millis", 2).pipe(Schedule.jittered),
+  Schedule.recurs(3), // 1 initial + 3 retries = 4 attempts
+]);
 
 export const withRetry = <A, R>(
   self: Effect.Effect<A, DiscordError, R>,
@@ -120,7 +120,7 @@ export const toUserResponse = (
     case "PostHogError":
     case "RequestBodyReadError":
     case "SqlError":
-    case "UnknownException":
+    case "UnknownError":
       return GENERIC;
     default: {
       // If this line stops compiling, a new member was added to AppError without

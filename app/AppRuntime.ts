@@ -1,4 +1,4 @@
-import { Effect, Layer, Logger, LogLevel, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, References } from "effect";
 import type { PostHog } from "posthog-node";
 
 import { DatabaseLayer } from "#~/Database";
@@ -22,13 +22,11 @@ import { UserServiceLive } from "#~/models/user.server";
 const InfraLayer = Layer.mergeAll(
   TracingLive,
   JsonLoggerLayer,
-  isProd()
-    ? Logger.minimumLogLevel(LogLevel.Info)
-    : Logger.minimumLogLevel(LogLevel.All),
+  Layer.succeed(References.MinimumLogLevel, isProd() ? "Info" : "All"),
 );
 
 // App layer: database + PostHog + feature flags + spam detection + message cache
-// + discord client + infrastructure
+// + discord client, built on top of the infrastructure layer
 const AppLayer = Layer.mergeAll(
   DatabaseLayer,
   PostHogServiceLive,
@@ -45,8 +43,9 @@ const AppLayer = Layer.mergeAll(
   DiscordClientLayer,
   Layer.provide(DiscordEventBusLive, DiscordClientLayer),
   Layer.provide(UserServiceLive, DatabaseLayer),
-  InfraLayer,
-);
+  // provideMerge (not a sibling in mergeAll) so the services' construction-time
+  // logs and spans also go through the JSON logger / tracer.
+).pipe(Layer.provideMerge(InfraLayer));
 
 // ManagedRuntime keeps the AppLayer scope alive for the process lifetime.
 // Unlike Effect.runSync which closes the scope (and thus the SQLite connection)
@@ -55,7 +54,7 @@ export const runtime = ManagedRuntime.make(AppLayer);
 
 // The context type provided by the ManagedRuntime. Use this for typing functions
 // that accept effects which need database access.
-export type RuntimeContext = ManagedRuntime.ManagedRuntime.Context<
+export type RuntimeContext = ManagedRuntime.ManagedRuntime.Services<
   typeof runtime
 >;
 

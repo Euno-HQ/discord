@@ -20,6 +20,10 @@ spec:
       labels:
         app: mod-bot
     spec:
+      # Must comfortably exceed the in-app graceful-shutdown force-exit
+      # deadline (FORCE_EXIT_MS = 25s in app/server.ts), so the app finishes
+      # its WAL checkpoint and DB close before the kubelet SIGKILLs it.
+      terminationGracePeriodSeconds: 40
       containers:
         - name: mod-bot
           image: $(IMAGE)

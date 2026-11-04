@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 // The bot and the web app share one process. A login failure used to call
@@ -18,11 +20,11 @@ const discordClient = vi.hoisted(() => ({
 vi.mock("#~/helpers/env.server", () => ({
   discordToken: "test-bot-token",
 }));
+// A real REST arms sweeper intervals, which runAllTimersAsync would chase forever.
+vi.mock("#~/discord/botRest.server", () => ({ botRest: {} }));
 vi.mock("#~/helpers/botPermissions", () => ({ botInviteUrl: () => "invite" }));
-vi.mock("#~/helpers/observability", () => ({
-  // eslint-disable-next-line @typescript-eslint/no-empty-function
-  log: () => {},
-  trackPerformance: (_name: string, fn: () => unknown) => fn(),
+vi.mock("#~/effects/observability", () => ({
+  logEffect: () => Effect.void,
 }));
 vi.mock("#~/helpers/sentry.server", () => ({
   default: { captureException: vi.fn(), captureMessage: vi.fn() },
@@ -32,6 +34,16 @@ const importFresh = async () => {
   vi.resetModules();
   return import("./client.server");
 };
+
+/** Run `login` under TestClock, fast-forwarding through every retry delay. */
+const runLogin = (login: (c: any) => Effect.Effect<string>) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const fiber = yield* Effect.forkChild(login(discordClient));
+      yield* TestClock.adjust("10 minutes");
+      return yield* Fiber.join(fiber);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
 
 describe("login", () => {
   beforeEach(() => {
@@ -52,7 +64,7 @@ describe("login", () => {
     discordClient.login.mockRejectedValue(unauthorized);
 
     const { login } = await importFresh();
-    const state = await login(discordClient);
+    const state = await runLogin(login);
 
     expect(state).toBe("unauthorized");
     expect(exit).not.toHaveBeenCalled();
@@ -65,7 +77,7 @@ describe("login", () => {
     );
 
     const { login, getBotConnection } = await importFresh();
-    await login(discordClient);
+    await runLogin(login);
 
     // A rotated token cannot be recovered in-process — env is read once at
     // boot — so retrying a 401 is pure noise against Discord's API.
@@ -74,37 +86,31 @@ describe("login", () => {
   });
 
   test("retries transient failures and reports success", async () => {
-    vi.useFakeTimers();
     discordClient.login
       .mockRejectedValueOnce(new Error("ECONNRESET"))
       .mockResolvedValueOnce(undefined);
 
     const { login, getBotConnection } = await importFresh();
-    const pending = login(discordClient);
-    await vi.runAllTimersAsync();
-    const state = await pending;
+    const state = await runLogin(login);
 
     expect(state).toBe("connected");
     expect(discordClient.login).toHaveBeenCalledTimes(2);
     expect(getBotConnection().state).toBe("connected");
-    vi.useRealTimers();
+    expect(getBotConnection().attempts).toBe(2);
   });
 
   test("gives up after exhausting attempts, still without exiting", async () => {
-    vi.useFakeTimers();
     const exit = vi
       .spyOn(process, "exit")
       .mockImplementation(() => undefined as never);
     discordClient.login.mockRejectedValue(new Error("gateway unreachable"));
 
     const { login } = await importFresh();
-    const pending = login(discordClient);
-    await vi.runAllTimersAsync();
-    const state = await pending;
+    const state = await runLogin(login);
 
     expect(state).toBe("degraded");
+    expect(discordClient.login).toHaveBeenCalledTimes(6);
     expect(exit).not.toHaveBeenCalled();
     exit.mockRestore();
-    vi.useRealTimers();
   });
 });

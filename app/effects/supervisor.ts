@@ -1,8 +1,11 @@
-import { Context, Effect, FiberRef, Layer, Supervisor } from "effect";
+import { Context, Effect, Layer } from "effect";
 
 // ---------------------------------------------------------------------------
-// Fiber metadata — attached to job fibers via FiberRef
+// Active-job registry
 // ---------------------------------------------------------------------------
+// Effect v4 removed `Supervisor` (and `FiberRef`), so job fibers can no longer
+// be enumerated by the runtime. Instead, a job registers its metadata for the
+// duration of its execution via `trackJob`, and the admin view reads it back.
 
 export interface ActiveJobMeta {
   readonly jobId: string;
@@ -11,51 +14,46 @@ export interface ActiveJobMeta {
   readonly startedAt: string;
 }
 
+const activeJobs = new Set<ActiveJobMeta>();
+
 /**
- * Module-level FiberRef that job fibers set to identify themselves.
- * Defaults to `null` (no job metadata) for non-job fibers.
+ * Registers `meta` as an active job while `self` runs. The entry is always
+ * removed afterwards (success, failure, or interruption). `startedAt` is
+ * stamped when the effect starts.
  */
-export const jobMetaRef: FiberRef.FiberRef<ActiveJobMeta | null> =
-  FiberRef.unsafeMake<ActiveJobMeta | null>(null);
+export const trackJob =
+  (meta: Omit<ActiveJobMeta, "startedAt">) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const entry: ActiveJobMeta = {
+          ...meta,
+          startedAt: new Date().toISOString(),
+        };
+        activeJobs.add(entry);
+        return entry;
+      }),
+      () => self,
+      (entry) => Effect.sync(() => activeJobs.delete(entry)),
+    );
 
 // ---------------------------------------------------------------------------
 // Service interface + tag
 // ---------------------------------------------------------------------------
 
 export interface ISupervisorService {
-  /** Returns metadata for all currently-executing job fibers. */
+  /** Returns metadata for all currently-executing jobs. */
   readonly getActiveJobMeta: () => Effect.Effect<ActiveJobMeta[]>;
 }
 
-export class SupervisorService extends Context.Tag("SupervisorService")<
+export class SupervisorService extends Context.Service<
   SupervisorService,
   ISupervisorService
->() {}
+>()("SupervisorService") {}
 
-// ---------------------------------------------------------------------------
-// Live layer — creates the supervisor, builds the service, installs both
-// ---------------------------------------------------------------------------
-
-export const SupervisorServiceLive = Layer.unwrapEffect(
-  Effect.gen(function* () {
-    const supervisor = yield* Supervisor.track;
-
-    const service: ISupervisorService = {
-      getActiveJobMeta: () =>
-        Effect.gen(function* () {
-          const fibers = yield* supervisor.value;
-          const metas: ActiveJobMeta[] = [];
-          for (const fiber of fibers) {
-            const meta = fiber.getFiberRef(jobMetaRef);
-            if (meta) metas.push(meta);
-          }
-          return metas;
-        }).pipe(Effect.withSpan("getActiveJobMeta")),
-    };
-
-    return Layer.mergeAll(
-      Layer.succeed(SupervisorService, service),
-      Supervisor.addSupervisor(supervisor),
-    );
-  }),
-);
+export const SupervisorServiceLive = Layer.succeed(SupervisorService, {
+  getActiveJobMeta: () =>
+    Effect.sync(() => [...activeJobs]).pipe(
+      Effect.withSpan("getActiveJobMeta"),
+    ),
+});

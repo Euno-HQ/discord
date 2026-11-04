@@ -1,5 +1,6 @@
 import { AuditLogEvent, type Guild } from "discord.js";
-import { Effect, Fiber, TestClock, TestContext } from "effect";
+import { Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, test, vi } from "vitest";
 
 import { fetchAuditLogEntry, type AuditLogEntryResult } from "./auditLog";
@@ -19,11 +20,11 @@ const mockUser = { id: "user-1", username: "TestUser" };
 function runEffect<A, E>(effect: Effect.Effect<A, E>) {
   return Effect.gen(function* () {
     // Fast-forward all sleeps so tests don't wait
-    const fiber = yield* Effect.fork(effect);
+    const fiber = yield* Effect.forkChild(effect);
     // Advance time enough to cover initial 100ms + 3 * 500ms = 1600ms
     yield* TestClock.adjust("2 seconds");
     return yield* Fiber.join(fiber);
-  }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+  }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
 }
 
 describe("fetchAuditLogEntry", () => {

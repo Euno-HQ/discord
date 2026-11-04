@@ -46,7 +46,7 @@ export const Command = {
         content: "This message has been reported anonymously",
       });
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           yield* logEffect("error", "Commands", "Report command failed", {
             error,
@@ -55,7 +55,7 @@ export const Command = {
           yield* interactionEditReply(interaction, {
             content: "Failed to submit report. Please try again later.",
           }).pipe(
-            Effect.catchAll(() => {
+            Effect.catch(() => {
               commandStats.commandFailed(interaction, "report", error.message);
               return Effect.void;
             }),

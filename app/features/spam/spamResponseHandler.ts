@@ -40,12 +40,8 @@ export const CROSS_GUILD_SPAM_THRESHOLD = 3;
 const crossGuildDmSent = new Set<string>();
 
 /** Execute the graduated response for a spam verdict. */
-export const executeResponse = (
-  verdict: SpamVerdict,
-  message: Message,
-  member: GuildMember,
-) =>
-  Effect.gen(function* () {
+export const executeResponse = Effect.fn("SpamResponse.executeResponse")(
+  function* (verdict: SpamVerdict, message: Message, member: GuildMember) {
     if (verdict.tier === "none") return;
 
     const guildId = message.guild!.id;
@@ -85,7 +81,7 @@ export const executeResponse = (
     if (verdict.tier === "medium") {
       // Apply restricted role
       yield* applyRestriction(member).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logEffect("warn", "SpamResponse", "Failed to apply restriction", {
             error,
           }),
@@ -97,7 +93,7 @@ export const executeResponse = (
     if (verdict.tier === "high") {
       // Timeout user in the originating guild
       yield* timeout(member, "Automated spam detection").pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logEffect("warn", "SpamResponse", "Failed to timeout user", {
             error,
           }),
@@ -130,7 +126,7 @@ export const executeResponse = (
         // Clean up all reported messages for the kicked user — including any
         // back-filled prior duplicates — so nothing is left behind on Discord.
         yield* deleteAllReportedForUser(userId, guildId).pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             logEffect(
               "warn",
               "SpamResponse",
@@ -146,7 +142,7 @@ export const executeResponse = (
             allowedMentions: {},
           }),
         ).pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             logEffect(
               "warn",
               "SpamResponse",
@@ -170,7 +166,8 @@ export const executeResponse = (
       verdict.tier,
       verdict.totalScore,
     );
-  }).pipe(Effect.withSpan("SpamResponse.executeResponse"));
+  },
+);
 
 /**
  * Check if a user has been flagged for spam across enough guilds to trigger a
@@ -178,8 +175,8 @@ export const executeResponse = (
  * guild the bot is in and sends them a DM warning that their account may be
  * compromised.
  */
-const checkCrossGuildSpam = (userId: string) =>
-  Effect.gen(function* () {
+const checkCrossGuildSpam = Effect.fn("SpamResponse.checkCrossGuildSpam")(
+  function* (userId: string) {
     const client = yield* DiscordClient;
     const guildCount = yield* getSpamReportGuildCount(userId);
     if (guildCount < CROSS_GUILD_SPAM_THRESHOLD) return;
@@ -206,7 +203,7 @@ const checkCrossGuildSpam = (userId: string) =>
             await targetMember.timeout(OVERNIGHT, reason);
           }
         }).pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             logEffect(
               "warn",
               "SpamResponse",
@@ -233,7 +230,7 @@ const checkCrossGuildSpam = (userId: string) =>
             "Your account has been temporarily restricted while you secure it.",
         ),
       ).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logEffect(
             "warn",
             "SpamResponse",
@@ -243,141 +240,133 @@ const checkCrossGuildSpam = (userId: string) =>
         ),
       );
     }
-  }).pipe(Effect.withSpan("SpamResponse.checkCrossGuildSpam"));
+  },
+);
 
 /** Log a spam report to the mod thread */
-const logSpamReport = (message: Message, verdict: SpamVerdict) =>
-  Effect.gen(function* () {
-    const client = yield* DiscordClient;
-    const extra = `Score ${verdict.totalScore} (${verdict.tier}): ${verdict.summary}`;
+const logSpamReport = Effect.fn("SpamResponse.logSpamReport")(function* (
+  message: Message,
+  verdict: SpamVerdict,
+) {
+  const client = yield* DiscordClient;
+  const extra = `Score ${verdict.totalScore} (${verdict.tier}): ${verdict.summary}`;
 
-    const result = yield* logUserMessage({
-      reason: ReportReasons.spam,
-      message,
-      staff: client.user ?? false,
-      extra,
-    }).pipe(
-      Effect.catchAll((error) =>
-        Effect.gen(function* () {
-          yield* logEffect(
-            "error",
+  const result = yield* logUserMessage({
+    reason: ReportReasons.spam,
+    message,
+    staff: client.user ?? false,
+    extra,
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.gen(function* () {
+        yield* logEffect("error", "SpamResponse", "Failed to log spam report", {
+          error,
+        });
+        return null;
+      }),
+    ),
+  );
+
+  // Back-fill any prior duplicate messages that were not logged when they
+  // were first processed (because at that point they looked like tier=none).
+  // We record them against the same mod-log thread post as the trigger message
+  // so mods can see the full duplicate sequence, and so deleteAllReportedForUser
+  // can clean them all up on kick.
+  //
+  // recordReport is idempotent (ON CONFLICT DO NOTHING on the unique index),
+  // so subsequent spam events for the same user re-presenting overlapping
+  // priorDuplicates is expected and not an error — we just count how many
+  // were genuinely new vs already on file.
+  if (result && verdict.priorDuplicates && verdict.priorDuplicates.length > 0) {
+    const guildId = message.guild!.id;
+    const userId = message.author.id;
+    const logMessageId = result.message.id;
+    const logChannelId = result.thread.id;
+    const backfillExtra = `Back-filled prior duplicate. ${extra}`;
+
+    let backfilled = 0;
+    let alreadyRecorded = 0;
+    let failed = 0;
+
+    for (const prior of verdict.priorDuplicates) {
+      const outcome = yield* recordReport({
+        reportedMessageId: prior.messageId,
+        reportedChannelId: prior.channelId,
+        reportedUserId: userId,
+        guildId,
+        logMessageId,
+        logChannelId,
+        reason: ReportReasons.spam,
+        extra: backfillExtra,
+      }).pipe(
+        Effect.map((r): "inserted" | "skipped" =>
+          r.wasInserted ? "inserted" : "skipped",
+        ),
+        Effect.catchTag("SqlError", (e) => {
+          // Pull structured fields off the underlying sqlite error so the
+          // warn log carries the actual constraint name / sqlite code
+          // instead of an opaque "SqlError: Failed to execute statement".
+          const cause = e.cause as
+            | { code?: unknown; message?: unknown }
+            | null
+            | undefined;
+          return logEffect(
+            "warn",
             "SpamResponse",
-            "Failed to log spam report",
+            "Failed to back-fill prior duplicate into reported_messages",
             {
-              error,
-            },
-          );
-          return null;
-        }),
-      ),
-    );
-
-    // Back-fill any prior duplicate messages that were not logged when they
-    // were first processed (because at that point they looked like tier=none).
-    // We record them against the same mod-log thread post as the trigger message
-    // so mods can see the full duplicate sequence, and so deleteAllReportedForUser
-    // can clean them all up on kick.
-    //
-    // recordReport is idempotent (ON CONFLICT DO NOTHING on the unique index),
-    // so subsequent spam events for the same user re-presenting overlapping
-    // priorDuplicates is expected and not an error — we just count how many
-    // were genuinely new vs already on file.
-    if (
-      result &&
-      verdict.priorDuplicates &&
-      verdict.priorDuplicates.length > 0
-    ) {
-      const guildId = message.guild!.id;
-      const userId = message.author.id;
-      const logMessageId = result.message.id;
-      const logChannelId = result.thread.id;
-      const backfillExtra = `Back-filled prior duplicate. ${extra}`;
-
-      let backfilled = 0;
-      let alreadyRecorded = 0;
-      let failed = 0;
-
-      for (const prior of verdict.priorDuplicates) {
-        const outcome = yield* recordReport({
-          reportedMessageId: prior.messageId,
-          reportedChannelId: prior.channelId,
-          reportedUserId: userId,
-          guildId,
-          logMessageId,
-          logChannelId,
-          reason: ReportReasons.spam,
-          extra: backfillExtra,
-        }).pipe(
-          Effect.map((r): "inserted" | "skipped" =>
-            r.wasInserted ? "inserted" : "skipped",
-          ),
-          Effect.catchTag("SqlError", (e) => {
-            // Pull structured fields off the underlying sqlite error so the
-            // warn log carries the actual constraint name / sqlite code
-            // instead of an opaque "SqlError: Failed to execute statement".
-            const cause = e.cause as
-              | { code?: unknown; message?: unknown }
-              | null
-              | undefined;
-            return logEffect(
-              "warn",
-              "SpamResponse",
-              "Failed to back-fill prior duplicate into reported_messages",
-              {
-                messageId: prior.messageId,
-                error: {
-                  _tag: "SqlError",
-                  code:
-                    typeof cause?.code === "string" ? cause.code : undefined,
-                  message:
-                    typeof cause?.message === "string"
-                      ? cause.message
-                      : undefined,
-                },
+              messageId: prior.messageId,
+              error: {
+                _tag: "SqlError",
+                code: typeof cause?.code === "string" ? cause.code : undefined,
+                message:
+                  typeof cause?.message === "string"
+                    ? cause.message
+                    : undefined,
               },
-            ).pipe(Effect.as("failed" as const));
-          }),
-        );
-
-        if (outcome === "inserted") backfilled++;
-        else if (outcome === "skipped") alreadyRecorded++;
-        else failed++;
-      }
-
-      yield* logEffect(
-        "info",
-        "SpamResponse",
-        `Back-fill complete: ${backfilled} new, ${alreadyRecorded} already recorded${
-          failed > 0 ? `, ${failed} failed` : ""
-        }`,
-        { userId, guildId, backfilled, alreadyRecorded, failed },
+            },
+          ).pipe(Effect.as("failed" as const));
+        }),
       );
+
+      if (outcome === "inserted") backfilled++;
+      else if (outcome === "skipped") alreadyRecorded++;
+      else failed++;
     }
 
-    return result;
-  }).pipe(Effect.withSpan("SpamResponse.logSpamReport"));
+    yield* logEffect(
+      "info",
+      "SpamResponse",
+      `Back-fill complete: ${backfilled} new, ${alreadyRecorded} already recorded${
+        failed > 0 ? `, ${failed} failed` : ""
+      }`,
+      { userId, guildId, backfilled, alreadyRecorded, failed },
+    );
+  }
+
+  return result;
+});
 
 /** Execute a softban (ban + unban) for honeypot triggers — 7-day message wipe. */
-const executeSoftban = (
+const executeSoftban = Effect.fn("SpamResponse.executeSoftban")(function* (
   message: Message,
   member: GuildMember,
   verdict: SpamVerdict,
-) =>
-  Effect.gen(function* () {
-    yield* softbanMember(member, "honeypot spam detected", 604800).pipe(
-      Effect.catchIf(isDiscordError, (error) =>
-        logEffect("error", "SpamResponse", "Failed to softban user", {
-          error,
-          operation: error.operation,
-          userId: member.id,
-          guildId: message.guild!.id,
-        }),
-      ),
-    );
-    yield* logSpamReport(message, verdict);
-    featureStats.honeypotTriggered(
-      message.guild!.id,
-      member.id,
-      message.channelId,
-    );
-  }).pipe(Effect.withSpan("SpamResponse.executeSoftban"));
+) {
+  yield* softbanMember(member, "honeypot spam detected", 604800).pipe(
+    Effect.catchIf(isDiscordError, (error) =>
+      logEffect("error", "SpamResponse", "Failed to softban user", {
+        error,
+        operation: error.operation,
+        userId: member.id,
+        guildId: message.guild!.id,
+      }),
+    ),
+  );
+  yield* logSpamReport(message, verdict);
+  featureStats.honeypotTriggered(
+    message.guild!.id,
+    member.id,
+    message.channelId,
+  );
+});

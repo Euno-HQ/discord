@@ -1,6 +1,6 @@
 // learn more: https://fly.io/docs/reference/configuration/#services-http_checks
 import { runEffect } from "#~/AppRuntime";
-import { DatabaseService } from "#~/Database";
+import { db, run } from "#~/Database";
 
 import type { Route } from "./+types/healthcheck";
 
@@ -13,11 +13,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     // if we can connect to the database and make a simple query
     // and make a HEAD request to ourselves, then we're good.
     await Promise.all([
-      // Resolve the live DB handle from the runtime, then run the query
-      // builder (itself an Effect<rows, SqlError>). No `effect` import — this
-      // route module is client-reachable.
-      runEffect(DatabaseService).then((db) =>
-        runEffect(
+      // Run the query through the runtime's DatabaseService (`run` is an
+      // Effect<rows, SqlError>). No `effect` import — this route module is
+      // client-reachable.
+      runEffect(
+        run(
           db
             // @ts-expect-error because kysely doesn't generate types for sqlite_master
             .selectFrom("sqlite_master")

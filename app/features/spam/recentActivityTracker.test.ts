@@ -1,8 +1,9 @@
-import type { ActivityMap, RecentMessage } from "./recentActivityTracker";
 import {
-  recordMessage,
-  getRecentMessages,
   cleanupTracker,
+  getRecentMessages,
+  recordMessage,
+  type ActivityMap,
+  type RecentMessage,
 } from "./recentActivityTracker";
 
 const makeMsg = (overrides: Partial<RecentMessage> = {}): RecentMessage => ({

@@ -90,21 +90,21 @@ const vote =
         interactionReply(interaction, {
           content: "Only moderators can vote on escalations.",
           flags: [MessageFlags.Ephemeral],
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
       ),
       Effect.catchTag("NotFoundError", () =>
         interactionReply(interaction, {
           content: "Escalation not found.",
           flags: [MessageFlags.Ephemeral],
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
       ),
       Effect.catchTag("AlreadyResolvedError", () =>
         interactionReply(interaction, {
           content: "This escalation has already been resolved.",
           flags: [MessageFlags.Ephemeral],
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
       ),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         logEffect("error", "EscalationHandlers", "Error voting", {
           error,
           resolution,
@@ -115,7 +115,7 @@ const vote =
               flags: [MessageFlags.Ephemeral],
             }),
           )
-          .pipe(Effect.catchAll(() => Effect.void)),
+          .pipe(Effect.catch(() => Effect.void)),
       ),
     );
 
@@ -160,35 +160,35 @@ const expedite = (interaction: MessageComponentInteraction) =>
       interactionFollowUp(interaction, {
         content: "Only moderators can expedite resolutions.",
         flags: [MessageFlags.Ephemeral],
-      }).pipe(Effect.catchAll(() => Effect.void)),
+      }).pipe(Effect.catch(() => Effect.void)),
     ),
     Effect.catchTag("NotFoundError", () =>
       interactionFollowUp(interaction, {
         content: "Escalation not found.",
         flags: [MessageFlags.Ephemeral],
-      }).pipe(Effect.catchAll(() => Effect.void)),
+      }).pipe(Effect.catch(() => Effect.void)),
     ),
     Effect.catchTag("AlreadyResolvedError", () =>
       interactionFollowUp(interaction, {
         content: "This escalation has already been resolved.",
         flags: [MessageFlags.Ephemeral],
-      }).pipe(Effect.catchAll(() => Effect.void)),
+      }).pipe(Effect.catch(() => Effect.void)),
     ),
     Effect.catchTag("NoLeaderError", () =>
       interactionFollowUp(interaction, {
         content: "Cannot expedite: no clear leading resolution.",
         flags: [MessageFlags.Ephemeral],
-      }).pipe(Effect.catchAll(() => Effect.void)),
+      }).pipe(Effect.catch(() => Effect.void)),
     ),
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       logEffect("error", "EscalationHandlers", "Expedite failed", {
         error,
       }).pipe(
-        Effect.zipRight(
+        Effect.andThen(
           interactionFollowUp(interaction, {
             content: "Something went wrong while executing the resolution.",
             flags: [MessageFlags.Ephemeral],
-          }).pipe(Effect.catchAll(() => Effect.void)),
+          }).pipe(Effect.catch(() => Effect.void)),
         ),
       ),
     ),
@@ -229,21 +229,21 @@ const escalate = (interaction: MessageComponentInteraction) =>
     Effect.catchTag("FeatureDisabledError", () =>
       interactionEditReply(interaction, {
         content: `This is a paid feature. [Upgrade your plan](${webBaseUrl}/app/${interaction.guildId}/settings/upgrade) to enable it.`,
-      }).pipe(Effect.catchAll(() => Effect.void)),
+      }).pipe(Effect.catch(() => Effect.void)),
     ),
     Effect.catchTag("NotFoundError", () =>
       interactionEditReply(interaction, {
         content: "Failed to re-escalate, couldn't find escalation",
-      }).pipe(Effect.catchAll(() => Effect.void)),
+      }).pipe(Effect.catch(() => Effect.void)),
     ),
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       logEffect("error", "EscalationHandlers", "Error handling escalation", {
         error,
       }).pipe(
-        Effect.zipRight(
+        Effect.andThen(
           interactionEditReply(interaction, {
             content: "Failed to process escalation",
-          }).pipe(Effect.catchAll(() => Effect.void)),
+          }).pipe(Effect.catch(() => Effect.void)),
         ),
       ),
     ),
@@ -271,18 +271,18 @@ export const EscalationHandlers = {
       Effect.catchTag("NotAuthorizedError", () =>
         interactionEditReply(interaction, {
           content: "Insufficient permissions",
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
       ),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         logEffect("error", "EscalationHandlers", "Error deleting messages", {
           error,
         }).pipe(
-          Effect.zipRight(
+          Effect.andThen(
             Effect.suspend(() => {
               const reply = toUserResponse(error);
               return interactionEditReply(interaction, {
                 content: reply.content,
-              }).pipe(Effect.catchAll(() => Effect.void));
+              }).pipe(Effect.catch(() => Effect.void));
             }),
           ),
         ),
@@ -302,19 +302,19 @@ export const EscalationHandlers = {
         interactionReply(interaction, {
           content: "Insufficient permissions",
           flags: [MessageFlags.Ephemeral],
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
       ),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         logEffect("error", "EscalationHandlers", "Error kicking user", {
           error,
         }).pipe(
-          Effect.zipRight(
+          Effect.andThen(
             Effect.suspend(() => {
               const reply = toUserResponse(error);
               return interactionReply(interaction, {
                 content: reply.content,
                 flags: reply.ephemeral ? [MessageFlags.Ephemeral] : undefined,
-              }).pipe(Effect.catchAll(() => Effect.void));
+              }).pipe(Effect.catch(() => Effect.void));
             }),
           ),
         ),
@@ -347,19 +347,19 @@ export const EscalationHandlers = {
         interactionReply(interaction, {
           content: "Insufficient permissions",
           flags: [MessageFlags.Ephemeral],
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
       ),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         logEffect("error", "EscalationHandlers", "Error banning user", {
           error,
         }).pipe(
-          Effect.zipRight(
+          Effect.andThen(
             Effect.suspend(() => {
               const reply = toUserResponse(error);
               return interactionReply(interaction, {
                 content: reply.content,
                 flags: reply.ephemeral ? [MessageFlags.Ephemeral] : undefined,
-              }).pipe(Effect.catchAll(() => Effect.void));
+              }).pipe(Effect.catch(() => Effect.void));
             }),
           ),
         ),
@@ -386,22 +386,22 @@ export const EscalationHandlers = {
         interactionReply(interaction, {
           content: "Insufficient permissions",
           flags: [MessageFlags.Ephemeral],
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
       ),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         logEffect(
           "error",
           "EscalationHandlers",
           "Error banning user and deleting messages",
           { error },
         ).pipe(
-          Effect.zipRight(
+          Effect.andThen(
             Effect.suspend(() => {
               const reply = toUserResponse(error);
               return interactionReply(interaction, {
                 content: reply.content,
                 flags: reply.ephemeral ? [MessageFlags.Ephemeral] : undefined,
-              }).pipe(Effect.catchAll(() => Effect.void));
+              }).pipe(Effect.catch(() => Effect.void));
             }),
           ),
         ),
@@ -428,19 +428,19 @@ export const EscalationHandlers = {
         interactionReply(interaction, {
           content: "Insufficient permissions",
           flags: [MessageFlags.Ephemeral],
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
       ),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         logEffect("error", "EscalationHandlers", "Error restricting user", {
           error,
         }).pipe(
-          Effect.zipRight(
+          Effect.andThen(
             Effect.suspend(() => {
               const reply = toUserResponse(error);
               return interactionReply(interaction, {
                 content: reply.content,
                 flags: reply.ephemeral ? [MessageFlags.Ephemeral] : undefined,
-              }).pipe(Effect.catchAll(() => Effect.void));
+              }).pipe(Effect.catch(() => Effect.void));
             }),
           ),
         ),
@@ -467,19 +467,19 @@ export const EscalationHandlers = {
         interactionReply(interaction, {
           content: "Insufficient permissions",
           flags: [MessageFlags.Ephemeral],
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
       ),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         logEffect("error", "EscalationHandlers", "Error timing out user", {
           error,
         }).pipe(
-          Effect.zipRight(
+          Effect.andThen(
             Effect.suspend(() => {
               const reply = toUserResponse(error);
               return interactionReply(interaction, {
                 content: reply.content,
                 flags: reply.ephemeral ? [MessageFlags.Ephemeral] : undefined,
-              }).pipe(Effect.catchAll(() => Effect.void));
+              }).pipe(Effect.catch(() => Effect.void));
             }),
           ),
         ),

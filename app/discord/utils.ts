@@ -1,7 +1,7 @@
 import type { Message, TextChannel } from "discord.js";
 import { Effect } from "effect";
 
-import { DatabaseService, type SqlError } from "#~/Database";
+import { db, run, type DatabaseService, type SqlError } from "#~/Database";
 import type { DB } from "#~/db";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import type { DiscordError } from "#~/effects/errors";
@@ -13,13 +13,10 @@ export const getOrFetchChannel = (
   msg: Message,
 ): Effect.Effect<ChannelInfo, SqlError | DiscordError, DatabaseService> =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     // TODO: cache eviction?
-    const [channelInfo] = yield* db
-      .selectFrom("channel_info")
-      .selectAll()
-      .where("id", "=", msg.channelId);
+    const [channelInfo] = yield* run(
+      db.selectFrom("channel_info").selectAll().where("id", "=", msg.channelId),
+    );
 
     if (channelInfo) {
       yield* logEffect(
@@ -55,7 +52,7 @@ export const getOrFetchChannel = (
       name: data.name,
     };
 
-    yield* db.insertInto("channel_info").values(values);
+    yield* run(db.insertInto("channel_info").values(values));
 
     yield* logEffect(
       "debug",

@@ -48,6 +48,14 @@ jobs:
       - name: Type check
         run: npm run typecheck --if-present
 
+      # tsc doesn't load language-service plugins, so the Effect diagnostics
+      # only gate CI through these.
+      - name: Effect diagnostics
+        run: npm run check:effect
+
+      - name: Effect debt ratchet
+        run: npm run effect:debt
+
   vitest:
     name: Vitest
     runs-on: ubuntu-latest
@@ -81,3 +89,18 @@ jobs:
 
       - name: Assert Effect not in client bundle
         run: npm run check:client-bundle
+
+  infra-lint:
+    name: Shell + Dockerfile lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # shellcheck is preinstalled on ubuntu-latest. -x follows the
+      # `# shellcheck source=` directives into scripts/db-common.sh.
+      - name: shellcheck
+        run: git ls-files -z '*.sh' | xargs -0 --no-run-if-empty shellcheck -x
+
+      - name: hadolint
+        run: docker run --rm -i hadolint/hadolint:v2.12.0 < Dockerfile

@@ -1,31 +1,20 @@
-import { Effect, Either, Layer, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime, Result, type Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import * as Reactivity from "@effect/experimental/Reactivity";
-import { SqlClient } from "@effect/sql";
-import * as Sqlite from "@effect/sql-kysely/Sqlite";
-import { SqliteClient } from "@effect/sql-sqlite-node";
-
-import { DatabaseService, type DB } from "#~/Database";
+import { makeDatabaseLayer } from "#~/Database";
 import { SubscriptionService } from "#~/models/subscriptions.server";
 
 // In-memory SQLite test layer (mirrors user.server.test.ts)
-const TestSqliteLive = Layer.scoped(
-  SqlClient.SqlClient,
-  SqliteClient.make({ filename: ":memory:" }),
-).pipe(Layer.provide(Reactivity.layer));
-
-const TestKyselyLive = Layer.effect(DatabaseService, Sqlite.make<DB>()).pipe(
-  Layer.provide(TestSqliteLive),
-);
+const TestDbLive = makeDatabaseLayer(":memory:");
 
 // Provide both SqlClient (for schema setup) and DatabaseService (for service methods).
 // provideMerge keeps a single memoized in-memory connection.
-const TestLayer = Layer.mergeAll(TestSqliteLive, TestKyselyLive);
+const TestLayer = TestDbLive;
 
 const testRuntime = ManagedRuntime.make(TestLayer);
 
-type TestR = Layer.Layer.Success<typeof TestLayer>;
+type TestR = Layer.Success<typeof TestLayer>;
 
 const runTest = <A, E>(effect: Effect.Effect<A, E, TestR>) =>
   testRuntime.runPromise(effect);
@@ -193,11 +182,11 @@ describe("SubscriptionService", () => {
       SubscriptionService.updateSubscriptionStatus(
         "no-such-guild",
         "cancelled",
-      ).pipe(Effect.either),
+      ).pipe(Effect.result),
     );
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left._tag).toBe("SubscriptionNotFoundError");
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure._tag).toBe("SubscriptionNotFoundError");
     }
   });
 

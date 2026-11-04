@@ -1,9 +1,8 @@
 import { Data, type Cause } from "effect";
+import type { SqlError as SqlErrorType } from "effect/sql/SqlError";
 
-import type { SqlError as SqlErrorType } from "@effect/sql/SqlError";
-
-// Re-export SQL errors from @effect/sql for convenience
-export { SqlError, ResultLengthMismatch } from "@effect/sql/SqlError";
+// Re-export SQL errors from effect/sql for convenience
+export { SqlError, ResultLengthMismatch } from "effect/sql/SqlError";
 
 export class NotAuthorizedError extends Data.TaggedError("NotAuthorizedError")<{
   operation: string;
@@ -158,6 +157,13 @@ export class TransientError extends Data.TaggedError("TransientError")<{
   cause: Error;
 }> {}
 
+/** A discord.js Client lifecycle call (login, destroy, guild fetch) rejected. */
+export class DiscordClientError extends Data.TaggedError("DiscordClientError")<{
+  operation: "login" | "destroy" | "fetchGuilds";
+  attempt?: number;
+  cause: unknown;
+}> {}
+
 /** Non-retriable 403: the bot lacks a Discord permission. */
 export class ForbiddenError extends Data.TaggedError("ForbiddenError")<{
   source: "discord";
@@ -228,6 +234,6 @@ export type AppError =
   | PostHogError
   | RequestBodyReadError
   | SqlErrorType
-  /** Effect.tryPromise wraps thrown exceptions in UnknownException; command-level
+  /** Effect.tryPromise wraps thrown exceptions in UnknownError; command-level
    *  catchAll blocks see this whenever a raw promise rejects with an untyped error. */
-  | Cause.UnknownException;
+  | Cause.UnknownError;

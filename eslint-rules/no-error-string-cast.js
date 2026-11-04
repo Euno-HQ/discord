@@ -15,14 +15,9 @@ const ERROR_NAMES = new Set(["error", "err", "e", "cause"]);
 
 // Effect error-channel handlers whose first arrow param is the error/cause,
 // even when named something other than the conventional names above.
-const CATCH_METHODS = new Set([
-  "catchAll",
-  "catchAllCause",
-  "catchTag",
-  "catchTags",
-]);
+const CATCH_METHODS = new Set(["catch", "catchCause", "catchTag", "catchTags"]);
 
-/** Is this arrow the handler argument of `X.catchAll(...)` / `X.catchTag(...)` etc.? */
+/** Is this arrow the handler argument of `X.catch(...)` / `X.catchTag(...)` etc.? */
 function isCatchHandler(arrow) {
   const call = arrow.parent;
   return (

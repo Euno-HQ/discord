@@ -1,8 +1,7 @@
 import "react-router";
 
-import bodyParser from "body-parser";
-import { verifyKey } from "discord-interactions";
-import { Effect, Fiber } from "effect";
+import type { Server as HttpServer } from "node:http";
+import { Effect, Exit, Fiber, Scope } from "effect";
 import express from "express";
 import pinoHttp from "pino-http";
 
@@ -33,9 +32,6 @@ import { deletionLoggerPipeline } from "#~/discord/pipelines/deletionLogger";
 import { modActionLoggerPipeline } from "#~/discord/pipelines/modActionLogger";
 import { onboardGuildPipeline } from "#~/discord/pipelines/onboardGuild";
 import { reactjiChannelerPipeline } from "#~/discord/pipelines/reactjiChanneler";
-import { applicationKey } from "#~/helpers/env.server";
-// Side-effect import: registers job handler and notification builder
-
 import { runJobRunner } from "#~/jobs/jobRunner";
 
 import { runtime, warmRuntime } from "./AppRuntime";
@@ -43,6 +39,7 @@ import { checkpointWal, runIntegrityCheck } from "./Database";
 import { tryDiscord } from "./effects/classifyDiscordError";
 import { logEffect } from "./effects/observability";
 import { initializeGroups } from "./effects/posthog";
+import { reportCause, superviseForever } from "./effects/supervise";
 import { botStats } from "./helpers/metrics";
 
 export const app = express();
@@ -64,37 +61,31 @@ app.use(
   }),
 );
 
-// Discord signature verification
-app.post("/webhooks/discord", bodyParser.json(), async (req, res, next) => {
-  const isValidRequest = await verifyKey(
-    JSON.stringify(req.body),
-    req.header("X-Signature-Ed25519") ?? "bum signature",
-    req.header("X-Signature-Timestamp") ?? "bum timestamp",
-    applicationKey,
-  );
-  console.log("WEBHOOK", "isValidRequest:", isValidRequest);
-  if (!isValidRequest) {
-    console.log("[REQ] Invalid request signature");
-    res.status(401).send({ message: "Bad request signature" });
-    return;
-  }
-  if (req.body.type === 1) {
-    res.json({ type: 1, data: {} });
-    return;
-  }
-
-  next();
-});
-
-// Track whether one-time setup (event handlers, schedulers, signal handlers)
+// Track whether one-time setup (gateway, schedulers, job runner)
 // has already run. These must not re-register on HMR reloads — the closures
 // use Effect services from the stable ManagedRuntime, so re-registering just
 // creates duplicates. Command registration DOES re-run because command handler
 // functions change when command files are edited.
 declare global {
   var __discordOneTimeSetupDone: boolean | undefined;
-  var __pipelineFibers: Fiber.RuntimeFiber<void, never>[] | undefined;
+  var __pipelineFibers: Fiber.Fiber<unknown, unknown>[] | undefined;
+  // Schedulers + job runner: forked once (not per HMR reload); interrupted by
+  // graceful shutdown.
+  var __backgroundFibers: Fiber.Fiber<unknown, unknown>[] | undefined;
+  // Owns the gateway's listeners, login fiber, and client teardown (see
+  // initDiscordBot). Created once; closed by graceful shutdown.
+  var __gatewayScope: Scope.Closeable | undefined;
+  var __startupFiber: Fiber.Fiber<unknown, unknown> | undefined;
+  var __shutdownInstalled: boolean | undefined;
 }
+
+// Fork a long-lived fiber under restart supervision (see effects/supervise.ts):
+// if it ever ends or dies it is logged, reported, and restarted with capped
+// jittered backoff. forkDetach so it outlives `startup` (see below).
+const forkSupervised = <E, R>(
+  name: string,
+  self: Effect.Effect<unknown, E, R>,
+) => superviseForever(name, self).pipe(Effect.forkDetach);
 
 const startup = Effect.gen(function* () {
   yield* logEffect("debug", "Server", "initializing commands");
@@ -114,7 +105,10 @@ const startup = Effect.gen(function* () {
   ]);
 
   yield* logEffect("debug", "Server", "initializing Discord bot");
-  const discordClient = yield* initDiscordBot;
+  globalThis.__gatewayScope ??= yield* Scope.make();
+  const discordClient = yield* initDiscordBot.pipe(
+    Scope.provide(globalThis.__gatewayScope),
+  );
   const connection = getBotConnection();
   const botConnected = connection.state === "connected";
 
@@ -127,13 +121,13 @@ const startup = Effect.gen(function* () {
     );
   }
 
-  // One-time setup: event handlers, schedulers, signal handlers.
-  // Skipped on HMR reloads to prevent duplicate listeners.
+  // One-time setup: schedulers, job runner, integrity check.
+  // Skipped on HMR reloads to prevent duplicates.
   if (!globalThis.__discordOneTimeSetupDone) {
     globalThis.__discordOneTimeSetupDone = true;
+    const background = (globalThis.__backgroundFibers ??= []);
 
-    // Periodic schedulers — long-lived Effects forkDaemon'd (not runFork'd off
-    // the runtime) so they stay in the structured-concurrency tree and outlive
+    // Periodic schedulers — long-lived Effects forkDetach'd so they outlive
     // `startup`, the fiber running this code. Each self-recovers per run (see
     // scheduleTaskEffect), so a single failure never tears the schedule down.
     // Forked exactly once — this whole block is skipped on HMR reloads by the
@@ -141,18 +135,31 @@ const startup = Effect.gen(function* () {
     // __pipelineFibers: that array is interrupted and replaced on every reload,
     // and nothing here would re-fork them. These two need no gateway, so they
     // run even in web-only degraded mode.
-    yield* messageCacheExpirationSchedule.pipe(Effect.forkDaemon);
-    yield* runJobRunner.pipe(Effect.forkDaemon);
+    background.push(
+      yield* forkSupervised(
+        "MessageCacheExpiration",
+        messageCacheExpirationSchedule,
+      ),
+    );
+    // No per-job timeout: jobs (e.g. bulk role assignment) legitimately run
+    // for many minutes and checkpoint their own progress. A runner death is
+    // restarted, and the restart resumes the in-flight job.
+    background.push(yield* forkSupervised("JobRunner", runJobRunner));
 
     // Everything below needs a live gateway. When Discord has rejected us the
     // client exists but is not logged in, so these calls would throw and take
-    // the startup fiber down with them — stranding the pipelines, job runner,
-    // and signal handlers that the web app still depends on.
+    // the startup fiber down with them — stranding the pipelines and job
+    // runner that the web app still depends on.
     if (botConnected) {
       yield* tryDiscord("init", () => deployCommands(discordClient));
 
       // Escalation resolver scheduler (must be after client is ready)
-      yield* escalationResolverSchedule(discordClient).pipe(Effect.forkDaemon);
+      background.push(
+        yield* forkSupervised(
+          "EscalationResolver",
+          escalationResolverSchedule(discordClient),
+        ),
+      );
 
       yield* logEffect("info", "Gateway", "Gateway initialization completed", {
         guildCount: discordClient.guilds.cache.size,
@@ -170,49 +177,7 @@ const startup = Effect.gen(function* () {
     }
 
     yield* logEffect("debug", "Server", "scheduling integrity check");
-    yield* runIntegrityCheck.pipe(Effect.forkDaemon);
-
-    // Graceful shutdown handler to checkpoint WAL and dispose the runtime
-    // (tears down PostHog finalizer, feature flag interval, and SQLite connection)
-    // Graceful shutdown: checkpoint WAL, THEN dispose the runtime so AppLayer
-    // finalizers run (PostHog flush/shutdown, feature-flag interval clear,
-    // SQLite connection close) before the process exits. The exit must come
-    // after dispose — an earlier `process.exit` here skips every finalizer.
-    let shuttingDown = false;
-    const handleShutdown = async (signal: string) => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-
-      // Failsafe: if teardown hangs (a finalizer blocks), force-exit rather
-      // than wait for the orchestrator's SIGKILL. unref() so this timer can
-      // never keep the process alive on its own.
-      const forceExit = setTimeout(() => {
-        console.error("Graceful shutdown timed out; forcing exit");
-        process.exit(1);
-      }, 10_000);
-      forceExit.unref();
-
-      try {
-        await runtime.runPromise(
-          Effect.gen(function* () {
-            yield* logEffect("info", "Server", `Received ${signal}`);
-            yield* checkpointWal();
-            yield* logEffect("info", "Server", "Database WAL checkpointed");
-          }),
-        );
-      } catch (error) {
-        console.error("Shutdown WAL checkpoint failed:", error);
-      } finally {
-        await runtime
-          .dispose()
-          .catch((error) => console.error("Runtime dispose failed:", error));
-        process.exit(0);
-      }
-    };
-
-    yield* logEffect("debug", "Server", "setting signal handlers");
-    process.on("SIGTERM", () => void handleShutdown("SIGTERM"));
-    process.on("SIGINT", () => void handleShutdown("SIGINT"));
+    background.push(yield* forkSupervised("IntegrityCheck", runIntegrityCheck));
   } else {
     yield* logEffect(
       "info",
@@ -225,28 +190,141 @@ const startup = Effect.gen(function* () {
   // Interrupt stale fibers, fork fresh pipelines with updated handler code.
   // The event bus queue buffers events during the brief swap.
   //
-  // forkDaemon (NOT fork): these fibers must outlive `startup`, the fiber
-  // running this code. Plain Effect.fork makes them children of `startup`, so
-  // they're interrupted the instant it completes — silently killing every
+  // forkDetach (NOT forkChild): these fibers must outlive `startup`, the fiber
+  // running this code. Plain Effect.forkChild makes them children of `startup`,
+  // so they're interrupted the instant it completes — silently killing every
   // pipeline before it drains a single event. HMR cleanup is handled by the
   // explicit Fiber.interrupt above, not by parent-scope teardown.
   if (globalThis.__pipelineFibers) {
-    yield* Effect.all(
-      globalThis.__pipelineFibers.map((f) => Fiber.interrupt(f)),
-    );
+    yield* Fiber.interruptAll(globalThis.__pipelineFibers);
     yield* logEffect("info", "Server", "Interrupted old pipeline fibers");
   }
   globalThis.__pipelineFibers = [
-    yield* deletionLoggerPipeline.pipe(Effect.forkDaemon),
-    yield* automodPipeline.pipe(Effect.forkDaemon),
-    yield* modActionLoggerPipeline.pipe(Effect.forkDaemon),
-    yield* activityTrackerPipeline.pipe(Effect.forkDaemon),
-    yield* onboardGuildPipeline.pipe(Effect.forkDaemon),
-    yield* reactjiChannelerPipeline.pipe(Effect.forkDaemon),
+    yield* forkSupervised("DeletionLoggerPipeline", deletionLoggerPipeline),
+    yield* forkSupervised("AutomodPipeline", automodPipeline),
+    yield* forkSupervised("ModActionLoggerPipeline", modActionLoggerPipeline),
+    yield* forkSupervised("ActivityTrackerPipeline", activityTrackerPipeline),
+    yield* forkSupervised("OnboardGuildPipeline", onboardGuildPipeline),
+    yield* forkSupervised("ReactjiChannelerPipeline", reactjiChannelerPipeline),
   ];
   yield* logEffect("info", "Server", "Pipeline fibers forked");
 });
 
+// --- Graceful shutdown ------------------------------------------------------
+//
+// Not `NodeRuntime.runMain`: that wants to own the process as one root Effect
+// and interrupt it on SIGTERM, but here Express (index.prod.js / index.dev.js)
+// owns the process and the HTTP server, the ManagedRuntime outlives HMR
+// reloads of this module, and the teardown order below spans both worlds. So:
+// explicit signal handlers, installed once by the entry via
+// `installGracefulShutdown(httpServer)`.
+//
+// Order (each step logged, each step's failure recorded but not fatal to the
+// steps after it, so the DB is still closed cleanly):
+//   1. stop accepting HTTP, drain in-flight requests (force-close after
+//      HTTP_DRAIN_MS)
+//   2. close the gateway scope: remove gateway listeners, interrupt login,
+//      destroy the discord.js client (no new events after this)
+//   3. interrupt startup, pipelines, job runner, schedulers
+//   4. WAL checkpoint
+//   5. runtime.dispose(): AppLayer finalizers (event-bus listeners, PostHog
+//      flush, feature-flag interval, SQLite close)
+// Exit 0 only if every step succeeded. FORCE_EXIT_MS is the backstop for a
+// hung step; cluster/deployment.yaml's terminationGracePeriodSeconds must
+// comfortably exceed it.
+const HTTP_DRAIN_MS = 10_000;
+const FORCE_EXIT_MS = 25_000;
+
+const closeHttpServer = (server: HttpServer) =>
+  Effect.callback<void>((resume) => {
+    server.close(() => resume(Effect.void));
+    // Node closes idle keep-alive sockets on close(); in-flight requests are
+    // given HTTP_DRAIN_MS before their sockets are cut.
+    const timer = setTimeout(() => server.closeAllConnections(), HTTP_DRAIN_MS);
+    timer.unref();
+  });
+
+const shutdownStep = <E, R>(name: string, step: Effect.Effect<void, E, R>) =>
+  logEffect("info", "Shutdown", name).pipe(
+    Effect.andThen(step),
+    Effect.exit,
+    Effect.flatMap((exit) =>
+      Exit.isSuccess(exit)
+        ? Effect.succeed(true)
+        : reportCause(
+            "Shutdown",
+            `Shutdown step failed: ${name}`,
+            exit.cause,
+          ).pipe(Effect.as(false)),
+    ),
+  );
+
+const shutdownSequence = (server: HttpServer, signal: string) =>
+  Effect.gen(function* () {
+    yield* logEffect("info", "Shutdown", `Received ${signal}`);
+    const results = [
+      yield* shutdownStep("Draining HTTP server", closeHttpServer(server)),
+      yield* shutdownStep(
+        "Closing Discord gateway",
+        globalThis.__gatewayScope
+          ? Scope.close(globalThis.__gatewayScope, Exit.void)
+          : Effect.void,
+      ),
+      yield* shutdownStep(
+        "Interrupting pipelines, jobs, and schedulers",
+        Fiber.interruptAll([
+          ...(globalThis.__startupFiber ? [globalThis.__startupFiber] : []),
+          ...(globalThis.__pipelineFibers ?? []),
+          ...(globalThis.__backgroundFibers ?? []),
+        ]),
+      ),
+      yield* shutdownStep("Checkpointing database WAL", checkpointWal()),
+    ];
+    return results.every(Boolean);
+  });
+
+export const installGracefulShutdown = (server: HttpServer) => {
+  if (globalThis.__shutdownInstalled) return;
+  globalThis.__shutdownInstalled = true;
+
+  let shuttingDown = false;
+  const handle = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    // Failsafe: if teardown hangs, force-exit rather than wait for the
+    // orchestrator's SIGKILL. unref() so this timer never keeps us alive.
+    setTimeout(() => {
+      console.error("Graceful shutdown timed out; forcing exit");
+      process.exit(1);
+    }, FORCE_EXIT_MS).unref();
+
+    const stepsOk = await runtime
+      .runPromiseExit(shutdownSequence(server, signal))
+      .then((exit) => Exit.isSuccess(exit) && exit.value);
+    // After dispose the Effect logger is gone, hence console.
+    const disposed = await runtime.dispose().then(
+      () => true,
+      (error: unknown) => {
+        console.error("Runtime dispose failed:", error);
+        return false;
+      },
+    );
+    const ok = stepsOk && disposed;
+    console.log(
+      JSON.stringify({
+        service: "Shutdown",
+        message: ok ? "Shutdown complete" : "Shutdown completed with errors",
+        exitCode: ok ? 0 : 1,
+      }),
+    );
+    process.exit(ok ? 0 : 1);
+  };
+
+  process.on("SIGTERM", () => void handle("SIGTERM"));
+  process.on("SIGINT", () => void handle("SIGINT"));
+};
+
 console.log("running program");
 await warmRuntime();
-runtime.runCallback(startup);
+globalThis.__startupFiber = runtime.runFork(startup);

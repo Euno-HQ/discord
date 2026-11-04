@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/prefer-nullish-coalescing */
 import { Context, Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { Resource } from "@effect/opentelemetry";
-import { SqlClient } from "@effect/sql";
 
 import type { RuntimeContext } from "#~/AppRuntime";
 import { DatabaseService } from "#~/Database";
@@ -28,12 +28,8 @@ vi.mock("#~/effects/observability", () => ({
 }));
 vi.mock("#~/discord/client.server", () => ({
   client: {},
-  DiscordClient: Context.GenericTag("DiscordClient"),
+  DiscordClient: Context.Service("DiscordClient"),
   DiscordClientLayer: Layer.empty,
-}));
-vi.mock("#~/Database", () => ({
-  DatabaseService: Context.GenericTag("DatabaseService"),
-  DatabaseLayer: Layer.empty,
 }));
 vi.mock("#~/helpers/metrics", () => ({
   featureStats: { reactjiTriggered: vi.fn() },
@@ -41,14 +37,9 @@ vi.mock("#~/helpers/metrics", () => ({
 
 // --- Helpers ---
 
+// The handler's only query is the config lookup; answer it with `configs`.
 const makeMockDb = (configs: any[] = []) => ({
-  selectFrom: () => ({
-    selectAll: () => ({
-      where: () => ({
-        where: () => Effect.succeed(configs),
-      }),
-    }),
-  }),
+  run: () => Effect.succeed(configs),
 });
 
 // Typed stub for a service that's never touched at runtime in this file (its
@@ -83,7 +74,9 @@ const unusedService = <T extends object>(name: string): T =>
 const restOfRuntimeContext = Layer.mergeAll(
   Layer.succeed(
     SqlClient.SqlClient,
-    unusedService<Context.Tag.Service<typeof SqlClient.SqlClient>>("SqlClient"),
+    unusedService<Context.Service.Shape<typeof SqlClient.SqlClient>>(
+      "SqlClient",
+    ),
   ),
   Resource.layerEmpty,
   // PostHogService's Service type is `PostHog | null`; `null` is a real,
@@ -92,39 +85,39 @@ const restOfRuntimeContext = Layer.mergeAll(
   Layer.succeed(PostHogService, null),
   Layer.succeed(
     FeatureFlagService,
-    unusedService<Context.Tag.Service<typeof FeatureFlagService>>(
+    unusedService<Context.Service.Shape<typeof FeatureFlagService>>(
       "FeatureFlagService",
     ),
   ),
   Layer.succeed(
     SpamDetectionService,
-    unusedService<Context.Tag.Service<typeof SpamDetectionService>>(
+    unusedService<Context.Service.Shape<typeof SpamDetectionService>>(
       "SpamDetectionService",
     ),
   ),
   Layer.succeed(
     SupervisorService,
-    unusedService<Context.Tag.Service<typeof SupervisorService>>(
+    unusedService<Context.Service.Shape<typeof SupervisorService>>(
       "SupervisorService",
     ),
   ),
   Layer.succeed(
     DiscordClient,
-    unusedService<Context.Tag.Service<typeof DiscordClient>>("DiscordClient"),
+    unusedService<Context.Service.Shape<typeof DiscordClient>>("DiscordClient"),
   ),
   Layer.succeed(
     DiscordEventBus,
-    unusedService<Context.Tag.Service<typeof DiscordEventBus>>(
+    unusedService<Context.Service.Shape<typeof DiscordEventBus>>(
       "DiscordEventBus",
     ),
   ),
   Layer.succeed(
     UserService,
-    unusedService<Context.Tag.Service<typeof UserService>>("UserService"),
+    unusedService<Context.Service.Shape<typeof UserService>>("UserService"),
   ),
   Layer.succeed(
     MessageCacheService,
-    unusedService<Context.Tag.Service<typeof MessageCacheService>>(
+    unusedService<Context.Service.Shape<typeof MessageCacheService>>(
       "MessageCacheService",
     ),
   ),

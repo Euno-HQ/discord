@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { Effect } from "effect";
+import { Cause, Effect, Option } from "effect";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -171,8 +171,12 @@ describe("tryDiscord", () => {
       ),
     );
     expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure" && exit.cause._tag === "Fail") {
-      expect(exit.cause.error._tag).toBe("ForbiddenError");
+    const error =
+      exit._tag === "Failure"
+        ? Option.getOrUndefined(Cause.findErrorOption(exit.cause))
+        : undefined;
+    if (error) {
+      expect(error._tag).toBe("ForbiddenError");
     } else {
       throw new Error("expected a Fail cause with ForbiddenError");
     }

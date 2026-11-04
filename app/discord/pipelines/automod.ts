@@ -9,6 +9,7 @@ import {
   type GuildMemberMessage,
 } from "#~/discord/events";
 import { filterLog, logEffect } from "#~/effects/observability";
+import { isolateHandler } from "#~/effects/supervise";
 import { SpamDetectionService } from "#~/features/spam/service";
 import { isStaff } from "#~/helpers/discord";
 
@@ -29,7 +30,7 @@ const isStandardMessage = (e: GuildMemberMessage) =>
 
 export const automodPipeline: Effect.Effect<void, never, RuntimeContext> =
   Effect.gen(function* () {
-    const { stream } = yield* DiscordEventBus;
+    const { bulk: stream } = yield* DiscordEventBus;
     const spamService = yield* SpamDetectionService;
 
     yield* stream.pipe(
@@ -69,7 +70,7 @@ export const automodPipeline: Effect.Effect<void, never, RuntimeContext> =
           if (verdict.tier !== "none") {
             yield* spamService.executeResponse(verdict, e.message, e.member);
           }
-        }),
+        }).pipe(isolateHandler("Automod", e.type)),
       ),
 
       Stream.runDrain,

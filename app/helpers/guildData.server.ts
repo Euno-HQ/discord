@@ -127,7 +127,7 @@ export function fetchGuildData(
     return { roles, channels };
   }).pipe(
     Effect.withSpan("guildData.fetch", { attributes: { guildId } }),
-    Effect.catchAll((e) =>
+    Effect.catch((e) =>
       logEffect("error", "guildData", "Failed to fetch guild data", {
         guildId,
         error: e,

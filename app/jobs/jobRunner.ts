@@ -1,14 +1,14 @@
 import { Routes } from "discord-api-types/v10";
-import { Deferred, Effect, Fiber, FiberRef } from "effect";
-import type { Selectable } from "kysely";
+import { Deferred, Effect } from "effect";
+import { sql, type Selectable } from "kysely";
 
-import { DatabaseService, type SqlError } from "#~/Database";
+import { db, run, type DatabaseService, type SqlError } from "#~/Database";
 import type { DB } from "#~/db";
 import { ssrDiscordSdk } from "#~/discord/api";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { type DiscordError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
-import { jobMetaRef, type ActiveJobMeta } from "#~/effects/supervisor";
+import { trackJob } from "#~/effects/supervisor";
 import { formatError } from "#~/helpers/formatError";
 
 export type Job = Selectable<DB["background_jobs"]>;
@@ -18,50 +18,40 @@ export type Job = Selectable<DB["background_jobs"]>;
 // ---------------------------------------------------------------------------
 
 /**
- * Claims the next available job. Prefers jobs already in "processing" status
- * (interrupted jobs that should be resumed) over "pending" jobs.
- *
- * For pending jobs, updates the status to "processing" before returning.
- * Returns undefined when no jobs are available.
+ * Claims the next job in a single atomic UPDATE … RETURNING (pending →
+ * processing), so two claimers can never both take the same pending job.
+ * With `resume`, jobs already in "processing" — interrupted by a crash or
+ * restart, resumed from their cursor — come first; that's only correct at
+ * startup, before this process has started any job itself.
  */
-export const claimNextJobEffect = Effect.gen(function* () {
-  const db = yield* DatabaseService;
+const claimJob = (resume: boolean) =>
+  Effect.gen(function* () {
+    const [job] = yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({ status: "processing", updated_at: new Date().toISOString() })
+        .where("id", "=", (eb) =>
+          eb
+            .selectFrom("background_jobs")
+            .select("id")
+            .where(
+              "status",
+              "in",
+              resume ? ["processing", "pending"] : ["pending"],
+            )
+            .orderBy(sql`status = 'processing'`, "desc")
+            .orderBy("created_at", "asc")
+            .limit(1),
+        )
+        .returningAll(),
+    );
+    return job as Job | undefined;
+  }).pipe(Effect.withSpan("claimNextJob", { attributes: { resume } }));
 
-  // First, look for a job that's already processing (interrupted, needs resume)
-  const [processingJob] = yield* db
-    .selectFrom("background_jobs")
-    .selectAll()
-    .where("status", "=", "processing")
-    .orderBy("created_at", "asc")
-    .limit(1);
-
-  if (processingJob) {
-    return processingJob as Job;
-  }
-
-  // No in-progress jobs — pick the oldest pending job
-  const [pendingJob] = yield* db
-    .selectFrom("background_jobs")
-    .selectAll()
-    .where("status", "=", "pending")
-    .orderBy("created_at", "asc")
-    .limit(1);
-
-  if (!pendingJob) {
-    return undefined;
-  }
-
-  // Mark it processing
-  yield* db
-    .updateTable("background_jobs")
-    .set({
-      status: "processing",
-      updated_at: new Date().toISOString(),
-    })
-    .where("id", "=", pendingJob.id);
-
-  return { ...pendingJob, status: "processing" } as Job;
-}).pipe(Effect.withSpan("claimNextJob"));
+/** Startup claim: resumes interrupted jobs before taking new ones. */
+export const claimNextJobEffect = claimJob(true);
+/** Steady-state claim: pending jobs only. */
+export const claimPendingJobEffect = claimJob(false);
 
 /**
  * Persists incremental progress: the current pagination cursor and the
@@ -73,15 +63,16 @@ export const checkpointJobEffect = (
   progressCount: number,
 ) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db
-      .updateTable("background_jobs")
-      .set({
-        cursor: JSON.stringify(cursor),
-        progress_count: progressCount,
-        updated_at: new Date().toISOString(),
-      })
-      .where("id", "=", jobId);
+    yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({
+          cursor: JSON.stringify(cursor),
+          progress_count: progressCount,
+          updated_at: new Date().toISOString(),
+        })
+        .where("id", "=", jobId),
+    );
   }).pipe(Effect.withSpan("checkpointJob", { attributes: { jobId } }));
 
 /**
@@ -94,15 +85,16 @@ export const recordJobErrorEffect = (
   lastError: string,
 ) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db
-      .updateTable("background_jobs")
-      .set({
-        error_count: errorCount,
-        last_error: lastError,
-        updated_at: new Date().toISOString(),
-      })
-      .where("id", "=", jobId);
+    yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({
+          error_count: errorCount,
+          last_error: lastError,
+          updated_at: new Date().toISOString(),
+        })
+        .where("id", "=", jobId),
+    );
   }).pipe(Effect.withSpan("recordJobError", { attributes: { jobId } }));
 
 /**
@@ -111,15 +103,16 @@ export const recordJobErrorEffect = (
  */
 export const advancePhaseEffect = (jobId: string, nextPhase: number) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db
-      .updateTable("background_jobs")
-      .set({
-        phase: nextPhase,
-        cursor: null,
-        updated_at: new Date().toISOString(),
-      })
-      .where("id", "=", jobId);
+    yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({
+          phase: nextPhase,
+          cursor: null,
+          updated_at: new Date().toISOString(),
+        })
+        .where("id", "=", jobId),
+    );
   }).pipe(
     Effect.withSpan("advancePhase", { attributes: { jobId, nextPhase } }),
   );
@@ -129,16 +122,17 @@ export const advancePhaseEffect = (jobId: string, nextPhase: number) =>
  */
 export const completeJobEffect = (jobId: string) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
     const now = new Date().toISOString();
-    yield* db
-      .updateTable("background_jobs")
-      .set({
-        status: "completed",
-        completed_at: now,
-        updated_at: now,
-      })
-      .where("id", "=", jobId);
+    yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({
+          status: "completed",
+          completed_at: now,
+          updated_at: now,
+        })
+        .where("id", "=", jobId),
+    );
   }).pipe(Effect.withSpan("completeJob", { attributes: { jobId } }));
 
 /**
@@ -146,15 +140,16 @@ export const completeJobEffect = (jobId: string) =>
  */
 export const failJobEffect = (jobId: string, error: string) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    yield* db
-      .updateTable("background_jobs")
-      .set({
-        status: "failed",
-        last_error: error,
-        updated_at: new Date().toISOString(),
-      })
-      .where("id", "=", jobId);
+    yield* run(
+      db
+        .updateTable("background_jobs")
+        .set({
+          status: "failed",
+          last_error: error,
+          updated_at: new Date().toISOString(),
+        })
+        .where("id", "=", jobId),
+    );
   }).pipe(Effect.withSpan("failJob", { attributes: { jobId } }));
 
 interface CreateJobOptions {
@@ -172,16 +167,16 @@ interface CreateJobOptions {
  */
 export const createJobEffect = (options: CreateJobOptions) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     // Fail any existing incomplete jobs of the same type for this guild
-    const [existing] = yield* db
-      .selectFrom("background_jobs")
-      .selectAll()
-      .where("guild_id", "=", options.guildId)
-      .where("job_type", "=", options.jobType)
-      .where("status", "in", ["pending", "processing"])
-      .limit(1);
+    const [existing] = yield* run(
+      db
+        .selectFrom("background_jobs")
+        .selectAll()
+        .where("guild_id", "=", options.guildId)
+        .where("job_type", "=", options.jobType)
+        .where("status", "in", ["pending", "processing"])
+        .limit(1),
+    );
 
     if (existing) {
       yield* logEffect(
@@ -220,7 +215,7 @@ export const createJobEffect = (options: CreateJobOptions) =>
       completed_at: null,
     };
 
-    yield* db.insertInto("background_jobs").values(job);
+    yield* run(db.insertInto("background_jobs").values(job));
 
     yield* logEffect("info", "JobRunner", "Created job", {
       jobId: id,
@@ -245,11 +240,9 @@ export const createJobEffect = (options: CreateJobOptions) =>
  */
 export const getJobEffect = (jobId: string) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-    const [job] = yield* db
-      .selectFrom("background_jobs")
-      .selectAll()
-      .where("id", "=", jobId);
+    const [job] = yield* run(
+      db.selectFrom("background_jobs").selectAll().where("id", "=", jobId),
+    );
     return job as Job | undefined;
   }).pipe(Effect.withSpan("getJob", { attributes: { jobId } }));
 
@@ -311,7 +304,7 @@ const notifyChannelEffect = (channelId: string, job: Job) =>
         body,
       }),
     ).pipe(
-      Effect.catchAll((err) =>
+      Effect.catch((err) =>
         logEffect("warn", "JobRunner", "Failed to send progress notification", {
           channelId,
           error: err,
@@ -320,64 +313,73 @@ const notifyChannelEffect = (channelId: string, job: Job) =>
     );
   });
 
-export const pollAndExecuteEffect = Effect.gen(function* () {
-  const job = yield* claimNextJobEffect;
-  if (!job) return;
+const executeNextJob = (claim: typeof claimNextJobEffect) =>
+  Effect.gen(function* () {
+    const job = yield* claim;
+    if (!job) return false;
 
-  const handler = handlers[job.job_type];
-  if (!handler) {
-    yield* failJobEffect(job.id, `Unknown job type: ${job.job_type}`);
-    return;
-  }
+    const handler = handlers[job.job_type];
+    if (!handler) {
+      yield* failJobEffect(job.id, `Unknown job type: ${job.job_type}`);
+      return true;
+    }
 
-  const jobFiber = yield* Effect.gen(function* () {
-    // Set metadata on the child fiber so Supervisor can identify it
-    yield* FiberRef.set(jobMetaRef, {
-      jobId: job.id,
-      jobType: job.job_type,
-      guildId: job.guild_id,
-      startedAt: new Date().toISOString(),
-    } satisfies ActiveJobMeta);
+    yield* handler(job).pipe(
+      Effect.catch((err) =>
+        Effect.gen(function* () {
+          yield* logEffect(
+            "error",
+            "JobRunner",
+            "Unhandled error in job execution",
+            {
+              jobId: job.id,
+              error: err,
+            },
+          );
+          yield* failJobEffect(job.id, `Unhandled: ${formatError(err)}`);
+        }),
+      ),
+      // Visible to SupervisorService.getActiveJobMeta while it runs
+      trackJob({ jobId: job.id, jobType: job.job_type, guildId: job.guild_id }),
+    );
 
-    yield* handler(job);
+    // Reload job to check final status and notify
+    let updated = yield* getJobEffect(job.id);
+    if (updated?.status === "processing") {
+      // A handler that returns must have completed or failed its job; left as
+      // "processing" it would be re-claimed forever by the drain loop.
+      yield* failJobEffect(
+        job.id,
+        "Handler returned without finishing the job",
+      );
+      updated = yield* getJobEffect(job.id);
+    }
+    if (updated?.notify_channel_id) {
+      yield* notifyChannelEffect(updated.notify_channel_id, updated);
+    }
+    return true;
   }).pipe(
-    Effect.catchAll((err) =>
-      Effect.gen(function* () {
-        yield* logEffect(
-          "error",
-          "JobRunner",
-          "Unhandled error in job execution",
-          {
-            jobId: job.id,
-            error: err,
-          },
-        );
-        yield* failJobEffect(job.id, `Unhandled: ${formatError(err)}`);
-      }),
+    // Catch errors from claimNextJob (e.g., SqlError) so the loop continues.
+    // Report "nothing claimed" so a persistent DB error can't spin the drain.
+    Effect.catch((err) =>
+      logEffect("error", "JobRunner", "Poll cycle failed", {
+        error: err,
+      }).pipe(Effect.as(false)),
     ),
-    Effect.fork, // Fork as child fiber — visible to Supervisor
+    Effect.withSpan("pollAndExecute"),
   );
 
-  yield* Fiber.join(jobFiber); // Wait for completion — sequential semantics preserved
-
-  // Reload job to check final status and notify
-  const updated = yield* getJobEffect(job.id);
-  if (updated?.notify_channel_id) {
-    yield* notifyChannelEffect(updated.notify_channel_id, updated);
-  }
-}).pipe(
-  // Catch errors from claimNextJob (e.g., SqlError) so the loop continues
-  Effect.catchAll((err) =>
-    logEffect("error", "JobRunner", "Poll cycle failed", {
-      error: err,
-    }),
-  ),
-  Effect.withSpan("pollAndExecute"),
-);
+/** Claims (resuming interrupted jobs first) and runs one job. Returns whether
+ *  a job was claimed. */
+export const pollAndExecuteEffect = executeNextJob(claimNextJobEffect);
 
 // ---------------------------------------------------------------------------
-// Signal-driven job runner — waits for a signal instead of polling
+// Signal-driven job runner with a periodic backstop poll
 // ---------------------------------------------------------------------------
+
+/** Backstop for signals that never arrive (another module instance after HMR,
+ *  a job inserted out-of-band, a signal raised while no one was listening). */
+export const JOB_POLL_INTERVAL = "60 seconds";
 
 let jobSignal: Deferred.Deferred<void> | null = null;
 
@@ -388,20 +390,32 @@ const notifyJobAvailable = Effect.gen(function* () {
   }
 });
 
+/** Claims and runs jobs until none are left. `resume` only at startup. */
+export const drainJobsEffect = (resume: boolean) => {
+  const next = resume
+    ? pollAndExecuteEffect
+    : executeNextJob(claimPendingJobEffect);
+  return Effect.gen(function* () {
+    while (yield* next) {
+      // keep claiming
+    }
+  });
+};
+
 /**
- * Runs forever, waiting for `notifyJobAvailable` signals.
- * On boot, runs once immediately to pick up any incomplete jobs from a prior crash.
+ * Runs forever. On boot it drains immediately, which resumes any "processing"
+ * jobs left by a prior crash. Then it waits for a `notifyJobAvailable` signal
+ * or the poll interval, whichever comes first, and drains again.
  */
 export const runJobRunner = Effect.gen(function* () {
-  // Resume any incomplete jobs left over from a prior crash
-  yield* pollAndExecuteEffect;
-
-  // Then wait for signals
+  let resume = true;
   while (true) {
+    // Install the signal before draining: a job created mid-drain completes
+    // it, so the wait below returns at once instead of missing that job.
     const signal = yield* Deferred.make<void>();
     jobSignal = signal;
-    yield* Deferred.await(signal);
-    jobSignal = null;
-    yield* pollAndExecuteEffect;
+    yield* drainJobsEffect(resume);
+    resume = false;
+    yield* Deferred.await(signal).pipe(Effect.timeoutOption(JOB_POLL_INTERVAL));
   }
 });

@@ -136,7 +136,7 @@ export const PurgeMessagesCommand = {
         components: buildPurgeComponents(targetUser.id, DEFAULT_DURATION_VALUE),
       });
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           yield* logEffect(
             "error",
@@ -194,7 +194,7 @@ export const PurgeMessagesSelectHandler = {
         components: buildPurgeComponents(targetUserId, selectedValue),
       });
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           yield* logEffect(
             "error",
@@ -336,7 +336,7 @@ export const PurgeMessagesConfirmHandler = {
 
           // Skip channels the bot lacks permission to read/manage. This is
           // expected for some channels and should not abort the whole run.
-          return scanChannel.pipe(Effect.catchAll(() => Effect.void));
+          return scanChannel.pipe(Effect.catch(() => Effect.void));
         },
         { concurrency: 1 },
       );
@@ -356,7 +356,7 @@ export const PurgeMessagesConfirmHandler = {
         components: [],
       });
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           yield* logEffect(
             "error",
@@ -372,7 +372,7 @@ export const PurgeMessagesConfirmHandler = {
           yield* interactionEditReply(interaction, {
             content: reply.content,
             components: [],
-          }).pipe(Effect.catchAll(() => Effect.void));
+          }).pipe(Effect.catch(() => Effect.void));
         }),
       ),
       Effect.withSpan("purgeMessagesConfirm", {

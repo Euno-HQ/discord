@@ -42,7 +42,7 @@ equals the class name.
 | `SubscriptionNotFoundError`| `guildId`                                           | Missing guild subscription         |
 | `StripeError`              | `operation, cause`                                  | Stripe SDK call failures           |
 | `OAuthFetchError`          | `operation, status?, cause`                         | Discord OAuth fetch failures       |
-| `SqlError`                 | (re-exported from `@effect/sql`)                    | Database query failures            |
+| `SqlError`                 | (re-exported from `effect/sql`)                    | Database query failures            |
 
 **Discord transport taxonomy** — named by the *decision* they drive, not the
 HTTP family. The first six are the `DiscordError` union, produced only by
@@ -60,19 +60,19 @@ HTTP family. The first six are the `DiscordError` union, produced only by
 | `ServiceUnavailableError`| —          | `source, lastCause` — escalation product of `escalateExhausted`, **not** in `DiscordError` |
 
 `AppError` (`errors.ts`) is the app-wide union — `DiscordError` + all the domain
-errors above + `SqlError` + `Cause.UnknownException` — used for `toUserResponse`
+errors above + `SqlError` + `Cause.UnknownError` — used for `toUserResponse`
 exhaustiveness.
 
 > **Gone:** `DiscordApiError` and `StripeApiError` no longer exist. Discord
 > failures are now the `DiscordError` union (classified at the boundary); Stripe
 > failures are `StripeError`.
 
-### catchAll vs catchTag
+### catch vs catchTag
 
 ```typescript
-// catchAll — handle any error uniformly
+// catch — handle any error uniformly
 effect.pipe(
-  Effect.catchAll((error) => Effect.succeed(fallback)),
+  Effect.catch((error) => Effect.succeed(fallback)),
 );
 
 // catchTag — handle specific error types differently
@@ -95,7 +95,7 @@ effect.pipe(
 // Catch and recover inside Effect.forEach or Effect.all
 yield* Effect.forEach(items, (item) =>
   processItem(item).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       logEffect("error", "Handler", "Item failed", {
         itemId: item.id,
         error, // pass the tagged error through — not String(error)
@@ -107,16 +107,17 @@ yield* Effect.forEach(items, (item) =>
 
 ## Concurrency
 
-### Parallel: Effect.all + withConcurrency
+### Parallel: Effect.all with `concurrency`
 
-Use for independent operations that don't depend on each other:
+Use for independent operations that don't depend on each other. Pass
+`concurrency` in the options — `Effect.all` without it runs **sequentially**, and
+piping `Effect.withConcurrency` (v3) never changed that (it only affects
+`concurrency: "inherit"`; it no longer exists in v4):
 
 ```typescript
-const [a, b, c] = yield* Effect.all([
-  fetchA(),
-  fetchB(),
-  fetchC(),
-]).pipe(Effect.withConcurrency("unbounded"));
+const [a, b, c] = yield* Effect.all([fetchA(), fetchB(), fetchC()], {
+  concurrency: "unbounded",
+});
 ```
 
 ### Sequential: Effect.forEach
@@ -133,30 +134,32 @@ const results = yield* Effect.forEach(items, (item) =>
 
 | Scenario                    | Use                                        |
 | --------------------------- | ------------------------------------------ |
-| Independent API calls       | `Effect.all` + `withConcurrency`           |
+| Independent API calls       | `Effect.all(..., { concurrency })`         |
 | Discord API calls in a loop | `Effect.forEach` (sequential, rate limits) |
 | Operations with deps        | Sequential `yield*` in `Effect.gen`        |
 
 ## Services
 
 Most code does **not** define a service. The default for data access is a free
-`Effect`-returning function that does `const db = yield* DatabaseService` — see
-EFFECT.md → "Data Access: Free Effect Functions". Reach for a `Context.Tag`
+`Effect`-returning function that runs queries with `run(db...)` — see
+EFFECT.md → "Data Access: Free Effect Functions". Reach for a `Context.Service`
 service only when you need lifetime-held state or a swappable implementation. The
-nine production Tag services are: `DatabaseService`, `DiscordEventBus`,
+nine production services are: `DatabaseService`, `DiscordEventBus`,
 `MessageCacheService`, `SpamDetectionService`, `UserService`, `EscalationService`,
 `FeatureFlagService`, `PostHogService`, `SupervisorService`.
 
-### Context.Tag Class Pattern
+### Context.Service Class Pattern
 
-When you do define a service, use the class-`Tag` pattern — not
-`Context.GenericTag` (which appears only in test doubles):
+When you do define a service, use the class form (v4 replaced `Context.Tag`,
+`Effect.Tag` and `Effect.Service` with this; note the type parameters come
+first and the id second). The function form `Context.Service<T>("id")` appears
+only in test doubles:
 
 ```typescript
-export class MyService extends Context.Tag("MyService")<
+export class MyService extends Context.Service<
   MyService,
   IMyService
->() {}
+>()("MyService") {}
 ```
 
 ### Layer.effect Implementation
@@ -170,20 +173,21 @@ close a requirement that `AppLayer` does *not* satisfy.
 export const MyServiceLive = Layer.effect(
   MyService,
   Effect.gen(function* () {
-    const db = yield* DatabaseService; // satisfied by AppLayer
+    // Capture the executor at construction so methods keep R = never
+    const { run } = yield* DatabaseService; // satisfied by AppLayer
     return {
-      method: (arg) =>
-        Effect.gen(function* () {
-          // use db
-        }).pipe(Effect.withSpan("method")),
+      method: Effect.fn("MyService.method")(function* (arg) {
+        // yield* run(db.selectFrom(...))
+      }),
     };
   }),
 );
 ```
 
-`Layer.scoped` (acquire/release finalizers — `PostHogService`,
-`FeatureFlagService`, `DiscordEventBus`) and `Layer.unwrapEffect`
-(`SupervisorService`) are the other two construction shapes in use.
+`Layer.effect` with acquire/release finalizers (`PostHogService`,
+`FeatureFlagService`, `DiscordEventBus` — v4 folded `Layer.scoped` into
+`Layer.effect`) and `Layer.succeed` (`SupervisorService`) are the other
+construction shapes in use.
 
 ### Layer Composition
 
@@ -199,7 +203,7 @@ const ServiceLayer = Layer.effect(MyService, impl).pipe(
 
 **Files:** `app/AppRuntime.ts` (`AppLayer` via `Layer.mergeAll`),
 `app/Database.ts` (`DatabaseLayer`), `app/effects/supervisor.ts`
-(`Layer.unwrapEffect`)
+(`Layer.unwrap`)
 
 ## Observability
 
@@ -310,7 +314,7 @@ export const myNewHelperOrNull = (guild: Guild, arg: string) =>
     try: () => guild.someMethod(arg),
     catch: () => null,
   }).pipe(
-    Effect.catchAll(() => Effect.succeed(null)),
+    Effect.catch(() => Effect.succeed(null)),
     Effect.withSpan("discord.myNewHelperOrNull"),
   );
 ```
@@ -322,65 +326,68 @@ export const myNewHelperOrNull = (guild: Guild, arg: string) =>
 
 ### DatabaseService
 
-The database is an effectified Kysely instance provided as a service:
+Kysely is a **compile-only typed query builder** (`db`: SqliteAdapter +
+SqliteQueryCompiler + DummyDriver, no connection). Queries execute through the
+effect/sql `SqlClient` via `DatabaseService.run`, so `SqlError`, `sql.execute`
+spans and `withTransaction` all come from effect/sql. The free `run(query)` is
+`Effect<Rows<O>, SqlError, DatabaseService>`, typed from Kysely's
+`Compilable<O>`; writes without `returning` are typed `never[]` (they yield no
+rows). `run` binds `undefined` params as NULL and returns plain-object rows —
+the contract the v3 better-sqlite3 driver had (v4's driver is `node:sqlite`).
 
 ```typescript
-export class DatabaseService extends Context.Tag("DatabaseService")<
+interface Database {
+  readonly run: <O>(query: Compilable<O>) => Effect.Effect<Rows<O>, SqlError>;
+}
+export class DatabaseService extends Context.Service<
   DatabaseService,
-  EffectKysely
->() {}
+  Database
+>()("DatabaseService") {}
 ```
+
+Never call Kysely's `.execute()` — the DummyDriver returns nothing.
 
 ### Querying
 
 ```typescript
-const db = yield* DatabaseService;
+// Build with the compile-only `db` builder, execute with `run`.
+import { db, run } from "#~/Database";
 
 // Select
-const rows = yield* db
-  .selectFrom("table")
-  .selectAll()
-  .where("column", "=", value);
+const rows = yield* run(
+  db.selectFrom("table").selectAll().where("column", "=", value),
+);
+const [first] = yield* run(db.selectFrom("table").selectAll().limit(1));
 
-// Insert
-yield* db.insertInto("table").values({ ... });
+// Insert / update / delete — without `returning(...)` these yield no rows
+yield* run(db.insertInto("table").values({ ... }));
+yield* run(db.updateTable("table").set({ column: newValue }).where("id", "=", id));
+yield* run(db.deleteFrom("table").where("id", "=", id));
 
-// Update
-yield* db
-  .updateTable("table")
-  .set({ column: newValue })
-  .where("id", "=", id);
-
-// Delete
-yield* db
-  .deleteFrom("table")
-  .where("id", "=", id);
+// Need the written row? Ask for it.
+const [inserted] = yield* run(db.insertInto("table").values({ ... }).returning("id"));
 ```
 
 ### Layer Setup
 
 ```typescript
-// Base SQLite client (WAL on by default). busy_timeout pragma applied on
-// acquire; Reactivity is a required dependency of @effect/sql-kysely.
-const SqliteLive = Layer.scoped(
-  SqlClient.SqlClient,
-  SqliteClient.make({ filename: databaseUrl }).pipe(
-    Effect.tap((sql) => sql.unsafe("PRAGMA busy_timeout = 5000")),
-  ),
-).pipe(Layer.provide(Reactivity.layer));
-
-// Kysely builder, exposed as DatabaseService, on top of the SQLite client
-const KyselyLive = Layer.effect(DatabaseService, Sqlite.make<DB>()).pipe(
-  Layer.provide(SqliteLive),
-);
-
-// Combined layer exposes BOTH the raw SqlClient (for sql.unsafe / PRAGMA /
-// integrity checks) and the Kysely DatabaseService
-export const DatabaseLayer = Layer.mergeAll(SqliteLive, KyselyLive);
+// SqliteClient.layer provides SqliteClient + SqlClient (WAL and a 5s
+// busy_timeout are driver defaults); DatabaseService wraps the SqlClient.
+export const makeDatabaseLayer = (filename: string) => {
+  const client = SqliteClient.layer({ filename });
+  return Layer.merge(
+    client,
+    Layer.effect(DatabaseService, makeDatabase).pipe(Layer.provide(client)),
+  );
+};
+export const DatabaseLayer = makeDatabaseLayer(databaseUrl);
 ```
 
+Tests use `makeDatabaseLayer(":memory:")` — the layer exposes both the raw
+`SqlClient` (for `sql.unsafe` schema setup) and `DatabaseService`.
+
 `DatabaseLayer` is merged into `AppLayer` in `app/AppRuntime.ts`, so effects
-that `yield* DatabaseService` need no per-call `Layer.provide` — the
+that `run(...)` need no per-call `Layer.provide` — the
 `ManagedRuntime` already supplies it (see EFFECT.md → "Runtime & Boundaries").
 
 **File:** `app/Database.ts`

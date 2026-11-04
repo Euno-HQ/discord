@@ -1,7 +1,13 @@
 import { Effect } from "effect";
 import type { Selectable } from "kysely";
 
-import { DatabaseService, type DB, type SqlError } from "#~/Database";
+import {
+  db,
+  run,
+  type DatabaseService,
+  type DB,
+  type SqlError,
+} from "#~/Database";
 import { SubscriptionNotFoundError } from "#~/effects/errors";
 import { logEffect } from "#~/effects/observability";
 import Sentry from "#~/helpers/sentry.server";
@@ -29,8 +35,6 @@ const getGuildSubscription = (
   guildId: string,
 ): Effect.Effect<GuildSubscription | null, SqlError, DatabaseService> =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     yield* logEffect(
       "debug",
       "SubscriptionService",
@@ -40,10 +44,12 @@ const getGuildSubscription = (
       },
     );
 
-    const [result] = yield* db
-      .selectFrom("guild_subscriptions")
-      .selectAll()
-      .where("guild_id", "=", guildId);
+    const [result] = yield* run(
+      db
+        .selectFrom("guild_subscriptions")
+        .selectAll()
+        .where("guild_id", "=", guildId),
+    );
 
     if (result) {
       yield* logEffect(
@@ -85,8 +91,6 @@ const createOrUpdateSubscription = (data: {
   current_period_end?: string;
 }): Effect.Effect<void, SqlError, DatabaseService> =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     yield* logEffect(
       "info",
       "SubscriptionService",
@@ -105,28 +109,30 @@ const createOrUpdateSubscription = (data: {
     const existing = yield* getGuildSubscription(data.guild_id);
     const isUpdate = !!existing;
 
-    yield* db
-      .insertInto("guild_subscriptions")
-      .values({
-        guild_id: data.guild_id,
-        stripe_customer_id: data.stripe_customer_id ?? null,
-        stripe_subscription_id: data.stripe_subscription_id ?? null,
-        product_tier: data.product_tier,
-        status: data.status ?? "active",
-        current_period_end: data.current_period_end ?? null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .onConflict((oc) =>
-        oc.column("guild_id").doUpdateSet({
+    yield* run(
+      db
+        .insertInto("guild_subscriptions")
+        .values({
+          guild_id: data.guild_id,
           stripe_customer_id: data.stripe_customer_id ?? null,
           stripe_subscription_id: data.stripe_subscription_id ?? null,
           product_tier: data.product_tier,
           status: data.status ?? "active",
           current_period_end: data.current_period_end ?? null,
+          created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-        }),
-      );
+        })
+        .onConflict((oc) =>
+          oc.column("guild_id").doUpdateSet({
+            stripe_customer_id: data.stripe_customer_id ?? null,
+            stripe_subscription_id: data.stripe_subscription_id ?? null,
+            product_tier: data.product_tier,
+            status: data.status ?? "active",
+            current_period_end: data.current_period_end ?? null,
+            updated_at: new Date().toISOString(),
+          }),
+        ),
+    );
 
     yield* logEffect(
       "info",
@@ -153,8 +159,6 @@ const updateSubscriptionStatus = (
   currentPeriodEnd?: string,
 ): Effect.Effect<void, SqlError | SubscriptionNotFoundError, DatabaseService> =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     yield* logEffect(
       "info",
       "SubscriptionService",
@@ -178,14 +182,16 @@ const updateSubscriptionStatus = (
       return yield* Effect.fail(new SubscriptionNotFoundError({ guildId }));
     }
 
-    yield* db
-      .updateTable("guild_subscriptions")
-      .set({
-        status,
-        current_period_end: currentPeriodEnd ?? null,
-        updated_at: new Date().toISOString(),
-      })
-      .where("guild_id", "=", guildId);
+    yield* run(
+      db
+        .updateTable("guild_subscriptions")
+        .set({
+          status,
+          current_period_end: currentPeriodEnd ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .where("guild_id", "=", guildId),
+    );
 
     yield* logEffect(
       "info",
@@ -357,15 +363,15 @@ const getAllSubscriptions = (): Effect.Effect<
   DatabaseService
 > =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
     yield* logEffect(
       "debug",
       "SubscriptionService",
       "Fetching all guild subscriptions",
     );
 
-    const results = yield* db.selectFrom("guild_subscriptions").selectAll();
+    const results = yield* run(
+      db.selectFrom("guild_subscriptions").selectAll(),
+    );
 
     yield* logEffect(
       "debug",

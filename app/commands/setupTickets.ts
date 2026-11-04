@@ -12,7 +12,7 @@ import {
 } from "discord.js";
 import { Effect } from "effect";
 
-import { DatabaseService } from "#~/Database.ts";
+import { db, run } from "#~/Database";
 import { ssrDiscordSdk as rest } from "#~/discord/api";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import {
@@ -66,7 +66,7 @@ export const Command = [
 
         yield* tryDiscord("showModal", () => interaction.showModal(modal));
       }).pipe(
-        Effect.catchAll(() => Effect.void),
+        Effect.catch(() => Effect.void),
         Effect.withSpan("openTicketModal", {
           attributes: {
             guildId: interaction.guildId,
@@ -109,11 +109,12 @@ export const Command = [
         const { channel, fields, user } = interaction;
         const concern = fields.getTextInputValue("concern");
 
-        const db = yield* DatabaseService;
-        const configRows = yield* db
-          .selectFrom("tickets_config")
-          .selectAll()
-          .where("message_id", "=", interaction.message.id);
+        const configRows = yield* run(
+          db
+            .selectFrom("tickets_config")
+            .selectAll()
+            .where("message_id", "=", interaction.message.id),
+        );
         let config = configRows[0];
 
         // If there's no config, that means that the button was set up before the db was set up. Add one with default values
@@ -122,10 +123,12 @@ export const Command = [
             interaction.guild.id,
             [SETTINGS.moderator, SETTINGS.modLog],
           );
-          const insertedRows = yield* db
-            .insertInto("tickets_config")
-            .returningAll()
-            .values({ message_id: interaction.message.id, role_id: mod });
+          const insertedRows = yield* run(
+            db
+              .insertInto("tickets_config")
+              .returningAll()
+              .values({ message_id: interaction.message.id, role_id: mod }),
+          );
           config = insertedRows[0];
           if (!config) {
             return yield* Effect.fail(
@@ -200,7 +203,7 @@ export const Command = [
           flags: [MessageFlags.Ephemeral],
         });
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect(
               "error",
@@ -212,7 +215,7 @@ export const Command = [
             yield* interactionReply(interaction, {
               content: "Something went wrong while creating the ticket",
               flags: MessageFlags.Ephemeral,
-            }).pipe(Effect.catchAll(() => Effect.void));
+            }).pipe(Effect.catch(() => Effect.void));
           }),
         ),
         Effect.withSpan("modalOpenTicket", {
@@ -279,7 +282,7 @@ export const Command = [
           !!feedback?.trim(),
         );
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             yield* logEffect("error", "TicketsClose", "Error closing ticket", {
               error,
@@ -288,7 +291,7 @@ export const Command = [
             yield* interactionReply(interaction, {
               content: "Something went wrong while closing the ticket",
               flags: MessageFlags.Ephemeral,
-            }).pipe(Effect.catchAll(() => Effect.void));
+            }).pipe(Effect.catch(() => Effect.void));
           }),
         ),
         Effect.withSpan("closeTicket", {

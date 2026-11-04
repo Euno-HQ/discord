@@ -8,11 +8,7 @@ const runAndCapture = async (effect: Effect.Effect<void>): Promise<string> => {
   const spy = vi.spyOn(console, "log").mockImplementation(vi.fn());
   try {
     await Effect.runPromise(
-      effect.pipe(
-        Effect.provide(
-          Logger.replace(Logger.defaultLogger, JsonLoggerWithCause),
-        ),
-      ),
+      effect.pipe(Effect.provide(Logger.layer([JsonLoggerWithCause]))),
     );
     const call = spy.mock.calls.at(-1);
     return call ? String(call[0]) : "";

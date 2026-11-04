@@ -1,5 +1,5 @@
 import type { GuildMember } from "discord.js";
-import { Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Option } from "effect";
 
 import { softbanMember } from "./discordSdk";
 
@@ -55,7 +55,7 @@ test("softbanMember fails with TransientError(operation=softbanMember.ban) when 
 
   expect(Exit.isFailure(exit)).toBe(true);
   if (Exit.isFailure(exit)) {
-    const failure = exit.cause._tag === "Fail" ? exit.cause.error : null;
+    const failure = Option.getOrNull(Cause.findErrorOption(exit.cause));
     expect(failure?._tag).toBe("TransientError");
     expect(failure?.operation).toBe("softbanMember.ban");
   }
@@ -74,7 +74,7 @@ test("softbanMember fails with TransientError(operation=softbanMember.unban) whe
 
   expect(Exit.isFailure(exit)).toBe(true);
   if (Exit.isFailure(exit)) {
-    const failure = exit.cause._tag === "Fail" ? exit.cause.error : null;
+    const failure = Option.getOrNull(Cause.findErrorOption(exit.cause));
     expect(failure?._tag).toBe("TransientError");
     expect(failure?.operation).toBe("softbanMember.unban");
   }

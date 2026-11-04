@@ -79,7 +79,7 @@ export const fetchAutomodRuleOrNull = (
     try: () => guild.autoModerationRules.fetch(ruleId),
     catch: () => null,
   }).pipe(
-    Effect.catchAll(() => Effect.succeed(null)),
+    Effect.catch(() => Effect.succeed(null)),
     Effect.tap((result) =>
       Effect.annotateCurrentSpan({ found: result !== null }),
     ),
@@ -101,7 +101,7 @@ export const fetchMemberOrNull = (
     try: () => guild.members.fetch(userId),
     catch: () => null,
   }).pipe(
-    Effect.catchAll(() => Effect.succeed(null)),
+    Effect.catch(() => Effect.succeed(null)),
     Effect.tap((result) =>
       Effect.annotateCurrentSpan({ found: result !== null }),
     ),
@@ -123,7 +123,7 @@ export const fetchUserOrNull = (
     try: () => client.users.fetch(userId),
     catch: () => null,
   }).pipe(
-    Effect.catchAll(() => Effect.succeed(null)),
+    Effect.catch(() => Effect.succeed(null)),
     Effect.tap((result) =>
       Effect.annotateCurrentSpan({ found: result !== null }),
     ),
@@ -171,7 +171,7 @@ export const editMessage = (
 
 export const forwardMessageSafe = (message: Message, targetChannelId: string) =>
   tryDiscord("forwardMessage", () => message.forward(targetChannelId)).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       logEffect("error", "Discord SDK", "failed to forward to modLog", {
         error,
         messageId: message.id,
@@ -206,7 +206,7 @@ export const replyAndForwardSafe = (
     },
     catch: () => null,
   }).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       logEffect("warn", "Discord SDK", "Could not reply and forward message", {
         error,
         messageId: message.id,

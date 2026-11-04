@@ -4,7 +4,7 @@ import { defineConfig, getKnexTimestampPrefix } from "kysely-ctl";
 
 if (!process.env.DATABASE_URL || process.env.DATABASE_URL === "DATABASE_URL") {
   throw new Error(
-    "Please provide a DATABASE_URL! probably './mod-bot.sqlite3'",
+    "Please provide a DATABASE_URL! an absolute path to mod-bot.sqlite3",
   );
 }
 

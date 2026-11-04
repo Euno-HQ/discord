@@ -6,7 +6,7 @@ import "dotenv/config";
 import express from "express";
 
 // This only exists after a production build, when this file is copied into Docker
-import { app as rrApp } from "./build/server/index.js";
+import { installGracefulShutdown, app as rrApp } from "./build/server/index.js";
 
 const app = express();
 
@@ -34,6 +34,8 @@ process.on("uncaughtException", errorHandler);
 process.on("unhandledRejection", errorHandler);
 
 const PORT = process.env.PORT ?? "3000";
-app.listen(PORT, "0.0.0.0", async () => {
+const server = app.listen(PORT, "0.0.0.0", async () => {
   console.log("INI", "Now listening on port", PORT);
 });
+// SIGTERM/SIGINT: drain HTTP, close gateway, stop fibers, checkpoint, close DB.
+installGracefulShutdown(server);

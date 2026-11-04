@@ -2,62 +2,6 @@
 
 Last major revision 2026-01
 
-Discord Button Click (MessageComponentInteraction)
-↓
-EscalationHandlers[action] dispatch
-├─→ Direct Actions (delete/kick/ban/restrict/timeout)
-│ ├─ Check permissions
-│ ├─ Fetch guild member
-│ ├─ Call Discord action
-│ └─ Reply with confirmation/error
-│
-├─→ vote (resolution-specific handler)
-│ ├─ Check moderator role
-│ ├─ recordVote(escalationId, voterId, resolution)
-│ ├─ tallyVotes() → determine leader/tie/quorum
-│ ├─ calculateScheduledFor(createdAt, newVoteCount)
-│ ├─ shouldTriggerEarlyResolution() check
-│ ├─ Update message:
-│ │ ├─ If early + clear winner: buildConfirmedMessageContent()
-│ │ └─ Else: buildVoteMessageContent() + buildVoteButtons()
-│ └─ Log action
-│
-├─→ expedite
-│ ├─ Check moderator role
-│ ├─ Get escalation from DB
-│ ├─ Check if resolved or no leader
-│ ├─ executeResolution(leader, escalation, guild)
-│ ├─ resolveEscalation(id, resolution)
-│ ├─ Update message with confirmation + remove buttons
-│ └─ Log action
-│
-└─→ escalate (level selector)
-├─ Extract: reportedUserId, level, previousEscalationId
-├─ If level 0: createEscalation()
-│ ├─ Fetch guild settings
-│ ├─ Prepare escalation object
-│ ├─ Send vote message to thread
-│ ├─ Store message ID
-│ ├─ createEscalationRecord(escalation)
-│ └─ Reply "Escalation started"
-│
-└─ Else (level 1+): upgradeToMajority()
-├─ Fetch existing escalation
-├─ Get vote message from thread
-├─ tallyVotes() for current state
-├─ Recalculate scheduled_for
-├─ Update message content + buttons
-├─ updateEscalationStrategy() + updateScheduledFor()
-└─ Reply "Escalation upgraded"
+Discord Button Click (MessageComponentInteraction) ↓ EscalationHandlers[action] dispatch ├─→ Direct Actions (delete/kick/ban/restrict/timeout) │ ├─ Check permissions │ ├─ Fetch guild member │ ├─ Call Discord action │ └─ Reply with confirmation/error │ ├─→ vote (resolution-specific handler) │ ├─ Check moderator role │ ├─ recordVote(escalationId, voterId, resolution) │ ├─ tallyVotes() → determine leader/tie/quorum │ ├─ calculateScheduledFor(createdAt, newVoteCount) │ ├─ shouldTriggerEarlyResolution() check │ ├─ Update message: │ │ ├─ If early + clear winner: buildConfirmedMessageContent() │ │ └─ Else: buildVoteMessageContent() + buildVoteButtons() │ └─ Log action │ ├─→ expedite │ ├─ Check moderator role │ ├─ Get escalation from DB │ ├─ Check if resolved or no leader │ ├─ executeResolution(leader, escalation, guild) │ ├─ resolveEscalation(id, resolution) │ ├─ Update message with confirmation + remove buttons │ └─ Log action │ └─→ escalate (level selector) ├─ Extract: reportedUserId, level, previousEscalationId ├─ If level 0: createEscalation() │ ├─ Fetch guild settings │ ├─ Prepare escalation object │ ├─ Send vote message to thread │ ├─ Store message ID │ ├─ createEscalationRecord(escalation) │ └─ Reply "Escalation started" │ └─ Else (level 1+): upgradeToMajority() ├─ Fetch existing escalation ├─ Get vote message from thread ├─ tallyVotes() for current state ├─ Recalculate scheduled_for ├─ Update message content + buttons ├─ updateEscalationStrategy() + updateScheduledFor() └─ Reply "Escalation upgraded"
 
-Background Process (escalationResolver.ts - runs every 15 min):
-├─ getDueEscalations() - Where scheduled_for <= now
-├─ For each escalation:
-│ ├─ tallyVotes() - determine resolution
-│ ├─ if tied: resolve to "track" (can't auto-break tie)
-│ ├─ else: use leading vote
-│ ├─ executeResolution(resolution, escalation, guild)
-│ ├─ resolveEscalation(id, resolution)
-│ ├─ Disable all buttons on vote message
-│ └─ Post resolution notice + forward to modLog
-└─ Log all actions & errors
+Background Process (escalationResolver.ts - runs every 15 min): ├─ getDueEscalations() - Where scheduled_for <= now ├─ For each escalation: │ ├─ tallyVotes() - determine resolution │ ├─ if tied: resolve to "track" (can't auto-break tie) │ ├─ else: use leading vote │ ├─ executeResolution(resolution, escalation, guild) │ ├─ resolveEscalation(id, resolution) │ ├─ Disable all buttons on vote message │ └─ Post resolution notice + forward to modLog └─ Log all actions & errors

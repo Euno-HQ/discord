@@ -11,7 +11,6 @@
    1. From the General Information page:
       1. <img width="328" alt="discord-general-settings" src="https://user-images.githubusercontent.com/1551487/221075576-e03f6d76-903f-4005-adf6-40a93b10183f.png">
       1. Copy the Application ID as `DISCORD_APP_ID`
-      1. Copy the Public Key as `DISCORD_PUBLIC_KEY`
    1. From the Oauth2 page:
       1. Copy the Client Secret as `DISCORD_SECRET`
    1. From the Bot page:

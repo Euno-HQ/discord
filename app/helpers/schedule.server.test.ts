@@ -1,4 +1,5 @@
-import { Effect, Fiber, Ref, TestClock, TestContext } from "effect";
+import { Effect, Fiber, Ref } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, test, vi } from "vitest";
 
 import { getFirstRun, scheduleTaskEffect } from "./schedule.server";
@@ -33,7 +34,7 @@ describe("scheduleTaskEffect", () => {
       const interval = 10 * 60 * 1000;
 
       const task = Ref.update(runs, (n) => n + 1);
-      const fiber = yield* Effect.fork(
+      const fiber = yield* Effect.forkChild(
         scheduleTaskEffect("Test", interval, task),
       );
 
@@ -49,9 +50,7 @@ describe("scheduleTaskEffect", () => {
       yield* Fiber.interrupt(fiber);
     });
 
-    await Effect.runPromise(
-      program.pipe(Effect.provide(TestContext.TestContext)),
-    );
+    await Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
   });
 
   test("a failing run does not tear down the schedule", async () => {
@@ -69,7 +68,7 @@ describe("scheduleTaskEffect", () => {
         }
       });
 
-      const fiber = yield* Effect.fork(
+      const fiber = yield* Effect.forkChild(
         scheduleTaskEffect("Test", interval, task),
       );
 
@@ -82,8 +81,6 @@ describe("scheduleTaskEffect", () => {
       yield* Fiber.interrupt(fiber);
     });
 
-    await Effect.runPromise(
-      program.pipe(Effect.provide(TestContext.TestContext)),
-    );
+    await Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
   });
 });

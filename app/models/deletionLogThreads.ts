@@ -8,7 +8,7 @@ import {
 import { Deferred, Effect, Ref } from "effect";
 import type { Selectable } from "kysely";
 
-import { DatabaseService, type SqlError } from "#~/Database";
+import { db, run, type SqlError } from "#~/Database";
 import type { DB } from "#~/db";
 import { tryDiscord } from "#~/effects/classifyDiscordError";
 import { fetchChannel } from "#~/effects/discordSdk.ts";
@@ -25,7 +25,7 @@ type ThreadError = DiscordError | SqlError | NotFoundError;
 export type DeletionLogThread = Selectable<DB["deletion_log_threads"]>;
 
 // Module-level ref for tracking in-flight getOrCreateDeletionLogThread requests
-const inflightRef = Ref.unsafeMake(
+const inflightRef = Ref.makeUnsafe(
   new Map<string, Deferred.Deferred<AnyThreadChannel, ThreadError>>(),
 );
 
@@ -35,13 +35,13 @@ const inflightRef = Ref.unsafeMake(
  */
 export const getDeletionLogThread = (userId: string, guildId: string) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
-    const [thread] = yield* db
-      .selectFrom("deletion_log_threads")
-      .selectAll()
-      .where("user_id", "=", userId)
-      .where("guild_id", "=", guildId);
+    const [thread] = yield* run(
+      db
+        .selectFrom("deletion_log_threads")
+        .selectAll()
+        .where("user_id", "=", userId)
+        .where("guild_id", "=", guildId),
+    );
 
     yield* logEffect(
       "debug",
@@ -66,20 +66,20 @@ export const upsertDeletionLogThread = (
   threadId: string,
 ) =>
   Effect.gen(function* () {
-    const db = yield* DatabaseService;
-
-    yield* db
-      .insertInto("deletion_log_threads")
-      .values({
-        user_id: userId,
-        guild_id: guildId,
-        thread_id: threadId,
-      })
-      .onConflict((oc) =>
-        oc
-          .columns(["user_id", "guild_id"])
-          .doUpdateSet({ thread_id: threadId }),
-      );
+    yield* run(
+      db
+        .insertInto("deletion_log_threads")
+        .values({
+          user_id: userId,
+          guild_id: guildId,
+          thread_id: threadId,
+        })
+        .onConflict((oc) =>
+          oc
+            .columns(["user_id", "guild_id"])
+            .doUpdateSet({ thread_id: threadId }),
+        ),
+    );
 
     yield* logEffect(
       "debug",
@@ -174,7 +174,7 @@ const doGetOrCreateDeletionLogThread = (guild: Guild, user: User) =>
     if (existingThread) {
       const thread = yield* fetchChannel(guild, existingThread.thread_id).pipe(
         Effect.map((channel) => (channel?.isThread() ? channel : null)),
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logEffect(
             "warn",
             "getOrCreateDeletionLogThread",

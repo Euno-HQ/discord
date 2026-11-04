@@ -22,7 +22,7 @@ export const Command = [
       interactionReply(interaction, {
         flags: [MessageFlags.Ephemeral],
         content: "ok",
-      }).pipe(Effect.catchAll(() => Effect.void)),
+      }).pipe(Effect.catch(() => Effect.void)),
   } satisfies SlashCommand,
   {
     command: new ContextMenuCommandBuilder()
@@ -32,7 +32,7 @@ export const Command = [
       interactionReply(interaction, {
         flags: [MessageFlags.Ephemeral],
         content: "ok",
-      }).pipe(Effect.catchAll(() => Effect.void)),
+      }).pipe(Effect.catch(() => Effect.void)),
   } satisfies UserContextCommand,
   {
     command: new ContextMenuCommandBuilder()
@@ -42,6 +42,6 @@ export const Command = [
       interactionReply(interaction, {
         flags: [MessageFlags.Ephemeral],
         content: "ok",
-      }).pipe(Effect.catchAll(() => Effect.void)),
+      }).pipe(Effect.catch(() => Effect.void)),
   } satisfies MessageContextCommand,
 ];

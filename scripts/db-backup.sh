@@ -7,6 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/db-common.sh
 source "${SCRIPT_DIR}/db-common.sh"
 
 check_kubectl
@@ -53,7 +54,7 @@ db.backup('${REMOTE_BACKUP_PATH}')
 log_step "Downloading backup to local machine"
 kubectl cp "${POD_NAME}:${REMOTE_BACKUP_PATH}" "${DESTINATION}"
 
-FILE_SIZE=$(ls -lh "${DESTINATION}" | awk '{print $5}')
+FILE_SIZE=$(du -h "${DESTINATION}" | cut -f1)
 echo "  File: ${DESTINATION}"
 echo "  Size: ${FILE_SIZE}"
 

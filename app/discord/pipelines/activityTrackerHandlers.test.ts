@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/prefer-nullish-coalescing */
 import { ChannelType } from "discord.js";
 import { Context, Effect, Layer } from "effect";
+import type { Compilable } from "kysely";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { DatabaseService } from "#~/Database";
@@ -20,20 +21,18 @@ vi.mock("#~/effects/observability", () => ({
 }));
 vi.mock("#~/discord/client.server", () => ({
   client: {},
-  DiscordClient: Context.GenericTag("DiscordClient"),
+  DiscordClient: Context.Service("DiscordClient"),
   DiscordClientLayer: Layer.empty,
 }));
-vi.mock("#~/Database", () => ({
-  DatabaseService: Context.GenericTag("DatabaseService"),
-  DatabaseLayer: Layer.empty,
-}));
-
-const mockInsertInto = vi.fn().mockReturnValue({
-  values: vi.fn().mockReturnValue(Effect.void),
+// Records the SQL of every query the handlers execute through `run`.
+const mockRun = vi.fn((query: Compilable<unknown>) => {
+  void query;
+  return Effect.succeed([]);
 });
-const mockDeleteFrom = vi.fn().mockReturnValue({
-  where: vi.fn().mockReturnValue(Effect.void),
-});
+const ranQuery = (prefix: string) =>
+  mockRun.mock.calls.some(([query]) => query.compile().sql.startsWith(prefix));
+const INSERT_STATS = 'insert into "message_stats"';
+const DELETE_STATS = 'delete from "message_stats"';
 
 vi.mock("#~/AppRuntime", () => ({
   runEffect: vi.fn(),
@@ -68,13 +67,7 @@ vi.mock("#~/helpers/metrics", () => ({
 
 // --- Helpers ---
 
-// Only insertInto + deleteFrom are exercised by the two tested handlers
-// (handleMessageCreate / handleMessageDelete). Do NOT add updateTable here —
-// the reaction/update handlers aren't tested and an unused mock trips lint.
-const mockDb = {
-  insertInto: (...args: any[]) => mockInsertInto(...args),
-  deleteFrom: (...args: any[]) => mockDeleteFrom(...args),
-};
+const mockDb = { run: mockRun };
 
 const runHandler = (effect: Effect.Effect<void, unknown, DatabaseService>) =>
   Effect.runPromise(
@@ -128,7 +121,7 @@ describe("handleMessageCreate", () => {
 
     await runHandler(handleMessageCreate(event as any));
 
-    expect(mockInsertInto).not.toHaveBeenCalled();
+    expect(ranQuery(INSERT_STATS)).toBe(false);
   });
 
   test("returns early for bot messages", async () => {
@@ -138,7 +131,7 @@ describe("handleMessageCreate", () => {
 
     await runHandler(handleMessageCreate(event as any));
 
-    expect(mockInsertInto).not.toHaveBeenCalled();
+    expect(ranQuery(INSERT_STATS)).toBe(false);
   });
 
   test("returns early for webhook messages", async () => {
@@ -148,7 +141,7 @@ describe("handleMessageCreate", () => {
 
     await runHandler(handleMessageCreate(event as any));
 
-    expect(mockInsertInto).not.toHaveBeenCalled();
+    expect(ranQuery(INSERT_STATS)).toBe(false);
   });
 
   test("returns early for non-trackable channel types", async () => {
@@ -158,7 +151,7 @@ describe("handleMessageCreate", () => {
 
     await runHandler(handleMessageCreate(event as any));
 
-    expect(mockInsertInto).not.toHaveBeenCalled();
+    expect(ranQuery(INSERT_STATS)).toBe(false);
   });
 
   test("inserts stats for valid human messages", async () => {
@@ -166,7 +159,7 @@ describe("handleMessageCreate", () => {
 
     await runHandler(handleMessageCreate(event as any));
 
-    expect(mockInsertInto).toHaveBeenCalledWith("message_stats");
+    expect(ranQuery(INSERT_STATS)).toBe(true);
   });
 
   test("tracks messages in trackable channel types", async () => {
@@ -182,7 +175,7 @@ describe("handleMessageCreate", () => {
 
       await runHandler(handleMessageCreate(event as any));
 
-      expect(mockInsertInto).toHaveBeenCalledWith("message_stats");
+      expect(ranQuery(INSERT_STATS)).toBe(true);
     }
   });
 });
@@ -195,7 +188,7 @@ describe("handleMessageDelete", () => {
 
     await runHandler(handleMessageDelete(event as any));
 
-    expect(mockDeleteFrom).not.toHaveBeenCalled();
+    expect(ranQuery(DELETE_STATS)).toBe(false);
   });
 
   test("returns early for bot messages", async () => {
@@ -205,7 +198,7 @@ describe("handleMessageDelete", () => {
 
     await runHandler(handleMessageDelete(event as any));
 
-    expect(mockDeleteFrom).not.toHaveBeenCalled();
+    expect(ranQuery(DELETE_STATS)).toBe(false);
   });
 
   test("deletes stats for human message deletions", async () => {
@@ -213,7 +206,7 @@ describe("handleMessageDelete", () => {
 
     await runHandler(handleMessageDelete(event as any));
 
-    expect(mockDeleteFrom).toHaveBeenCalledWith("message_stats");
+    expect(ranQuery(DELETE_STATS)).toBe(true);
   });
 
   test("proceeds when author is null (not a bot)", async () => {
@@ -223,6 +216,6 @@ describe("handleMessageDelete", () => {
 
     await runHandler(handleMessageDelete(event as any));
 
-    expect(mockDeleteFrom).toHaveBeenCalledWith("message_stats");
+    expect(ranQuery(DELETE_STATS)).toBe(true);
   });
 });

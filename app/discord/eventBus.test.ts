@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Context, Layer } from "effect";
+import { Context, Effect, Layer, Queue } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  countingOffer,
   enrichMessageBulkDelete,
   enrichMessageCreate,
   enrichMessageDelete,
@@ -15,7 +16,7 @@ vi.mock("#~/helpers/observability", () => ({
 }));
 vi.mock("#~/discord/client.server", () => ({
   client: {},
-  DiscordClient: Context.GenericTag("DiscordClient"),
+  DiscordClient: Context.Service("DiscordClient"),
   DiscordClientLayer: Layer.empty,
 }));
 
@@ -195,5 +196,50 @@ describe("enrichMessageBulkDelete", () => {
       guild: { id: "guild-1" },
       guildId: "guild-1",
     });
+  });
+});
+
+describe("countingOffer", () => {
+  const setup = (capacity: number) => {
+    const queue = Effect.runSync(Queue.sliding<number>(capacity));
+    const warns: Record<string, unknown>[] = [];
+    let t = 0;
+    const offer = countingOffer(queue, "bulk", {
+      intervalMs: 30_000,
+      now: () => t,
+      warn: (ctx) => warns.push(ctx),
+    });
+    return { queue, warns, offer, advance: (ms: number) => (t += ms) };
+  };
+
+  it("does not count or warn while there is room", () => {
+    const { offer, warns, queue } = setup(3);
+    offer(1);
+    offer(2);
+    offer(3);
+    expect(warns).toEqual([]);
+    expect(Queue.sizeUnsafe(queue)).toBe(3);
+  });
+
+  it("counts drops at capacity and rate-limits the warning", () => {
+    const { offer, warns, advance, queue } = setup(2);
+    offer(1);
+    offer(2);
+    offer(3); // drop #1 -> immediate warn
+    expect(warns).toEqual([{ queue: "bulk", dropped: 1, capacity: 1024 }]);
+
+    offer(4); // drops #2..#4 inside the window: counted, not logged
+    advance(10_000);
+    offer(5);
+    offer(6);
+    expect(warns).toHaveLength(1);
+
+    advance(20_000); // window elapsed: next drop reports everything since
+    offer(7);
+    expect(warns).toHaveLength(2);
+    expect(warns[1]).toMatchObject({ queue: "bulk", dropped: 4 });
+
+    // Sliding semantics unchanged: newest kept, oldest evicted.
+    expect(Queue.sizeUnsafe(queue)).toBe(2);
   });
 });

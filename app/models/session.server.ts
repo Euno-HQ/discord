@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { Effect } from "effect";
+import type { Compilable } from "kysely";
 import {
   createCookieSessionStorage,
   createSessionStorage,
@@ -9,7 +10,7 @@ import {
 import { AuthorizationCode } from "simple-oauth2";
 
 import { runEffect } from "#~/AppRuntime";
-import { DatabaseService, type DB, type EffectKysely } from "#~/Database";
+import { db, run, type DB } from "#~/Database";
 import { toError } from "#~/effects/classifyDiscordError";
 import {
   OAuthFetchError,
@@ -38,12 +39,10 @@ const userSvc = <A, E>(
   f: (s: IUserService) => Effect.Effect<A, E, never>,
 ): Promise<A> => runEffect(Effect.flatMap(UserService, f));
 
-// Bridge: run a query built on the runtime's EffectKysely handle from this
+// Bridge: run a Kysely query through the runtime's DatabaseService from this
 // plain-async (web) module. A SqlError rejects the returned promise,
 // propagating exactly as a thrown DB error did.
-const dbEffect = <A, E>(
-  f: (db: EffectKysely) => Effect.Effect<A, E, never>,
-): Promise<A> => runEffect(Effect.flatMap(DatabaseService, f));
+const dbQuery = <O>(query: Compilable<O>) => runEffect(run(query));
 
 const config = {
   client: {
@@ -92,18 +91,15 @@ const {
     secrets: [sessionSecret],
   },
   async createData(data, expires) {
-    const result = await dbEffect((db) =>
-      Effect.map(
-        db
-          .insertInto("sessions")
-          .values({
-            id: randomUUID(),
-            data: JSON.stringify(data),
-            expires: expires?.toString(),
-          })
-          .returning("id"),
-        (rows) => rows[0],
-      ),
+    const [result] = await dbQuery(
+      db
+        .insertInto("sessions")
+        .values({
+          id: randomUUID(),
+          data: JSON.stringify(data),
+          expires: expires?.toString(),
+        })
+        .returning("id"),
     );
     if (!result?.id) {
       console.error({ result, data, expires });
@@ -112,15 +108,12 @@ const {
     return result.id;
   },
   async readData(id) {
-    const result = await dbEffect((db) =>
-      Effect.map(
-        db.selectFrom("sessions").where("id", "=", id).selectAll(),
-        (rows) => rows[0],
-      ),
+    const [result] = await dbQuery(
+      db.selectFrom("sessions").where("id", "=", id).selectAll(),
     );
 
     if (!result?.data) return null;
-    // @effect/sql-kysely doesn't include ParseJSONResultsPlugin, so JSON
+    // The compile-only Kysely builder doesn't run ParseJSONResultsPlugin, so JSON
     // columns come back as raw strings. Parse before returning to the
     // session storage, which expects a deserialized object.
     return typeof result.data === "string"
@@ -128,7 +121,7 @@ const {
       : result.data;
   },
   async updateData(id, data, expires) {
-    await dbEffect((db) =>
+    await dbQuery(
       db
         .updateTable("sessions")
         .set("data", JSON.stringify(data))
@@ -137,7 +130,7 @@ const {
     );
   },
   async deleteData(id) {
-    await dbEffect((db) => db.deleteFrom("sessions").where("id", "=", id));
+    await dbQuery(db.deleteFrom("sessions").where("id", "=", id));
   },
 });
 export type DbSession = Awaited<ReturnType<typeof getDbSession>>;

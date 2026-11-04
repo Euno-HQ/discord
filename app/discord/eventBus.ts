@@ -1,10 +1,3 @@
-/* @effect-diagnostics runEffectInsideEffect:skip-file */
-// ^ The `client.on(...)` callbacks below are discord.js's callback boundary, not
-// Effect nesting: discord.js invokes them from its own event loop, so there is no
-// ambient fiber to `yield*` into and `Effect.runFork` is the correct entry point.
-// The rule stays at error everywhere else, where a nested run IS the anti-pattern
-// (see notes/EFFECT.md "Don't nest Effect.runPromise").
-
 import {
   Events,
   type Guild,
@@ -15,7 +8,7 @@ import {
 } from "discord.js";
 import { Context, Effect, Layer, Queue, Stream } from "effect";
 
-import { DiscordClient } from "#~/discord/client.server";
+import { DiscordClient, listenScoped } from "#~/discord/client.server";
 import type {
   DiscordEvent,
   GuildMemberMessage,
@@ -98,31 +91,124 @@ export const enrichMessageBulkDelete = (
   return { type: "GuildMessageBulkDelete", messages, channel, guild, guildId };
 };
 
+// --- Queue routing ---
+
+/**
+ * Which queue each event type rides. Moderation-critical events get their own
+ * queue so a stalled high-volume subscriber can't evict them: today a backed-up
+ * `MessageCreate` consumer fills the shared sliding queue with messages and a
+ * ban that arrives meanwhile is the oldest thing dropped soon after.
+ *
+ * - critical: low volume, and losing one loses a mod-log entry or onboarding —
+ *   bans/unbans, audit-log entries (kicks, timeouts), automod actions and
+ *   rule changes, message deletes (single + bulk), guild join/leave.
+ * - bulk: high volume, best-effort — message create/update, reactions.
+ *
+ * A Record (not a Set) so adding a DiscordEvent variant is a compile error
+ * until it is routed here.
+ */
+export const EVENT_QUEUE: Record<DiscordEvent["type"], "critical" | "bulk"> = {
+  GuildBanAdd: "critical",
+  GuildBanRemove: "critical",
+  GuildAuditLogEntryCreate: "critical",
+  AutoModerationActionExecution: "critical",
+  AutoModerationRuleCreate: "critical",
+  AutoModerationRuleDelete: "critical",
+  AutoModerationRuleUpdate: "critical",
+  GuildMessageDelete: "critical",
+  GuildMessageBulkDelete: "critical",
+  GuildCreate: "critical",
+  GuildDelete: "critical",
+  GuildMemberMessage: "bulk",
+  GuildMessageUpdate: "bulk",
+  MessageReactionAdd: "bulk",
+  MessageReactionRemove: "bulk",
+};
+
+export const QUEUE_CAPACITY = 1024;
+const DROP_WARN_INTERVAL_MS = 30_000;
+
+/**
+ * Wrap a sliding queue's synchronous offer with drop accounting. A sliding
+ * queue never rejects — when full it evicts the oldest element — so a drop is
+ * "the queue was full at offer time". Drops are counted and surfaced as at most
+ * one warn per `intervalMs`, carrying the count since the previous warn.
+ *
+ * ponytail: drops after the last warn in a burst are only reported by the next
+ * drop; add a periodic flush (or a Metric counter) when a metrics exporter lands.
+ */
+export const countingOffer = <A>(
+  queue: Queue.Queue<A>,
+  name: string,
+  {
+    intervalMs = DROP_WARN_INTERVAL_MS,
+    now = Date.now,
+    warn = (context: Record<string, unknown>) =>
+      log(
+        "warn",
+        "DiscordEventBus",
+        "Event queue full: dropped oldest events",
+        context,
+      ),
+  }: {
+    intervalMs?: number;
+    now?: () => number;
+    warn?: (context: Record<string, unknown>) => void;
+  } = {},
+) => {
+  let dropped = 0;
+  let lastWarnAt = Number.NEGATIVE_INFINITY;
+  return (item: A) => {
+    if (Queue.isFullUnsafe(queue)) {
+      dropped++;
+      const t = now();
+      if (t - lastWarnAt >= intervalMs) {
+        warn({ queue: name, dropped, capacity: QUEUE_CAPACITY });
+        dropped = 0;
+        lastWarnAt = t;
+      }
+    }
+    Queue.offerUnsafe(queue, item);
+  };
+};
+
 // --- Service definition ---
 
 export interface IDiscordEventBus {
+  /** Every event (critical + bulk merged). */
   readonly stream: Stream.Stream<DiscordEvent>;
+  /** Moderation-critical events only — see EVENT_QUEUE. */
+  readonly critical: Stream.Stream<DiscordEvent>;
+  /** High-volume events only — see EVENT_QUEUE. */
+  readonly bulk: Stream.Stream<DiscordEvent>;
 }
 
-export class DiscordEventBus extends Context.Tag("DiscordEventBus")<
+export class DiscordEventBus extends Context.Service<
   DiscordEventBus,
   IDiscordEventBus
->() {}
+>()("DiscordEventBus") {}
 
-export const DiscordEventBusLive = Layer.scoped(
+export const DiscordEventBusLive = Layer.effect(
   DiscordEventBus,
   Effect.gen(function* () {
     const client = yield* DiscordClient;
-    const queue = yield* Queue.sliding<DiscordEvent>(1024);
+    const criticalQueue = yield* Queue.sliding<DiscordEvent>(QUEUE_CAPACITY);
+    const bulkQueue = yield* Queue.sliding<DiscordEvent>(QUEUE_CAPACITY);
+    const offerCritical = countingOffer(criticalQueue, "critical");
+    const offerBulk = countingOffer(bulkQueue, "bulk");
+    const offer = (event: DiscordEvent) =>
+      EVENT_QUEUE[event.type] === "critical"
+        ? offerCritical(event)
+        : offerBulk(event);
 
     // --- Register event sources ---
-    // These run once at Layer construction. The callbacks close over the queue
-    // and push events with Effect.runFork (fire-and-forget, non-blocking).
+    // Scoped to the Layer: each listener is removed when the runtime is
+    // disposed. Callbacks push synchronously (sliding queues never block).
 
-    client.on(Events.MessageCreate, (message) => {
+    yield* listenScoped(client, Events.MessageCreate, (message) => {
       const event = enrichMessageCreate(message);
       if (event) {
-        Effect.runFork(Queue.offer(queue, event));
+        offer(event);
         return;
       }
       // Diagnostic: a human, in-guild message whose member didn't resolve is
@@ -148,103 +234,110 @@ export const DiscordEventBusLive = Layer.scoped(
       }
     });
 
-    client.on(Events.MessageDelete, (message) => {
+    yield* listenScoped(client, Events.MessageDelete, (message) => {
       const event = enrichMessageDelete(message, client.guilds.cache);
-      if (event) Effect.runFork(Queue.offer(queue, event));
+      if (event) offer(event);
     });
 
-    client.on(Events.MessageUpdate, (oldMessage, newMessage) => {
-      const event = enrichMessageUpdate(
-        oldMessage,
-        newMessage,
-        client.guilds.cache,
-      );
-      if (event) Effect.runFork(Queue.offer(queue, event));
+    yield* listenScoped(
+      client,
+      Events.MessageUpdate,
+      (oldMessage, newMessage) => {
+        const event = enrichMessageUpdate(
+          oldMessage,
+          newMessage,
+          client.guilds.cache,
+        );
+        if (event) offer(event);
+      },
+    );
+
+    yield* listenScoped(
+      client,
+      Events.MessageBulkDelete,
+      (messages, channel) => {
+        const event = enrichMessageBulkDelete(
+          messages,
+          channel,
+          client.guilds.cache,
+        );
+        if (event) offer(event);
+      },
+    );
+
+    yield* listenScoped(client, Events.MessageReactionAdd, (reaction, user) => {
+      offer({ type: "MessageReactionAdd", reaction, user });
     });
 
-    client.on(Events.MessageBulkDelete, (messages, channel) => {
-      const event = enrichMessageBulkDelete(
-        messages,
-        channel,
-        client.guilds.cache,
-      );
-      if (event) Effect.runFork(Queue.offer(queue, event));
+    yield* listenScoped(
+      client,
+      Events.MessageReactionRemove,
+      (reaction, user) => {
+        offer({ type: "MessageReactionRemove", reaction, user });
+      },
+    );
+
+    yield* listenScoped(client, Events.GuildBanAdd, (ban) => {
+      offer({ type: "GuildBanAdd", ban });
     });
 
-    client.on(Events.MessageReactionAdd, (reaction, user) => {
-      Effect.runFork(
-        Queue.offer(queue, { type: "MessageReactionAdd", reaction, user }),
-      );
+    yield* listenScoped(client, Events.GuildBanRemove, (ban) => {
+      offer({ type: "GuildBanRemove", ban });
     });
 
-    client.on(Events.MessageReactionRemove, (reaction, user) => {
-      Effect.runFork(
-        Queue.offer(queue, { type: "MessageReactionRemove", reaction, user }),
-      );
+    yield* listenScoped(
+      client,
+      Events.GuildAuditLogEntryCreate,
+      (entry, guild) => {
+        offer({ type: "GuildAuditLogEntryCreate", entry, guild });
+      },
+    );
+
+    yield* listenScoped(
+      client,
+      Events.AutoModerationActionExecution,
+      (execution) => {
+        offer({ type: "AutoModerationActionExecution", execution });
+      },
+    );
+
+    yield* listenScoped(client, Events.AutoModerationRuleCreate, (rule) => {
+      offer({ type: "AutoModerationRuleCreate", rule });
     });
 
-    client.on(Events.GuildBanAdd, (ban) => {
-      Effect.runFork(Queue.offer(queue, { type: "GuildBanAdd", ban }));
+    yield* listenScoped(client, Events.AutoModerationRuleDelete, (rule) => {
+      offer({ type: "AutoModerationRuleDelete", rule });
     });
 
-    client.on(Events.GuildBanRemove, (ban) => {
-      Effect.runFork(Queue.offer(queue, { type: "GuildBanRemove", ban }));
+    yield* listenScoped(
+      client,
+      Events.AutoModerationRuleUpdate,
+      (oldRule, newRule) => {
+        offer({ type: "AutoModerationRuleUpdate", oldRule, newRule });
+      },
+    );
+
+    yield* listenScoped(client, Events.GuildCreate, (guild) => {
+      offer({ type: "GuildCreate", guild });
     });
 
-    client.on(Events.GuildAuditLogEntryCreate, (entry, guild) => {
-      Effect.runFork(
-        Queue.offer(queue, { type: "GuildAuditLogEntryCreate", entry, guild }),
-      );
-    });
-
-    client.on(Events.AutoModerationActionExecution, (execution) => {
-      Effect.runFork(
-        Queue.offer(queue, {
-          type: "AutoModerationActionExecution",
-          execution,
-        }),
-      );
-    });
-
-    client.on(Events.AutoModerationRuleCreate, (rule) => {
-      Effect.runFork(
-        Queue.offer(queue, { type: "AutoModerationRuleCreate", rule }),
-      );
-    });
-
-    client.on(Events.AutoModerationRuleDelete, (rule) => {
-      Effect.runFork(
-        Queue.offer(queue, { type: "AutoModerationRuleDelete", rule }),
-      );
-    });
-
-    client.on(Events.AutoModerationRuleUpdate, (oldRule, newRule) => {
-      Effect.runFork(
-        Queue.offer(queue, {
-          type: "AutoModerationRuleUpdate",
-          oldRule,
-          newRule,
-        }),
-      );
-    });
-
-    client.on(Events.GuildCreate, (guild) => {
-      Effect.runFork(Queue.offer(queue, { type: "GuildCreate", guild }));
-    });
-
-    client.on(Events.GuildDelete, (guild) => {
-      Effect.runFork(Queue.offer(queue, { type: "GuildDelete", guild }));
+    yield* listenScoped(client, Events.GuildDelete, (guild) => {
+      offer({ type: "GuildDelete", guild });
     });
 
     yield* logEffect("info", "DiscordEventBus", "Event source registered");
 
-    // Create broadcast stream — each subscriber gets independent backpressure.
-    // The Scope from Layer.scoped keeps the broadcast alive for the runtime lifetime.
-    const stream = yield* Stream.broadcastDynamic(
-      Stream.fromQueue(queue),
-      1024,
-    );
+    // One broadcast per queue — each subscriber gets independent backpressure.
+    // A subscriber of only `bulk` (automod, reactji) can stall without ever
+    // holding back the critical queue. The Layer's Scope keeps both alive for
+    // the runtime lifetime.
+    const critical = yield* Stream.broadcast(Stream.fromQueue(criticalQueue), {
+      capacity: QUEUE_CAPACITY,
+    });
+    const bulk = yield* Stream.broadcast(Stream.fromQueue(bulkQueue), {
+      capacity: QUEUE_CAPACITY,
+    });
 
-    return { stream };
+    return { critical, bulk, stream: Stream.merge(critical, bulk) };
   }),
 );
