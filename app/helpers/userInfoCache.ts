@@ -1,4 +1,6 @@
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { Routes } from "discord.js";
 import { LRUCache } from "lru-cache";
 
@@ -16,7 +18,8 @@ const cache = new LRUCache<string, DiscordUser>({
   max: 150,
 });
 
-const cachefile = "./userInfoCache.json";
+// Root filesystem is read-only in k8s; /tmp is a writable emptyDir.
+const cachefile = path.join(os.tmpdir(), "userInfoCache.json");
 void load();
 
 export async function getOrFetchUser(id: string) {
