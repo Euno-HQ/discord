@@ -20,6 +20,16 @@ spec:
       labels:
         app: mod-bot
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        # /data PVC is root-owned; fsGroup makes it group-writable for uid 1000.
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mod-bot
           image: $(IMAGE)
@@ -29,13 +39,24 @@ spec:
           terminationMessagePolicy: FallbackToLogsOnError
           ports:
             - containerPort: 3000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
+            # Only writable paths besides /data: npm logs/cache, node compile cache.
+            - mountPath: /tmp
+              name: tmp
             - mountPath: "/data"
               name: mod-bot-pvc
           resources:
             requests:
               memory: "256Mi"
               cpu: "50m"
+            limits:
+              memory: "512Mi"
+              cpu: 500m
           startupProbe:
             httpGet:
               path: /healthcheck
@@ -62,9 +83,16 @@ spec:
             - secretRef:
                 name: modbot-env
           env:
+            - name: HOME
+              value: /tmp
+            - name: npm_config_cache
+              value: /tmp/.npm
             - name: ENVIRONMENT
               value: production
-
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
   volumeClaimTemplates:
     - metadata:
         name: mod-bot-pvc
