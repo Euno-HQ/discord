@@ -24,7 +24,10 @@ export const buildVersionPayload = (client: DiscordStatus | null) => {
   return {
     commit: nonEmpty(process.env.GIT_SHA) ?? "unknown",
     releaseTag: nonEmpty(process.env.RELEASE_TAG) ?? null,
-    environment: isProd() ? "production" : "development",
+    // ENVIRONMENT is set per-deployment in cluster/ (UAT runs NODE_ENV=production).
+    environment:
+      nonEmpty(process.env.ENVIRONMENT) ??
+      (isProd() ? "production" : "development"),
     startedAt: startedAt.toISOString(),
     uptimeSeconds: Math.round((Date.now() - startedAt.getTime()) / 1000),
     node: process.version,
