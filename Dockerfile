@@ -33,4 +33,8 @@ COPY scripts ./scripts
 COPY kysely.config.ts ./
 COPY migrations ./migrations
 
+ARG GIT_SHA=unknown
+ARG RELEASE_TAG=
+ENV GIT_SHA=$GIT_SHA RELEASE_TAG=$RELEASE_TAG
+
 CMD ["npm", "run", "start"]
