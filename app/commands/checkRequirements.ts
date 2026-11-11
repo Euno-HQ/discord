@@ -26,6 +26,7 @@ import {
 import type { SlashCommand } from "#~/helpers/discord";
 import { formatError } from "#~/helpers/formatError";
 import { commandStats } from "#~/helpers/metrics";
+import { commitSha } from "#~/helpers/version.server";
 import { fetchSettings, SETTINGS } from "#~/models/guilds.server";
 
 export interface CheckResult {
@@ -508,9 +509,11 @@ export const Command = {
               { type: ComponentType.Separator },
               {
                 type: ComponentType.TextDisplay,
-                content: hasRequiredFailure
-                  ? "Run `/setup` to fix configuration"
-                  : "All required checks passed",
+                content: `${
+                  hasRequiredFailure
+                    ? "Run `/setup` to fix configuration"
+                    : "All required checks passed"
+                }\n-# ${commitSha().slice(0, 7)}`,
               },
             ],
           },

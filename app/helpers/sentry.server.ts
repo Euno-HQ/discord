@@ -9,6 +9,10 @@ if (isValidDsn) {
   const sentryOptions: Sentry.NodeOptions = {
     dsn: sentryIngest,
     environment: isProd() ? "production" : "development",
+    // Full source SHA, matching the version the deploy workflow registers.
+    ...(process.env.GIT_SHA && process.env.GIT_SHA !== "unknown"
+      ? { release: process.env.GIT_SHA }
+      : {}),
     // Skip Sentry's auto OpenTelemetry setup - we'll use Effect's OpenTelemetry
     // and provide the SentrySpanProcessor to it
     skipOpenTelemetrySetup: true,

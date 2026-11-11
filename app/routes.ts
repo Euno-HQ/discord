@@ -20,6 +20,7 @@ export default [
   route("auth", "routes/auth.tsx"),
   route("discord-oauth", "routes/discord-oauth.tsx"),
   route("healthcheck", "routes/healthcheck.tsx"),
+  route("version", "routes/version.tsx"),
   route("/", "routes/index.tsx"),
   route("pricing", "routes/pricing.tsx"),
   route("features", "routes/features.tsx"),
