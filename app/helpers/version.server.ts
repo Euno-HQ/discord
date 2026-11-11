@@ -12,6 +12,9 @@ export interface DiscordStatus {
 // Unset and empty (Docker ARG default) both mean "not provided".
 const nonEmpty = (v: string | undefined) => (v === "" ? undefined : v);
 
+/** Full commit SHA baked into the image at build time, or "unknown". */
+export const commitSha = () => nonEmpty(process.env.GIT_SHA) ?? "unknown";
+
 const mb = (bytes: number) => Math.round(bytes / 1024 / 1024);
 
 /**
@@ -22,7 +25,7 @@ export const buildVersionPayload = (client: DiscordStatus | null) => {
   const ready = client?.isReady() ?? false;
   const mem = process.memoryUsage();
   return {
-    commit: nonEmpty(process.env.GIT_SHA) ?? "unknown",
+    commit: commitSha(),
     releaseTag: nonEmpty(process.env.RELEASE_TAG) ?? null,
     // ENVIRONMENT is set per-deployment in cluster/ (UAT runs NODE_ENV=production).
     environment:
