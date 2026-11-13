@@ -1,0 +1,42 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mod-bot
+spec:
+  podSelector:
+    matchLabels:
+      app: mod-bot
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Kubelet probes come from the node and are always allowed by Cilium.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          # matchExpressions, not matchLabels: kustomize commonLabels would
+          # inject app=mod-bot into matchLabels and break DNS.
+          podSelector:
+            matchExpressions:
+              - {key: k8s-app, operator: In, values: [kube-dns]}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Observed + code: Discord (API/gateway/CDN), Sentry, PostHog, Stripe, all
+    # HTTPS. Private ranges (cluster, VPC, metadata service) are excluded.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 169.254.0.0/16]
+      ports:
+        - protocol: TCP
+          port: 443

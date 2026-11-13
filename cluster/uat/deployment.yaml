@@ -20,6 +20,16 @@ spec:
       labels:
         app: mod-bot-uat
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        # /data PVC is root-owned; fsGroup makes it group-writable for uid 1000.
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mod-bot
           image: ghcr.io/euno-hq/discord:${IMAGE_TAG}
@@ -27,15 +37,34 @@ spec:
           command: ["npm", "run", "start:staging"]
           ports:
             - containerPort: 3000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
+            # Only writable paths besides /data: npm logs/cache, node compile cache.
+            - mountPath: /tmp
+              name: tmp
             - mountPath: "/data"
               name: mod-bot-data
           envFrom:
             - secretRef:
                 name: mod-bot-staging-env
           env:
+            - name: HOME
+              value: /tmp
+            - name: npm_config_cache
+              value: /tmp/.npm
             - name: ENVIRONMENT
               value: staging
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "5m"
+            limits:
+              memory: "384Mi"
+              cpu: 500m
           startupProbe:
             httpGet:
               path: /healthcheck
@@ -57,6 +86,10 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 2
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
   volumeClaimTemplates:
     - metadata:
         name: mod-bot-data
@@ -92,6 +125,7 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
   rules:
@@ -108,4 +142,48 @@ spec:
   tls:
     - hosts:
         - uat.euno-staging.reactiflux.com
-      secretName: wildcard-staging-tls
+      secretName: uat-staging-tls
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mod-bot-uat
+  namespace: staging
+spec:
+  podSelector:
+    matchLabels:
+      app: mod-bot-uat
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Kubelet probes come from the node and are always allowed by Cilium.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          # matchExpressions, not matchLabels: kustomize commonLabels would
+          # inject app=mod-bot into matchLabels and break DNS.
+          podSelector:
+            matchExpressions:
+              - {key: k8s-app, operator: In, values: [kube-dns]}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Observed + code: Discord (API/gateway/CDN), Sentry, PostHog, Stripe, all
+    # HTTPS. Private ranges (cluster, VPC, metadata service) are excluded.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 169.254.0.0/16]
+      ports:
+        - protocol: TCP
+          port: 443
